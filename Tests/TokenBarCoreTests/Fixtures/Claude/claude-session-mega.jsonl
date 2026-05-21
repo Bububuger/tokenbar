@@ -1,0 +1,2 @@
+{"sessionId":"mega-1","timestamp":"2026-05-18T10:00:00.000Z","cwd":"/tmp/mega-proj","message":{"model":"claude-opus","usage":{"input_tokens":1000000,"output_tokens":500000,"cache_creation_input_tokens":250000,"cache_read_input_tokens":750000}}}
+{"sessionId":"mega-1","timestamp":"2026-05-18T10:05:00.000Z","cwd":"/tmp/mega-proj","message":{"model":"claude-opus","usage":{"input_tokens":2000000,"output_tokens":1000000,"cache_creation_input_tokens":500000,"cache_read_input_tokens":1500000}}}

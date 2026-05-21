@@ -10,3 +10,8 @@ tokenbar.zip
 *.tar.gz
 TokenBar.xcodeproj/xcuserdata/
 *.xcuserstate
+
+# Design-canvas screenshots — kept on disk for designer reference only;
+# excluded from git because filenames contain CJK + spaces that confuse
+# downstream tooling (notably ultrareview seed bundle import).
+docs/design-prd/tokenbar/uploads/

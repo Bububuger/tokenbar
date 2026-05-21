@@ -1,0 +1,3 @@
+{"type":"session_meta","timestamp":"2026-05-18T10:00:00.000Z","payload":{"id":"vll-1","cwd":"/tmp/vll","model":"gpt-5"}}
+{"type":"response_item","timestamp":"2026-05-18T10:00:01.000Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}]}}
+{"type":"event_msg","timestamp":"2026-05-18T10:00:02.000Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":250,"cached_input_tokens":0,"output_tokens":80}}}}

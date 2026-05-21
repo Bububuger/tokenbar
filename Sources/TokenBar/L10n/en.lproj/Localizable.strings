@@ -1,0 +1,24 @@
+/* CL-P2-010 baseline English copy. Keys are stable; values are the UI source-of-truth. */
+"tb.today" = "Today";
+"tb.overview" = "Overview";
+"tb.diagnostics" = "Diagnostics";
+"tb.settings" = "Settings";
+"tb.refresh" = "Refresh";
+"tb.reparse_all" = "Reparse all";
+"tb.wipe_prompts" = "Wipe prompts";
+"tb.warnings" = "warnings";
+"tb.no_warnings" = "0 warnings";
+"tb.add_source" = "Add Source";
+"tb.theme" = "Theme";
+"tb.pricing" = "Pricing";
+"tb.reset_defaults" = "Reset to Defaults";
+"tb.export_json" = "Export JSON…";
+"tb.reset_all" = "Reset All…";
+"tb.onboarding_title" = "Welcome — point TokenBar at your first source";
+"tb.onboarding_subtitle" = "TokenBar reads usage events from local data sources only. Nothing leaves this Mac. Add a source to begin indexing.";
+"tb.day_changed" = "Day changed — refreshing…";
+"tb.paused" = "PAUSED";
+"tb.live" = "live";
+"tb.refreshing" = "refreshing";
+"tb.stale" = "stale";
+"tb.failed" = "failed";

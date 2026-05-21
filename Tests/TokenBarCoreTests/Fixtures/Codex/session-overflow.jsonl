@@ -1,0 +1,2 @@
+{"type":"session_meta","timestamp":"2026-05-18T10:00:00.000Z","payload":{"id":"of-1","cwd":"/tmp/of-proj","model":"gpt-5"}}
+{"type":"event_msg","timestamp":"2026-05-18T10:00:01.000Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":2147483640,"cached_input_tokens":1000000,"output_tokens":500000}}}}

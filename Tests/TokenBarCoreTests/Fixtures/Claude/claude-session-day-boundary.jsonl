@@ -1,0 +1,2 @@
+{"sessionId":"db-1","timestamp":"2026-05-17T23:59:59.000Z","cwd":"/tmp/db-proj","message":{"model":"claude-sonnet","usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
+{"sessionId":"db-1","timestamp":"2026-05-18T00:00:01.000Z","cwd":"/tmp/db-proj","message":{"model":"claude-sonnet","usage":{"input_tokens":200,"output_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}

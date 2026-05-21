@@ -1,0 +1,24 @@
+/* CL-P2-010 Simplified Chinese translation. */
+"tb.today" = "今日";
+"tb.overview" = "概览";
+"tb.diagnostics" = "诊断";
+"tb.settings" = "设置";
+"tb.refresh" = "刷新";
+"tb.reparse_all" = "全量重解析";
+"tb.wipe_prompts" = "清空 Prompt";
+"tb.warnings" = "条警告";
+"tb.no_warnings" = "0 条警告";
+"tb.add_source" = "添加来源";
+"tb.theme" = "主题";
+"tb.pricing" = "定价";
+"tb.reset_defaults" = "恢复默认";
+"tb.export_json" = "导出 JSON…";
+"tb.reset_all" = "完全重置…";
+"tb.onboarding_title" = "欢迎 — 为 TokenBar 指定第一个数据源";
+"tb.onboarding_subtitle" = "TokenBar 只读取本地数据源，不上传任何数据。添加一个数据源开始索引。";
+"tb.day_changed" = "日期切换 — 正在刷新…";
+"tb.paused" = "已暂停";
+"tb.live" = "实时";
+"tb.refreshing" = "刷新中";
+"tb.stale" = "陈旧";
+"tb.failed" = "失败";

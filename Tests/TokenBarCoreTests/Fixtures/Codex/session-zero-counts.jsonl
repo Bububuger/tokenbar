@@ -1,0 +1,2 @@
+{"type":"session_meta","timestamp":"2026-05-18T10:00:00.000Z","payload":{"id":"zero-cx","cwd":"/tmp/zero-proj","model":"gpt-5"}}
+{"type":"event_msg","timestamp":"2026-05-18T10:00:01.000Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":0,"cached_input_tokens":0,"output_tokens":0}}}}

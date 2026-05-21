@@ -1,0 +1,24 @@
+/* CL-P2-010 German translation chosen for the longest-string stress test. */
+"tb.today" = "Heute";
+"tb.overview" = "Übersicht";
+"tb.diagnostics" = "Diagnose";
+"tb.settings" = "Einstellungen";
+"tb.refresh" = "Aktualisieren";
+"tb.reparse_all" = "Alles neu parsen";
+"tb.wipe_prompts" = "Prompts löschen";
+"tb.warnings" = "Warnungen";
+"tb.no_warnings" = "0 Warnungen";
+"tb.add_source" = "Quelle hinzufügen";
+"tb.theme" = "Erscheinungsbild";
+"tb.pricing" = "Preisgestaltung";
+"tb.reset_defaults" = "Standard wiederherstellen";
+"tb.export_json" = "JSON exportieren…";
+"tb.reset_all" = "Alles zurücksetzen…";
+"tb.onboarding_title" = "Willkommen — TokenBar auf erste Quelle ausrichten";
+"tb.onboarding_subtitle" = "TokenBar liest Nutzungs­ereignisse nur aus lokalen Datenquellen. Nichts verlässt diesen Mac. Fügen Sie eine Quelle hinzu.";
+"tb.day_changed" = "Tageswechsel — wird aktualisiert…";
+"tb.paused" = "PAUSIERT";
+"tb.live" = "live";
+"tb.refreshing" = "aktualisiert";
+"tb.stale" = "veraltet";
+"tb.failed" = "fehlgeschlagen";

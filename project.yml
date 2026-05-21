@@ -1,0 +1,131 @@
+name: TokenBar
+options:
+  bundleIdPrefix: com.javis
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  groupOrdering:
+    - order:
+        - Sources
+        - Resources
+        - Tests
+        - script
+        - docs
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift.git
+    from: 7.0.0
+configs:
+  Debug: debug
+  Release: release
+settings:
+  base:
+    SWIFT_VERSION: 6.0
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: MNTV7AH6PF
+    CODE_SIGN_IDENTITY: ""
+schemes:
+  TokenBar:
+    build:
+      targets:
+        TokenBar: all
+        TokenBarCore: [build]
+    run:
+      config: Debug
+  TokenBarTests:
+    build:
+      targets:
+        TokenBarCore: [build]
+        TokenBarTests: [test]
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - name: TokenBarTests
+  TokenBarProbe:
+    build:
+      targets:
+        TokenBarProbe: all
+  tokenbarctl:
+    build:
+      targets:
+        TokenBarCLI: all
+    run:
+      config: Debug
+  tb:
+    build:
+      targets:
+        TokenBarCLI: all
+    run:
+      config: Debug
+targets:
+  TokenBarCore:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/TokenBarCore
+    dependencies:
+      - package: GRDB
+        product: GRDB
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.javis.TokenBarCore
+        GENERATE_INFOPLIST_FILE: YES
+        ENABLE_TESTING_SEARCH_PATHS: YES
+  TokenBar:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/TokenBar
+    dependencies:
+      - target: TokenBarCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.javis.TokenBar
+        INFOPLIST_FILE: Resources/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_ENTITLEMENTS: ""
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_DEBUG_DYLIB: NO
+        SWIFT_EMIT_LOC_STRINGS: NO
+        CODE_SIGN_STYLE: Automatic
+  TokenBarProbe:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/TokenBarProbe
+    dependencies:
+      - target: TokenBarCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.javis.TokenBarProbe
+        GENERATE_INFOPLIST_FILE: YES
+  TokenBarCLI:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/TokenBarCLI
+    dependencies:
+      - target: TokenBarCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.javis.TokenBarCLI
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGNING_ALLOWED: NO
+  TokenBarTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/TokenBarCoreTests
+    resources:
+      - path: Tests/TokenBarCoreTests/Fixtures
+    dependencies:
+      - target: TokenBarCore
+      - package: GRDB
+        product: GRDB
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.javis.TokenBarTests
+        GENERATE_INFOPLIST_FILE: YES
+        ENABLE_TESTING_SEARCH_PATHS: YES

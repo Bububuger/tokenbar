@@ -1,0 +1,12 @@
+.DS_Store
+.build/
+.xcodebuild/
+.xcodebuild-local/
+.swiftpm/
+.codex/
+.harness/
+dist/
+tokenbar.zip
+*.tar.gz
+TokenBar.xcodeproj/xcuserdata/
+*.xcuserstate

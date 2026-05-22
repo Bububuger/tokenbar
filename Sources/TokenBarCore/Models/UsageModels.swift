@@ -5,6 +5,7 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
     case claudeCode
     case geminiCLI
     case hermes
+    case openCode
     case custom
 
     public var displayName: String {
@@ -17,6 +18,8 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
             "Gemini CLI"
         case .hermes:
             "Hermes"
+        case .openCode:
+            "OpenCode"
         case .custom:
             "Custom"
         }
@@ -32,6 +35,8 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
             0.50
         case .hermes:
             0.15
+        case .openCode:
+            0.00
         case .custom:
             0.15
         }
@@ -43,6 +48,7 @@ public enum ParserKind: String, Sendable, Hashable {
     case claudeCode
     case hermes
     case gemini
+    case openCode
     case sample
     case custom
 }
@@ -72,6 +78,7 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
     case codex
     case hermes
     case gemini
+    case openCode
 
     public var displayName: String {
         switch self {
@@ -83,6 +90,8 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             "Hermes"
         case .gemini:
             "Gemini CLI"
+        case .openCode:
+            "OpenCode"
         }
     }
 
@@ -96,6 +105,8 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             "state.db"
         case .gemini:
             "**/chats/*.json"
+        case .openCode:
+            "opencode.db"
         }
     }
 
@@ -109,6 +120,8 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             .hermes
         case .gemini:
             .geminiCLI
+        case .openCode:
+            .openCode
         }
     }
 
@@ -122,6 +135,8 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             .hermes
         case .gemini:
             .gemini
+        case .openCode:
+            .openCode
         }
     }
 }

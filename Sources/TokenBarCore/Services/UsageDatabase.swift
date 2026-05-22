@@ -207,6 +207,20 @@ public final class UsageDatabase: @unchecked Sendable {
             ON usage_events(timestamp, project_name, agent, model_name, input_tokens, output_tokens, cache_tokens)
             """)
         }
+        migrator.registerMigration("v9_add_saved_prompts") { db in
+            try db.execute(sql: """
+            CREATE TABLE IF NOT EXISTS saved_prompts (
+                id TEXT PRIMARY KEY,
+                slug TEXT UNIQUE NOT NULL,
+                title TEXT NOT NULL,
+                body TEXT NOT NULL,
+                source_prompt_id TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            """)
+            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_saved_prompts_updated ON saved_prompts(updated_at DESC);")
+        }
         return migrator
     }
 }

@@ -32,6 +32,7 @@ struct ProjectDetailView: View {
     @AppStorage("tokenbar.pricingOverrides") private var pricingOverridesJSON = "{}"
     // CL-P1-016: which session row is expanded into the detail drawer.
     @State private var expandedSession: String?
+    @State private var saveAsTemplateTarget: SavedPromptEditorTarget?
     // CL-P0-033: Reveal is gated by the global "Store prompt text in clear"
     // setting. When mask-only is configured, the button is disabled and
     // hovering it explains where to enable Full capture.
@@ -137,6 +138,12 @@ struct ProjectDetailView: View {
                 metadata: "project=\(detail.projectName) from=\(oldValue) to=\(newValue) events=\(projectEvents.count)",
                 success: true
             )
+        }
+        .sheet(item: $saveAsTemplateTarget) { target in
+            SavedPromptEditorView(target: target) {
+                saveAsTemplateTarget = nil
+            }
+            .environmentObject(runtimeModel)
         }
     }
 
@@ -702,6 +709,12 @@ struct ProjectDetailView: View {
                     Text(cluster.displayName)
                         .font(.system(size: 10.5, weight: .semibold))
                         .foregroundStyle(cluster.color)
+                    if runtimeModel.savedPromptSourceIds.contains(prompt.id) {
+                        Image(systemName: "bookmark.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(TokenBarStyle.accent)
+                            .help("Saved as prompt template")
+                    }
                     Spacer(minLength: 8)
                     Text(prompt.timestamp.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
                         .font(.system(size: 10.5, design: .monospaced))
@@ -761,6 +774,26 @@ struct ProjectDetailView: View {
                 .disabled(!allowReveal)
                 .opacity(allowReveal ? 1 : 0.35)
                 .help(allowReveal ? "Copy prompt text" : "Reveal prompt text before copying")
+                let existingTemplate = runtimeModel.savedPrompts.first { $0.sourcePromptId == prompt.id }
+                Button {
+                    if let existingTemplate {
+                        saveAsTemplateTarget = .edit(existingTemplate)
+                    } else {
+                        saveAsTemplateTarget = .new(from: prompt)
+                    }
+                } label: {
+                    Image(systemName: existingTemplate != nil ? "bookmark.fill" : "bookmark")
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(existingTemplate != nil ? TokenBarStyle.accent : TokenBarStyle.muted)
+                .disabled(!allowReveal)
+                .opacity(allowReveal ? 1 : 0.35)
+                .help(allowReveal
+                      ? (existingTemplate != nil
+                          ? "Edit saved template (/tb:\(existingTemplate?.slug ?? ""))"
+                          : "Save as reusable Claude Code slash command template")
+                      : "Reveal prompt text before saving as a template")
             }
 
             promptDetailContent(prompt: prompt, cluster: cluster, allowReveal: allowReveal, metadata: metadata)
@@ -952,6 +985,8 @@ struct ProjectDetailView: View {
             promptHistoryPage.kindCounts.subagentCount
         case .command:
             promptHistoryPage.kindCounts.commandCount
+        case .bookmarked:
+            promptHistoryPage.kindCounts.bookmarkedCount
         }
     }
 
@@ -967,6 +1002,7 @@ struct ProjectDetailView: View {
             promptSearchText,
             promptClusterFilter.rawValue,
             runtimeModel.promptSignature,
+            "saved:\(runtimeModel.savedPromptSourceIds.count)",
         ].joined(separator: "|")
     }
 
@@ -1279,6 +1315,7 @@ private enum PromptClusterFilter: String, CaseIterable, Identifiable, Sendable {
     case human
     case subagent
     case command
+    case bookmarked
 
     var id: String { rawValue }
 
@@ -1292,6 +1329,8 @@ private enum PromptClusterFilter: String, CaseIterable, Identifiable, Sendable {
             "Subagent"
         case .command:
             "Command"
+        case .bookmarked:
+            "Bookmarked"
         }
     }
 
@@ -1305,19 +1344,8 @@ private enum PromptClusterFilter: String, CaseIterable, Identifiable, Sendable {
             .subagent
         case .command:
             .command
-        }
-    }
-
-    func includes(_ cluster: PromptCluster) -> Bool {
-        switch self {
-        case .all:
-            true
-        case .human:
-            cluster == .human
-        case .subagent:
-            cluster == .subagent
-        case .command:
-            cluster == .command
+        case .bookmarked:
+            .bookmarked
         }
     }
 }

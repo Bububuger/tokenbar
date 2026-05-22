@@ -34,7 +34,7 @@ struct TokenBarCLI {
                 return .init(dbPath: dbOverride, command: .help)
             case "--db":
                 dbOverride = try iterator.nextValue(for: "--db")
-            case "summary", "prompts", "hours", "hourly", "rebuild", "help":
+            case "summary", "prompts", "hours", "hourly", "rebuild", "help", "prompt":
                 command = try parseCommand(named: arg, cursor: &iterator, dbOverride: dbOverride)
                 break
             case let unknown where unknown.hasPrefix("-"):
@@ -141,6 +141,54 @@ struct TokenBarCLI {
                 }
             }
             return .prompts(options)
+        case "prompt":
+            guard let action = cursor.next() else {
+                throw CLIError.invalidArgument("Usage: prompt <list|get <slug>>")
+            }
+            switch action {
+            case "--help", "-h":
+                return .help
+            case "list":
+                var databasePath = dbOverride
+                while let arg = cursor.next() {
+                    switch arg {
+                    case "--help", "-h":
+                        return .help
+                    case "--db":
+                        databasePath = try cursor.nextValue(for: "--db")
+                    case let unknown where unknown.hasPrefix("-"):
+                        throw CLIError.invalidArgument("Unknown prompt list option: \(unknown)")
+                    default:
+                        throw CLIError.invalidArgument("Unexpected prompt list argument: \(arg)")
+                    }
+                }
+                return .prompt(.list(databasePath: databasePath))
+            case "get":
+                var databasePath = dbOverride
+                var slug: String?
+                while let arg = cursor.next() {
+                    switch arg {
+                    case "--help", "-h":
+                        return .help
+                    case "--db":
+                        databasePath = try cursor.nextValue(for: "--db")
+                    case let unknown where unknown.hasPrefix("-"):
+                        throw CLIError.invalidArgument("Unknown prompt get option: \(unknown)")
+                    default:
+                        if slug == nil {
+                            slug = arg
+                        } else {
+                            throw CLIError.invalidArgument("Unexpected prompt get argument: \(arg)")
+                        }
+                    }
+                }
+                guard let slug else {
+                    throw CLIError.invalidArgument("Usage: prompt get <slug>")
+                }
+                return .prompt(.get(databasePath: databasePath, slug: slug))
+            default:
+                throw CLIError.invalidArgument("Unknown prompt action: \(action). Use list or get <slug>.")
+            }
         case "hours", "hourly":
             var options = HourlyOptions(
                 databasePath: dbOverride,
@@ -228,8 +276,28 @@ struct TokenBarCLI {
             try runSummary(with: options)
         case .prompts(let options):
             try runPrompts(with: options)
+        case .prompt(let action):
+            try runSavedPrompt(action: action)
         case .hours(let options):
             try runHours(with: options)
+        }
+    }
+
+    private static func runSavedPrompt(action: PromptCommandAction) throws {
+        switch action {
+        case .list(let databasePath):
+            let repository = try makeRepository(path: databasePath)
+            let prompts = try repository.allSavedPrompts()
+            for prompt in prompts {
+                print("\(prompt.slug)\t\(prompt.title)")
+            }
+        case .get(let databasePath, let slug):
+            let repository = try makeRepository(path: databasePath)
+            guard let prompt = try repository.savedPrompt(slug: slug) else {
+                fputs("Unknown saved prompt slug: \(slug)\n", stderr)
+                Foundation.exit(1)
+            }
+            FileHandle.standardOutput.write(Data(prompt.body.utf8))
         }
     }
 
@@ -756,6 +824,9 @@ Commands:
     --limit N       Max results (default 10)
     --json          Emit JSON output
 
+  prompt list           List saved prompt templates (slug<TAB>title)
+  prompt get <slug>     Print saved prompt body to stdout (no trailing newline)
+
   hours       Show hourly token peaks and daily peak time slots
     --days N        Filter by last N days (default 30, 0 = all-time)
     --project <name> Filter to project name
@@ -809,7 +880,13 @@ private enum ParsedCommand {
     case rebuild(RebuildOptions)
     case summary(SummaryOptions)
     case prompts(PromptOptions)
+    case prompt(PromptCommandAction)
     case hours(HourlyOptions)
+}
+
+private enum PromptCommandAction {
+    case list(databasePath: String?)
+    case get(databasePath: String?, slug: String)
 }
 
 private struct RebuildOptions {

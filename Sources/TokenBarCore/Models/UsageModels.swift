@@ -42,6 +42,7 @@ public enum ParserKind: String, Sendable, Hashable {
     case codex
     case claudeCode
     case hermes
+    case gemini
     case sample
     case custom
 }
@@ -70,6 +71,7 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
     case claudeCode
     case codex
     case hermes
+    case gemini
 
     public var displayName: String {
         switch self {
@@ -79,6 +81,8 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             "Codex"
         case .hermes:
             "Hermes"
+        case .gemini:
+            "Gemini CLI"
         }
     }
 
@@ -90,6 +94,8 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             "**/rollout-*.jsonl"
         case .hermes:
             "state.db"
+        case .gemini:
+            "**/chats/*.json"
         }
     }
 
@@ -101,6 +107,8 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             .codex
         case .hermes:
             .hermes
+        case .gemini:
+            .geminiCLI
         }
     }
 
@@ -112,6 +120,8 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             .codex
         case .hermes:
             .hermes
+        case .gemini:
+            .gemini
         }
     }
 }

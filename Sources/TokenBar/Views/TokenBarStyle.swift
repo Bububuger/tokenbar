@@ -723,8 +723,9 @@ struct TokenBarOverviewRangeMetrics: Sendable, Hashable {
         let projectBreakdowns = sortedBreakdowns(projectSummaries)
         let agentBreakdowns = sortedBreakdowns(agentSummaries)
         let totalModelTokens = modelTotals.values.reduce(0) { $0 + $1.summary.totalTokens }
-        let modelRows = modelTotals.map { name, model in
+        let modelRows = modelTotals.compactMap { name, model -> TokenBarModelBreakdown? in
             let summary = model.summary
+            guard summary.totalTokens > 0 else { return nil }
             return TokenBarModelBreakdown(
                 name: name,
                 agentName: topName(model.agentTokens, fallback: "Local"),
@@ -796,8 +797,9 @@ private func rankingRows(
     subtitles: [String: [String: Int]],
     fallback: String
 ) -> [TokenBarRankingRow] {
-    breakdowns.map { row in
-        TokenBarRankingRow(
+    breakdowns.compactMap { row -> TokenBarRankingRow? in
+        guard row.summary.totalTokens > 0 else { return nil }
+        return TokenBarRankingRow(
             name: row.name,
             summary: row.summary,
             totalTokens: row.summary.totalTokens,
@@ -1081,12 +1083,13 @@ func tokenbarModelBreakdowns(
 
     let totalTokens = grouped.values.reduce(0) { $0 + $1.inputTokens + $1.outputTokens + $1.cacheTokens }
 
-    return grouped.map { name, accumulator in
+    return grouped.compactMap { name, accumulator -> TokenBarModelBreakdown? in
         let summary = UsageSummary(
             inputTokens: accumulator.inputTokens,
             outputTokens: accumulator.outputTokens,
             cacheTokens: accumulator.cacheTokens
         )
+        guard summary.totalTokens > 0 else { return nil }
         let agentName = accumulator.agentTokens.max { lhs, rhs in
             if lhs.value == rhs.value {
                 return lhs.key > rhs.key
@@ -1191,7 +1194,8 @@ func tokenbarRankingRowsForFilteredEvents(
         }
     }
 
-    return rows.map { row in
+    return rows.compactMap { row -> TokenBarRankingRow? in
+        guard row.summary.totalTokens > 0 else { return nil }
         let rowEvents = eventsByName[row.name] ?? []
         return TokenBarRankingRow(
             name: row.name,

@@ -136,6 +136,109 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
                     UsageSourceWarning(sourceName: sourceName, sourcePath: $0.sourcePath, lineNumber: $0.lineNumber, message: $0.message)
                 })
             }
+        case .gemini:
+            let projectIndex = GeminiDataSource.loadProjectIndex(
+                rootDirectory: record.directory,
+                fileManager: fileManager
+            )
+            for file in files {
+                let sourcePath = file.path
+                let priorWatermark = watermarks[sourcePath]
+
+                let fingerprint: FileFingerprint
+                do {
+                    fingerprint = try JSONLIncrementalReader.fingerprint(at: sourcePath)
+                } catch {
+                    warnings.append(
+                        UsageSourceWarning(
+                            sourceName: sourceName,
+                            sourcePath: sourcePath,
+                            lineNumber: nil,
+                            message: "failed to fingerprint source file: \(error.localizedDescription)"
+                        )
+                    )
+                    continue
+                }
+
+                if shouldSkipWholeFileJSON(fingerprint: fingerprint, watermark: priorWatermark) {
+                    nextWatermarks.append(
+                        customWatermark(
+                            from: SourceWatermark(
+                                sourcePath: sourcePath,
+                                agent: record.engine.agentKind,
+                                lastMtime: fingerprint.mtime,
+                                lastByteOffset: 0,
+                                lastEventId: stripCustomWatermarkPrefix(priorWatermark?.lastEventId),
+                                lastInode: fingerprint.inode,
+                                updatedAt: referenceDate
+                            ),
+                            lastEventId: stripCustomWatermarkPrefix(priorWatermark?.lastEventId)
+                        )
+                    )
+                    continue
+                }
+
+                let data: Data
+                do {
+                    data = try Data(contentsOf: file)
+                } catch {
+                    warnings.append(
+                        UsageSourceWarning(
+                            sourceName: sourceName,
+                            sourcePath: sourcePath,
+                            lineNumber: nil,
+                            message: "failed to read source file: \(error.localizedDescription)"
+                        )
+                    )
+                    continue
+                }
+
+                let parseResult = GeminiUsageParser.parse(
+                    data: data,
+                    fileURL: file
+                ) { slug in
+                    GeminiDataSource.resolveProject(
+                        forSlug: slug,
+                        rootDirectory: record.directory,
+                        projectIndex: projectIndex,
+                        fileManager: fileManager
+                    )
+                }
+                warnings.append(contentsOf: parseResult.warnings.map {
+                    UsageSourceWarning(
+                        sourceName: sourceName,
+                        sourcePath: $0.sourcePath,
+                        lineNumber: $0.lineNumber,
+                        message: $0.message
+                    )
+                })
+
+                let previousLastEventID = stripCustomWatermarkPrefix(priorWatermark?.lastEventId)
+                let newEvents = filterNewGeminiEvents(
+                    parseResult.events,
+                    previousLastEventID: previousLastEventID
+                )
+                events.append(contentsOf: newEvents.map { customEvent($0) })
+
+                let watermarkLastEventID = newEvents.last
+                    .flatMap { messageID(fromEventID: $0.id, sourcePath: sourcePath) }
+                    ?? previousLastEventID
+
+                nextWatermarks.append(
+                    customWatermark(
+                        from: SourceWatermark(
+                            sourcePath: sourcePath,
+                            agent: record.engine.agentKind,
+                            lastMtime: fingerprint.mtime,
+                            lastByteOffset: 0,
+                            lastEventId: watermarkLastEventID,
+                            lastInode: fingerprint.inode,
+                            updatedAt: referenceDate
+                        ),
+                        lastEventId: watermarkLastEventID
+                    )
+                )
+            }
         }
 
         return UsageSourceLoadResult(events: events, prompts: prompts, nextWatermarks: nextWatermarks, warnings: warnings)
@@ -211,8 +314,17 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
         if globPattern.contains("rollout-*.jsonl") {
             return name.hasPrefix("rollout-") && name.hasSuffix(".jsonl")
         }
-        if globPattern.contains("*.jsonl") || globPattern.contains("**") {
+        if globPattern.contains("*.jsonl") {
             return name.hasSuffix(".jsonl")
+        }
+        if globPattern.contains("*.json") {
+            return name.hasSuffix(".json")
+        }
+        if globPattern == "state.db" {
+            return name == "state.db"
+        }
+        if globPattern.contains("**") {
+            return name.hasSuffix(fallbackSuffix)
         }
         if globPattern.contains("*") {
             return name.hasSuffix(fallbackSuffix)
@@ -426,6 +538,45 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
             current = next
         }
         return current
+    }
+
+    private func shouldSkipWholeFileJSON(fingerprint: FileFingerprint, watermark: SourceWatermark?) -> Bool {
+        guard let watermark else { return false }
+        guard fingerprint.mtime <= watermark.lastMtime else { return false }
+        guard let lastInode = watermark.lastInode else { return true }
+        return fingerprint.inode == lastInode
+    }
+
+    private func filterNewGeminiEvents(
+        _ events: [UsageEvent],
+        previousLastEventID: String?
+    ) -> [UsageEvent] {
+        guard let previousLastEventID else { return events }
+        guard let lastSeenIndex = events.lastIndex(where: { event in
+            messageID(fromEventID: event.id, sourcePath: event.sourcePath) == previousLastEventID
+        }) else {
+            return events
+        }
+        let nextIndex = events.index(after: lastSeenIndex)
+        guard nextIndex < events.endIndex else {
+            return []
+        }
+        return Array(events[nextIndex...])
+    }
+
+    private func messageID(fromEventID eventID: String, sourcePath: String) -> String? {
+        let prefix = sourcePath + "#"
+        guard eventID.hasPrefix(prefix) else { return nil }
+        return String(eventID.dropFirst(prefix.count))
+    }
+
+    private func stripCustomWatermarkPrefix(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count >= 3, parts[0] == "custom" else {
+            return value
+        }
+        return parts.dropFirst(2).joined(separator: ":")
     }
 }
 

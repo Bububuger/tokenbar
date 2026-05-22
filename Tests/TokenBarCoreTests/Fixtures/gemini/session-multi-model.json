@@ -1,0 +1,61 @@
+{
+  "sessionId": "session-multi",
+  "projectHash": "slug-multi",
+  "startTime": "2026-03-29T13:33:33.020Z",
+  "lastUpdated": "2026-03-29T13:41:55.267Z",
+  "messages": [
+    {
+      "id": "m-user-1",
+      "timestamp": "2026-03-29T13:33:35.020Z",
+      "type": "user",
+      "content": [
+        {
+          "text": "hello"
+        }
+      ]
+    },
+    {
+      "id": "m-gemini-1",
+      "timestamp": "2026-03-29T13:34:35.020Z",
+      "type": "gemini",
+      "model": "gemini-3-flash-preview",
+      "tokens": {
+        "input": 100,
+        "output": 20,
+        "cached": 3,
+        "thoughts": 4,
+        "tool": 6,
+        "total": 133
+      },
+      "content": "first"
+    },
+    {
+      "id": "m-info-1",
+      "timestamp": "2026-03-29T13:35:35.020Z",
+      "type": "info",
+      "content": "noise"
+    },
+    {
+      "id": "m-gemini-2",
+      "timestamp": "2026-03-29T13:36:35.020Z",
+      "type": "gemini",
+      "model": "gemini-2.5-pro",
+      "tokens": {
+        "input": 55,
+        "output": 7,
+        "cached": 2,
+        "thoughts": 1,
+        "tool": 0,
+        "total": 65
+      },
+      "content": "second"
+    },
+    {
+      "id": "m-gemini-missing-tokens",
+      "timestamp": "2026-03-29T13:37:35.020Z",
+      "type": "gemini",
+      "model": "gemini-2.5-pro",
+      "content": "no tokens"
+    }
+  ]
+}

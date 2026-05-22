@@ -201,6 +201,12 @@ public final class UsageDatabase: @unchecked Sendable {
                 }
             }
         }
+        migrator.registerMigration("v8_add_range_rollup_index") { db in
+            try db.execute(sql: """
+            CREATE INDEX IF NOT EXISTS idx_events_range_covering
+            ON usage_events(timestamp, project_name, agent, model_name, input_tokens, output_tokens, cache_tokens)
+            """)
+        }
         return migrator
     }
 }

@@ -67,6 +67,10 @@ public enum ClaudeDataSource {
             return "unknown"
         }
 
+        if let projectName = readableProjectNameFromKnownPathSlug(slug) {
+            return projectName
+        }
+
         let parts = slug
             .split(separator: "-")
             .map(String.init)
@@ -75,15 +79,49 @@ public enum ClaudeDataSource {
         return parts.last ?? "unknown"
     }
 
-    public static func expandHome(in path: String) -> String {
-        guard path.hasPrefix("~/") else {
-            return path
+    private static func readableProjectNameFromKnownPathSlug(_ slug: String) -> String? {
+        let normalized = slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        let markers = [
+            "Documents-TeamFile-claude-workspace-",
+            "Documents-TeamFile-codex-workspace-",
+            "Documents-workspace-projects-",
+            "Documents-workspace-",
+        ]
+
+        for marker in markers {
+            guard let range = normalized.range(of: marker, options: .backwards) else {
+                continue
+            }
+            let tail = String(normalized[range.upperBound...])
+            if let worktreeRange = tail.range(of: "--claude-worktrees-", options: .backwards) {
+                let worktreeName = String(tail[worktreeRange.upperBound...])
+                return worktreeName.isEmpty ? nil : worktreeName
+            }
+            return tail.isEmpty ? nil : tail
         }
 
-        let suffix = String(path.dropFirst(2))
-        return URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-            .appendingPathComponent(suffix)
-            .path
+        return nil
+    }
+
+    public static func expandHome(in path: String) -> String {
+        if path.hasPrefix("~/") {
+            let suffix = String(path.dropFirst(2))
+            return URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+                .appendingPathComponent(suffix)
+                .path
+        }
+
+        if path.hasPrefix("/."), !FileManager.default.fileExists(atPath: path) {
+            let suffix = String(path.dropFirst())
+            let homeCandidate = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+                .appendingPathComponent(suffix)
+                .path
+            if FileManager.default.fileExists(atPath: homeCandidate) {
+                return homeCandidate
+            }
+        }
+
+        return path
     }
 
     private static func isDirectory(_ url: URL, fileManager: FileManager) -> Bool {

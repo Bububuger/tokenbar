@@ -4,6 +4,7 @@ import TokenBarCore
 
 enum TokenBarIndexingPhase: String, Sendable, Hashable {
     case idle
+    case queued
     case discovering
     case indexing
     case paused
@@ -65,7 +66,7 @@ struct TokenBarIndexingState: Sendable, Hashable {
     }
 
     var isPartial: Bool {
-        isActive || phase == .paused
+        isActive || phase == .queued || phase == .paused
     }
 
     var completedSourceCount: Int {
@@ -75,7 +76,7 @@ struct TokenBarIndexingState: Sendable, Hashable {
     var progress: Double {
         guard !sources.isEmpty else { return phase == .completed ? 1 : 0 }
         switch phase {
-        case .idle:
+        case .idle, .queued:
             return 0
         case .completed:
             return 1
@@ -93,6 +94,11 @@ enum CustomSourceSaveResult: Equatable {
 private struct CachedProjectDetail {
     let detail: ProjectDetailSnapshot
     let eventsSignature: String
+}
+
+struct TokenBarOverviewRangeData: Sendable, Hashable {
+    let aggregate: UsageRangeAggregate
+    let window: TokenBarRangeWindow
 }
 
 @MainActor
@@ -114,6 +120,7 @@ final class TokenBarRuntimeModel: ObservableObject {
     @Published private(set) var popoverSnapshot: TokenBarPopoverSnapshot
     @Published private(set) var indexingState: TokenBarIndexingState = .idle
     @Published private(set) var isBootstrapping = true
+    @Published private(set) var archivedProjectNames: Set<String>
     @Published var mainRoute: TokenBarMainRoute = .today {
         didSet {
             guard oldValue != mainRoute else { return }
@@ -199,6 +206,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         self.storePromptTextInClearText = settingsStore.storePromptTextInClearText
         self.usePromptFingerprintsByDefault = settingsStore.usePromptFingerprintsByDefault
         self.retentionWindow = settingsStore.retentionWindow
+        self.archivedProjectNames = settingsStore.archivedProjectNames
         self.refreshState = .idle
         self.selectedProjectName = nil
         self.projectDetail = nil
@@ -455,6 +463,22 @@ final class TokenBarRuntimeModel: ObservableObject {
         )
         stageStarted = Date()
         let backgroundThrottle = backgroundThrottle(for: trigger)
+        let showIndexingProgress = shouldShowRefreshIndexingProgress(for: trigger)
+        if showIndexingProgress {
+            publishRefreshIndexingDiscovery(
+                trigger: trigger,
+                sources: sources,
+                startedAt: now,
+                resourceThrottle: backgroundThrottle
+            )
+            let discoveryStatuses = await collectStatuses(sources: sources, referenceDate: now)
+            publishRefreshIndexingProgress(
+                trigger: trigger,
+                statuses: discoveryStatuses,
+                startedAt: now,
+                resourceThrottle: backgroundThrottle
+            )
+        }
         let engine = checkpointEngine(for: sources, resourceThrottle: backgroundThrottle)
         TokenBarTelemetry.timing(
             "runtime.refresh.stage.checkpoint_engine_prepare",
@@ -462,7 +486,7 @@ final class TokenBarRuntimeModel: ObservableObject {
             metadata: "trigger=\(trigger) background=\(backgroundThrottle != nil)"
         )
         stageStarted = Date()
-        _ = await engine.run(trigger: trigger, startedAt: now, referenceDate: now, calendar: Calendar(identifier: .gregorian))
+        let runResult = await engine.run(trigger: trigger, startedAt: now, referenceDate: now, calendar: Calendar(identifier: .gregorian))
         let throttleSnapshot = await backgroundThrottle?.snapshot()
         let throttleMetadata: String
         if let throttleSnapshot {
@@ -561,6 +585,14 @@ final class TokenBarRuntimeModel: ObservableObject {
             startedAt: stageStarted,
             metadata: "trigger=\(trigger) refresh_state=\(refreshState)"
         )
+        if showIndexingProgress {
+            publishRefreshIndexingCompletion(
+                trigger: trigger,
+                statuses: statuses,
+                result: runResult,
+                endedAt: Date()
+            )
+        }
         TokenBarTelemetry.event(
             "runtime.refresh",
             metadata: "trigger=\(trigger) events=\(state.eventCount) prompts=\(state.promptCount) warnings=\(state.warnings.count)",
@@ -601,9 +633,9 @@ final class TokenBarRuntimeModel: ObservableObject {
             checkedFiles: 0,
             eventsIndexed: 0,
             promptsIndexed: 0,
-            message: "Background indexing with a \(Int(IndexingResourceBudget.backgroundCPUPercent))% CPU budget",
+            message: "Initial indexing with a \(Int(IndexingResourceBudget.initialIndexCPUPercent))% CPU budget",
             activeSourceName: nil,
-            cpuBudgetPercent: IndexingResourceBudget.backgroundCPUPercent
+            cpuBudgetPercent: IndexingResourceBudget.initialIndexCPUPercent
         )
         refreshState = .refreshing
         diagnostics = diagnosticsSnapshot(
@@ -614,7 +646,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         )
         TokenBarTelemetry.event(
             "initial_index.start",
-            metadata: "reason=\(reason) sources=\(sources.count) cpu_budget=\(IndexingResourceBudget.backgroundCPUPercent)",
+            metadata: "reason=\(reason) sources=\(sources.count) cpu_budget=\(IndexingResourceBudget.initialIndexCPUPercent)",
             success: true
         )
 
@@ -665,7 +697,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         reason: String
     ) async {
         let calendar = Calendar(identifier: .gregorian)
-        let resourceThrottle = IndexingResourceThrottle(budget: .background)
+        let resourceThrottle = IndexingResourceThrottle(budget: .initialIndex)
         var statuses: [UsageDataSourceStatus] = []
         var totalFiles = 0
         var totalEvents = 0
@@ -972,6 +1004,47 @@ final class TokenBarRuntimeModel: ObservableObject {
         }
     }
 
+    func archiveProject(named name: String, source: String = "sidebar.project_context") {
+        setProjectArchived(name, archived: true, source: source)
+    }
+
+    func restoreProject(named name: String, source: String = "sidebar.project_context") {
+        setProjectArchived(name, archived: false, source: source)
+    }
+
+    private func setProjectArchived(_ name: String, archived: Bool, source: String) {
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+
+        var next = archivedProjectNames
+        let changed: Bool
+        if archived {
+            changed = next.insert(normalized).inserted
+        } else {
+            changed = next.remove(normalized) != nil
+        }
+        guard changed else {
+            TokenBarTelemetry.event(
+                "project.archive.skip",
+                metadata: "source=\(source) project=\(normalized) archived=\(archived)",
+                success: true
+            )
+            return
+        }
+
+        archivedProjectNames = next
+        settingsStore.archivedProjectNames = next
+        TokenBarTelemetry.event(
+            "project.archive.change",
+            metadata: "source=\(source) project=\(normalized) archived=\(archived) count=\(next.count)",
+            success: true
+        )
+
+        if archived, selectedProjectName == normalized, mainRoute == .project(normalized) {
+            navigate(to: .today, source: "\(source).archived_current")
+        }
+    }
+
     func projectDetail(for name: String) async -> ProjectDetailSnapshot? {
         let now = Date()
         let projectEvents = (try? await usageStore.projectEvents(projectName: name)) ?? []
@@ -987,8 +1060,85 @@ final class TokenBarRuntimeModel: ObservableObject {
         (try? await usageStore.projectEvents(projectName: name)) ?? []
     }
 
+    func overviewRangeData(
+        selection: String,
+        referenceDate: Date = Date(),
+        calendar: Calendar = Calendar(identifier: .gregorian)
+    ) async -> TokenBarOverviewRangeData? {
+        guard let bounds = try? await usageStore.eventTimeBounds() else {
+            return nil
+        }
+        let window = tokenbarRangeWindow(
+            selection: selection,
+            earliestEventDate: bounds.earliest,
+            referenceDate: referenceDate,
+            calendar: calendar
+        )
+        guard let aggregate = try? await usageStore.rangeAggregate(
+            start: window.start,
+            end: window.end,
+            calendar: calendar
+        ) else {
+            return nil
+        }
+        return TokenBarOverviewRangeData(aggregate: aggregate, window: window)
+    }
+
+    func projectBreakdowns(
+        selection: String,
+        referenceDate: Date = Date(),
+        calendar: Calendar = Calendar(identifier: .gregorian)
+    ) async -> [UsageBreakdown]? {
+        guard let bounds = try? await usageStore.eventTimeBounds() else {
+            return nil
+        }
+        let window = tokenbarRangeWindow(
+            selection: selection,
+            earliestEventDate: bounds.earliest,
+            referenceDate: referenceDate,
+            calendar: calendar
+        )
+        return try? await usageStore.projectBreakdowns(
+            start: window.start,
+            end: window.end,
+            topCount: nil
+        )
+    }
+
     func projectPromptHistory(for name: String, includeContent: Bool = true) async -> [PromptRecord] {
         (try? await usageStore.projectPromptHistory(projectName: name, includeContent: includeContent)) ?? []
+    }
+
+    func projectPromptHistoryPage(
+        for name: String,
+        limit: Int,
+        offset: Int,
+        includeContent: Bool = true,
+        query: String = "",
+        kindFilter: PromptHistoryKindFilter = .all
+    ) async -> PromptHistoryPage {
+        (try? await usageStore.projectPromptHistoryPage(
+            projectName: name,
+            limit: limit,
+            offset: offset,
+            includeContent: includeContent,
+            query: query,
+            kindFilter: kindFilter
+        )) ?? .empty(limit: limit, offset: offset)
+    }
+
+    func projectPromptCountsByDay(
+        for name: String,
+        start: Date,
+        end: Date,
+        calendar: Calendar = Calendar(identifier: .gregorian)
+    ) async -> [Date: Int] {
+        (try? await usageStore.projectPromptCountsByDay(
+            projectName: name,
+            start: start,
+            end: end,
+            calendar: calendar
+        )) ?? [:]
     }
 
     private func cacheProjectDetail(_ detail: ProjectDetailSnapshot) {
@@ -1201,7 +1351,9 @@ final class TokenBarRuntimeModel: ObservableObject {
                 await publishCurrentStoreState(refreshState: .refreshing)
             }
             customSources = await loadCustomSources()
-            scheduleCustomSourceRefresh(trigger: existing == nil ? "custom-source-add" : "custom-source-deduplicate")
+            let trigger = existing == nil ? "custom-source-add" : "custom-source-deduplicate"
+            publishCustomSourceRefreshQueued(trigger: trigger, sources: [source])
+            scheduleCustomSourceRefresh(trigger: trigger)
             TokenBarTelemetry.event(
                 "custom_source.add",
                 metadata: "name=\(source.name) deduplicated=\(existing != nil)",
@@ -1252,7 +1404,9 @@ final class TokenBarRuntimeModel: ObservableObject {
             if requiresReindex {
                 await publishCurrentStoreState(refreshState: .refreshing)
             }
-            scheduleCustomSourceRefresh(trigger: deduplicated ? "custom-source-deduplicate" : "custom-source-update")
+            let trigger = deduplicated ? "custom-source-deduplicate" : "custom-source-update"
+            publishCustomSourceRefreshQueued(trigger: trigger, sources: [updated])
+            scheduleCustomSourceRefresh(trigger: trigger)
             TokenBarTelemetry.event(
                 "custom_source.update",
                 metadata: "name=\(updated.name) deduplicated=\(deduplicated) reindex=\(requiresReindex)",
@@ -1270,6 +1424,10 @@ final class TokenBarRuntimeModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             await self.restartFileWatcher()
+            while self.indexingState.isActive || self.activeRefreshTrigger != nil {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+            }
             await self.refresh(trigger: trigger)
         }
     }
@@ -1298,7 +1456,7 @@ final class TokenBarRuntimeModel: ObservableObject {
             startInitialIndexing(reason: "reparse-all")
             TokenBarTelemetry.event(
                 "diagnostics.reparse_all",
-                metadata: "mode=background cpu_budget=\(IndexingResourceBudget.backgroundCPUPercent)",
+                metadata: "mode=initial_index cpu_budget=\(IndexingResourceBudget.initialIndexCPUPercent)",
                 success: true,
                 elapsed: Date().timeIntervalSince(started)
             )
@@ -1518,6 +1676,206 @@ final class TokenBarRuntimeModel: ObservableObject {
         )
     }
 
+    private func publishCustomSourceRefreshQueued(trigger: String, sources: [CustomSourceRecord]) {
+        guard !indexingState.isActive else { return }
+        let visibleSources = sources.isEmpty ? customSources : sources
+        indexingState = TokenBarIndexingState(
+            phase: .queued,
+            sources: visibleSources.map { source in
+                TokenBarIndexingSourceState(
+                    sourceName: source.name,
+                    rootPath: source.directory,
+                    phase: .pending,
+                    discoveredFileCount: 0,
+                    eventsIndexed: 0,
+                    promptsIndexed: 0,
+                    message: "Waiting to scan"
+                )
+            },
+            startedAt: Date(),
+            endedAt: nil,
+            checkedFiles: 0,
+            eventsIndexed: 0,
+            promptsIndexed: 0,
+            message: refreshIndexingMessage(for: trigger, phase: .queued),
+            activeSourceName: nil,
+            cpuBudgetPercent: IndexingResourceBudget.initialIndexCPUPercent
+        )
+        refreshState = .refreshing
+        diagnostics = diagnosticsSnapshot(
+            from: diagnostics,
+            statuses: diagnostics.dataSourceStatuses,
+            refreshState: .refreshing,
+            rebuildError: nil
+        )
+    }
+
+    private func publishRefreshIndexingDiscovery(
+        trigger: String,
+        sources: [any InspectableUsageEventSource],
+        startedAt: Date,
+        resourceThrottle: IndexingResourceThrottle?
+    ) {
+        let sources = progressSources(from: sources, trigger: trigger)
+        indexingState = TokenBarIndexingState(
+            phase: .discovering,
+            sources: sources.map {
+                TokenBarIndexingSourceState(
+                    sourceName: $0.sourceName,
+                    rootPath: $0.rootPath,
+                    phase: .pending,
+                    discoveredFileCount: 0,
+                    eventsIndexed: 0,
+                    promptsIndexed: 0,
+                    message: nil
+                )
+            },
+            startedAt: startedAt,
+            endedAt: nil,
+            checkedFiles: 0,
+            eventsIndexed: 0,
+            promptsIndexed: 0,
+            message: refreshIndexingMessage(for: trigger, phase: .discovering),
+            activeSourceName: nil,
+            cpuBudgetPercent: resourceThrottle != nil ? IndexingResourceBudget.initialIndexCPUPercent : nil
+        )
+    }
+
+    private func publishRefreshIndexingProgress(
+        trigger: String,
+        statuses: [UsageDataSourceStatus],
+        startedAt: Date,
+        resourceThrottle: IndexingResourceThrottle?
+    ) {
+        let statuses = progressStatuses(from: statuses, trigger: trigger)
+        let sourceStates = statuses.map { status in
+            TokenBarIndexingSourceState(
+                sourceName: status.sourceName,
+                rootPath: status.rootPath,
+                phase: status.discoveredFileCount > 0 ? .scanning : .skipped,
+                discoveredFileCount: status.discoveredFileCount,
+                eventsIndexed: 0,
+                promptsIndexed: 0,
+                message: sourceMessage(for: status)
+            )
+        }
+        indexingState = TokenBarIndexingState(
+            phase: .indexing,
+            sources: sourceStates,
+            startedAt: startedAt,
+            endedAt: nil,
+            checkedFiles: statuses.reduce(0) { $0 + $1.discoveredFileCount },
+            eventsIndexed: 0,
+            promptsIndexed: 0,
+            message: refreshIndexingMessage(for: trigger, phase: .indexing),
+            activeSourceName: nil,
+            cpuBudgetPercent: resourceThrottle != nil ? IndexingResourceBudget.initialIndexCPUPercent : nil
+        )
+        publishDiagnosticsDuringInitialIndex(statuses: statuses, rebuildError: nil)
+    }
+
+    private func publishRefreshIndexingCompletion(
+        trigger: String,
+        statuses: [UsageDataSourceStatus],
+        result: CheckpointRunResult,
+        endedAt: Date
+    ) {
+        let statuses = progressStatuses(from: statuses, trigger: trigger)
+        let failedSource = result.failure?.sourceName
+        let eventsAdded = result.checkpoint?.eventsAdded ?? 0
+        let promptsAdded = result.checkpoint?.promptsAdded ?? 0
+        let sourceStates = statuses.map { status in
+            let phase: TokenBarIndexingSourcePhase
+            let message: String
+            if status.sourceName == failedSource {
+                phase = .failed
+                message = result.failure?.message ?? "Failed"
+            } else if status.isReadable || status.discoveredFileCount > 0 {
+                phase = .indexed
+                message = "Indexed"
+            } else {
+                phase = .skipped
+                message = sourceMessage(for: status)
+            }
+            return TokenBarIndexingSourceState(
+                sourceName: status.sourceName,
+                rootPath: status.rootPath,
+                phase: phase,
+                discoveredFileCount: status.discoveredFileCount,
+                eventsIndexed: statuses.count == 1 ? eventsAdded : 0,
+                promptsIndexed: statuses.count == 1 ? promptsAdded : 0,
+                message: message
+            )
+        }
+        indexingState = TokenBarIndexingState(
+            phase: result.failure == nil ? .completed : .failed,
+            sources: sourceStates,
+            startedAt: indexingState.startedAt,
+            endedAt: endedAt,
+            checkedFiles: statuses.reduce(0) { $0 + $1.discoveredFileCount },
+            eventsIndexed: eventsAdded,
+            promptsIndexed: promptsAdded,
+            message: refreshIndexingMessage(for: trigger, phase: result.failure == nil ? .completed : .failed),
+            activeSourceName: nil,
+            cpuBudgetPercent: indexingState.cpuBudgetPercent
+        )
+        if result.failure == nil {
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(6))
+                await MainActor.run {
+                    guard let self, self.indexingState.phase == .completed else { return }
+                    self.indexingState = .idle
+                }
+            }
+        }
+    }
+
+    private func refreshIndexingMessage(for trigger: String, phase: TokenBarIndexingPhase) -> String {
+        let noun = trigger == "reparse-source" ? "source" : "custom sources"
+        switch phase {
+        case .queued:
+            return "\(noun.capitalized) saved. Waiting for the indexer."
+        case .discovering:
+            return "Discovering \(noun) before indexing."
+        case .indexing:
+            return "Indexing \(noun) with a \(Int(IndexingResourceBudget.initialIndexCPUPercent))% CPU budget."
+        case .completed:
+            return "\(noun.capitalized) index is ready."
+        case .failed:
+            return "\(noun.capitalized) indexing finished with source issues."
+        default:
+            return "Indexing \(noun)."
+        }
+    }
+
+    private func shouldShowRefreshIndexingProgress(for trigger: String) -> Bool {
+        (trigger.hasPrefix("custom-source-") && trigger != "custom-source-remove") || trigger == "reparse-source"
+    }
+
+    private func progressSources(
+        from sources: [any InspectableUsageEventSource],
+        trigger: String
+    ) -> [any InspectableUsageEventSource] {
+        guard trigger.hasPrefix("custom-source-") else { return sources }
+        let builtInKeys = Set(builtInSources.map { sourceKey(name: $0.sourceName, rootPath: $0.rootPath) })
+        let custom = sources.filter { !builtInKeys.contains(sourceKey(name: $0.sourceName, rootPath: $0.rootPath)) }
+        return custom.isEmpty ? sources : custom
+    }
+
+    private func progressStatuses(
+        from statuses: [UsageDataSourceStatus],
+        trigger: String
+    ) -> [UsageDataSourceStatus] {
+        guard trigger.hasPrefix("custom-source-") else { return statuses }
+        let builtInKeys = Set(builtInSources.map { sourceKey(name: $0.sourceName, rootPath: $0.rootPath) })
+        let custom = statuses.filter { !builtInKeys.contains(sourceKey(name: $0.sourceName, rootPath: $0.rootPath)) }
+        return custom.isEmpty ? statuses : custom
+    }
+
+    private func sourceKey(name: String, rootPath: String) -> String {
+        "\(name)|\(rootPath)"
+    }
+
     private func markIndexingSource(
         _ sourceName: String,
         phase: TokenBarIndexingSourcePhase,
@@ -1644,11 +2002,14 @@ final class TokenBarRuntimeModel: ObservableObject {
     }
 
     private func backgroundThrottle(for trigger: String) -> IndexingResourceThrottle? {
+        if trigger.hasPrefix("custom-source-") || trigger == "reparse-source" {
+            return IndexingResourceThrottle(budget: .initialIndex)
+        }
         switch trigger {
         case "bootstrap-background", "reparse-all", "file-change":
-            IndexingResourceThrottle(budget: .background)
+            return IndexingResourceThrottle(budget: .background)
         default:
-            nil
+            return nil
         }
     }
 

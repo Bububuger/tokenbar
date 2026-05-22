@@ -221,6 +221,26 @@ public actor UsageStore {
         try repository.projectEvents(projectName: projectName, limit: limit)
     }
 
+    public func eventTimeBounds() throws -> UsageEventTimeBounds {
+        try repository.eventTimeBounds()
+    }
+
+    public func projectBreakdowns(
+        start: Date,
+        end: Date,
+        topCount: Int? = nil
+    ) throws -> [UsageBreakdown] {
+        try repository.projectBreakdowns(start: start, end: end, topCount: topCount)
+    }
+
+    public func rangeAggregate(
+        start: Date,
+        end: Date,
+        calendar: Calendar
+    ) throws -> UsageRangeAggregate {
+        try repository.rangeAggregate(start: start, end: end, calendar: calendar)
+    }
+
     public func projectPromptHistory(
         projectName: String,
         limit: Int? = nil,
@@ -230,6 +250,38 @@ public actor UsageStore {
             projectName: projectName,
             limit: limit,
             includeContent: includeContent
+        )
+    }
+
+    public func projectPromptHistoryPage(
+        projectName: String,
+        limit: Int,
+        offset: Int,
+        includeContent: Bool = false,
+        query: String = "",
+        kindFilter: PromptHistoryKindFilter = .all
+    ) throws -> PromptHistoryPage {
+        try repository.projectPromptHistoryPage(
+            projectName: projectName,
+            limit: limit,
+            offset: offset,
+            includeContent: includeContent,
+            query: query,
+            kindFilter: kindFilter
+        )
+    }
+
+    public func projectPromptCountsByDay(
+        projectName: String,
+        start: Date,
+        end: Date,
+        calendar: Calendar
+    ) throws -> [Date: Int] {
+        try repository.projectPromptCountsByDay(
+            projectName: projectName,
+            start: start,
+            end: end,
+            calendar: calendar
         )
     }
 

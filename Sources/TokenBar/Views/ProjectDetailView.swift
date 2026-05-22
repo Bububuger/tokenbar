@@ -7,7 +7,6 @@ struct ProjectDetailView: View {
     let projectPath: String?
     let allTimeSummary: UsageSummary
     let allTimeCost: UsageCostProjection
-    let prompts: [PromptRecord]
     let events: [UsageEvent]
     @Binding var selectedRange: String
     let refreshState: RefreshState
@@ -19,15 +18,17 @@ struct ProjectDetailView: View {
     let onRefresh: (() -> Void)?
     let onBack: () -> Void
 
-    @State private var revealPrompts = false
+    @State private var revealPrompts = true
     @State private var isRangeLoading = false
     @State private var promptSearchText = ""
     @State private var promptClusterFilter: PromptClusterFilter = .all
     @State private var promptPage = 0
     @State private var selectedPromptID: String?
     @State private var projectMetrics = ProjectDetailRangeMetrics.empty
-    @State private var promptMetrics = PromptHistoryFilterMetrics.empty
-    @State private var hasPromptMetricsLoaded = false
+    @State private var promptHistoryPage = PromptHistoryPage.empty(limit: 12, offset: 0)
+    @State private var promptCountsByDay: [Date: Int] = [:]
+    @State private var hasPromptHistoryLoaded = false
+    @State private var isPromptHistoryLoading = false
     @AppStorage("tokenbar.pricingOverrides") private var pricingOverridesJSON = "{}"
     // CL-P1-016: which session row is expanded into the detail drawer.
     @State private var expandedSession: String?
@@ -41,7 +42,6 @@ struct ProjectDetailView: View {
         projectPath: String?,
         allTimeSummary: UsageSummary,
         allTimeCost: UsageCostProjection,
-        prompts: [PromptRecord],
         events: [UsageEvent],
         selectedRange: Binding<String>,
         refreshState: RefreshState,
@@ -57,7 +57,6 @@ struct ProjectDetailView: View {
         self.projectPath = projectPath
         self.allTimeSummary = allTimeSummary
         self.allTimeCost = allTimeCost
-        self.prompts = prompts
         self.events = events
         self._selectedRange = selectedRange
         self.refreshState = refreshState
@@ -91,7 +90,7 @@ struct ProjectDetailView: View {
                     title: tokenbarRangeTitle(selectedRange),
                     subtitle: projectMetrics.availabilityNote,
                     summary: projectRangeSummary,
-                    promptCounts: tokenbarPromptCountsByDay(days: rangeDays, prompts: prompts)
+                    promptCounts: promptCountsByDay
                 )
                 HStack(alignment: .top, spacing: TokenBarStyle.sectionSpacing) {
                     agentShareCard
@@ -117,7 +116,7 @@ struct ProjectDetailView: View {
             let started = Date()
             TokenBarTelemetry.event(
                 "project.detail.view.appear",
-                metadata: "project=\(detail.projectName) events=\(events.count) prompts=\(prompts.count)",
+                metadata: "project=\(detail.projectName) events=\(events.count) prompts=\(promptHistoryPage.totalCount)",
                 success: true
             )
             Task { @MainActor in
@@ -246,7 +245,7 @@ struct ProjectDetailView: View {
     }
 
     private var projectMetricsTaskID: String {
-        "\(detail.projectName)|\(selectedRange)|\(events.count)|\(events.last?.id ?? "none")|\(pricingOverridesJSON)"
+        "\(detail.projectName)|\(selectedRange)|\(events.count)|\(events.last?.id ?? "none")|\(runtimeModel.promptSignature)|\(pricingOverridesJSON)"
     }
 
     private var projectRangeSummary: UsageSummary {
@@ -315,10 +314,26 @@ struct ProjectDetailView: View {
         }.value
         guard !Task.isCancelled, self.selectedRange == selectedRange else { return }
         projectMetrics = metrics
+        let countsByDay: [Date: Int]
+        let calendar = Calendar(identifier: .gregorian)
+        if let firstDay = metrics.days.first?.date,
+           let lastDay = metrics.days.last?.date,
+           let end = calendar.date(byAdding: .day, value: 1, to: lastDay) {
+            countsByDay = await runtimeModel.projectPromptCountsByDay(
+                for: projectName,
+                start: firstDay,
+                end: end,
+                calendar: calendar
+            )
+        } else {
+            countsByDay = [:]
+        }
+        guard !Task.isCancelled, self.selectedRange == selectedRange else { return }
+        promptCountsByDay = countsByDay
         TokenBarTelemetry.timing(
             "project.detail.metrics.compute",
             startedAt: started,
-            metadata: "project=\(projectName) range=\(selectedRange) days=\(metrics.days.count) sessions=\(metrics.recentSessions.count) models=\(metrics.modelRows.count) tokens=\(metrics.rangeSummary.totalTokens)"
+            metadata: "project=\(projectName) range=\(selectedRange) days=\(metrics.days.count) prompt_days=\(countsByDay.count) sessions=\(metrics.recentSessions.count) models=\(metrics.modelRows.count) tokens=\(metrics.rangeSummary.totalTokens)"
         )
         if self.selectedRange == selectedRange {
             withAnimation(.easeOut(duration: 0.14)) {
@@ -491,15 +506,15 @@ struct ProjectDetailView: View {
 
                 promptHistoryControls
 
-                if prompts.isEmpty {
-                    Text("No local prompt captures for this project.")
-                        .font(.caption)
-                        .foregroundStyle(TokenBarStyle.muted)
-                } else if !hasPromptMetricsLoaded {
+                if isPromptHistoryLoading && !hasPromptHistoryLoaded {
                     Text("Preparing prompt index.")
                         .font(.caption)
                         .foregroundStyle(TokenBarStyle.muted)
-                } else if filteredPromptHistory.isEmpty {
+                } else if promptHistoryPage.totalCount == 0 {
+                    Text(promptEmptyMessage)
+                        .font(.caption)
+                        .foregroundStyle(TokenBarStyle.muted)
+                } else if pagePrompts.isEmpty {
                     Text("No prompts match the current search or cluster.")
                         .font(.caption)
                         .foregroundStyle(TokenBarStyle.muted)
@@ -517,13 +532,21 @@ struct ProjectDetailView: View {
                 }
             }
         }
-        .task(id: promptMetricsTaskID) {
-            await rebuildPromptMetrics()
+        .task(id: promptHistoryTaskID) {
+            await loadPromptHistoryPage()
         }
     }
 
     private var promptHistorySubtitle: String {
-        "\(filteredPromptHistory.count) of \(prompts.count) prompts · human \(promptMetrics.humanCount) · subagent \(promptMetrics.subagentCount) · command \(promptMetrics.commandCount)"
+        let loadingSuffix = isPromptHistoryLoading ? " · loading" : ""
+        return "\(promptHistoryPage.totalCount) prompts · human \(promptHistoryPage.kindCounts.humanCount) · subagent \(promptHistoryPage.kindCounts.subagentCount) · command \(promptHistoryPage.kindCounts.commandCount)\(loadingSuffix)"
+    }
+
+    private var promptEmptyMessage: String {
+        if !promptSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || promptClusterFilter != .all {
+            return "No prompts match the current search or cluster."
+        }
+        return "No local prompt captures for this project."
     }
 
     private var promptHistoryControls: some View {
@@ -561,7 +584,7 @@ struct ProjectDetailView: View {
             promptPage = 0
             selectedPromptID = nil
         }
-        .onChange(of: prompts.count) { _, _ in
+        .onChange(of: promptHistoryPage.totalCount) { _, _ in
             promptPage = min(promptPage, max(promptPageCount - 1, 0))
             selectedPromptID = nil
         }
@@ -643,17 +666,8 @@ struct ProjectDetailView: View {
         .padding(.top, 2)
     }
 
-    private var filteredPromptHistory: [PromptRecord] {
-        promptMetrics.filteredPrompts
-    }
-
     private var pagedPromptHistory: [PromptRecord] {
-        guard !filteredPromptHistory.isEmpty else { return [] }
-        let safePage = min(promptPage, max(promptPageCount - 1, 0))
-        let start = safePage * promptPageSize
-        let end = min(start + promptPageSize, filteredPromptHistory.count)
-        guard start < end else { return [] }
-        return Array(filteredPromptHistory[start..<end])
+        promptHistoryPage.prompts
     }
 
     private func selectedPrompt(in pagePrompts: [PromptRecord]) -> PromptRecord? {
@@ -861,22 +875,18 @@ struct ProjectDetailView: View {
     }
 
     private func promptMetadata(_ prompt: PromptRecord) -> PromptDisplayMetadata {
-        promptMetrics.metadataByPromptID[prompt.id] ?? PromptDisplayMetadata.make(prompt.content)
+        PromptDisplayMetadata.make(prompt.content)
     }
 
     private func promptCommandParts(_ content: String) -> PromptCommandParts? {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         let lines = trimmed.split(whereSeparator: \.isNewline).map(String.init)
         guard let firstLine = lines.first?.trimmingCharacters(in: .whitespacesAndNewlines),
-              firstLine.hasPrefix("/") else {
+              let command = promptSlashCommandToken(firstLine) else {
             return nil
         }
-        let afterSlash = firstLine.dropFirst()
-        let commandBody = afterSlash.prefix { !$0.isWhitespace && $0 != "/" }
-        guard !commandBody.isEmpty else { return nil }
-        let command = "/" + String(commandBody)
-        let inlineArguments = afterSlash
-            .dropFirst(commandBody.count)
+        let inlineArguments = firstLine
+            .dropFirst(command.count)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let restArguments = lines.dropFirst()
             .joined(separator: "\n")
@@ -921,77 +931,80 @@ struct ProjectDetailView: View {
     }
 
     private var promptPageCount: Int {
-        max(1, Int(ceil(Double(filteredPromptHistory.count) / Double(promptPageSize))))
+        max(1, Int(ceil(Double(promptHistoryPage.totalCount) / Double(promptPageSize))))
     }
 
     private var promptPageLabel: String {
-        guard !filteredPromptHistory.isEmpty else { return "0 of 0" }
+        guard promptHistoryPage.totalCount > 0 else { return "0 of 0" }
         let safePage = min(promptPage, max(promptPageCount - 1, 0))
         let start = safePage * promptPageSize + 1
-        let end = min(start + promptPageSize - 1, filteredPromptHistory.count)
-        return "\(start)-\(end) of \(filteredPromptHistory.count) · page \(safePage + 1)/\(promptPageCount)"
-    }
-
-    private func promptClusterCount(_ cluster: PromptCluster) -> Int {
-        switch cluster {
-        case .human:
-            promptMetrics.humanCount
-        case .subagent:
-            promptMetrics.subagentCount
-        case .command:
-            promptMetrics.commandCount
-        }
+        let end = min(start + promptPageSize - 1, promptHistoryPage.totalCount)
+        return "\(start)-\(end) of \(promptHistoryPage.totalCount) · page \(safePage + 1)/\(promptPageCount)"
     }
 
     private func promptFilterCount(_ filter: PromptClusterFilter) -> Int {
         switch filter {
         case .all:
-            prompts.count
+            promptHistoryPage.kindCounts.totalCount
         case .human:
-            promptClusterCount(.human)
+            promptHistoryPage.kindCounts.humanCount
         case .subagent:
-            promptClusterCount(.subagent)
+            promptHistoryPage.kindCounts.subagentCount
         case .command:
-            promptClusterCount(.command)
+            promptHistoryPage.kindCounts.commandCount
         }
     }
 
     private func promptCluster(for prompt: PromptRecord) -> PromptCluster {
-        promptMetrics.clustersByPromptID[prompt.id] ?? PromptCluster.classify(prompt)
+        PromptCluster.classify(prompt)
     }
 
-    private var promptMetricsTaskID: String {
-        "\(prompts.count)|\(prompts.first?.id ?? "none")|\(prompts.last?.id ?? "none")|\(promptSearchText)|\(promptClusterFilter.rawValue)"
+    private var promptHistoryTaskID: String {
+        [
+            detail.projectName,
+            "\(promptPage)",
+            "\(promptPageSize)",
+            promptSearchText,
+            promptClusterFilter.rawValue,
+            runtimeModel.promptSignature,
+        ].joined(separator: "|")
     }
 
     @MainActor
-    private func rebuildPromptMetrics() async {
-        let prompts = prompts
+    private func loadPromptHistoryPage() async {
         let query = promptSearchText
         let filter = promptClusterFilter
+        let page = promptPage
         let started = Date()
+        isPromptHistoryLoading = true
         TokenBarTelemetry.event(
-            "project.detail.prompt.filter.begin",
-            metadata: "project=\(detail.projectName) prompts=\(prompts.count) filter=\(filter.rawValue) query_chars=\(query.count)",
+            "project.detail.prompt.page.begin",
+            metadata: "project=\(detail.projectName) page=\(page) filter=\(filter.rawValue) query_chars=\(query.count)",
             success: true
         )
-        let metrics = await Task.detached(priority: .utility) {
-            PromptHistoryFilterMetrics.make(
-                prompts: prompts,
-                query: query,
-                filter: filter
-            )
-        }.value
+        let pageResult = await runtimeModel.projectPromptHistoryPage(
+            for: detail.projectName,
+            limit: promptPageSize,
+            offset: page * promptPageSize,
+            includeContent: true,
+            query: query,
+            kindFilter: filter.coreFilter
+        )
         guard !Task.isCancelled,
               self.promptSearchText == query,
-              self.promptClusterFilter == filter else { return }
-        promptMetrics = metrics
-        hasPromptMetricsLoaded = true
+              self.promptClusterFilter == filter,
+              self.promptPage == page else {
+            isPromptHistoryLoading = false
+            return
+        }
+        promptHistoryPage = pageResult
+        hasPromptHistoryLoaded = true
+        isPromptHistoryLoading = false
         promptPage = min(promptPage, max(promptPageCount - 1, 0))
         TokenBarTelemetry.timing(
-            "project.detail.prompt.filter",
+            "project.detail.prompt.page",
             startedAt: started,
-            metadata: "project=\(detail.projectName) prompts=\(prompts.count) filtered=\(metrics.filteredPrompts.count) filter=\(filter.rawValue)"
+            metadata: "project=\(detail.projectName) page=\(page) rows=\(pageResult.prompts.count) total=\(pageResult.totalCount) filter=\(filter.rawValue)"
         )
     }
 
@@ -1150,75 +1163,6 @@ private struct ProjectDetailRangeMetrics: Sendable, Hashable {
     }
 }
 
-private struct PromptHistoryFilterMetrics: Sendable, Hashable {
-    let filteredPrompts: [PromptRecord]
-    let clustersByPromptID: [String: PromptCluster]
-    let metadataByPromptID: [String: PromptDisplayMetadata]
-    let humanCount: Int
-    let subagentCount: Int
-    let commandCount: Int
-
-    static let empty = PromptHistoryFilterMetrics(
-        filteredPrompts: [],
-        clustersByPromptID: [:],
-        metadataByPromptID: [:],
-        humanCount: 0,
-        subagentCount: 0,
-        commandCount: 0
-    )
-
-    static func make(
-        prompts: [PromptRecord],
-        query: String,
-        filter: PromptClusterFilter
-    ) -> PromptHistoryFilterMetrics {
-        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        var filtered: [PromptRecord] = []
-        filtered.reserveCapacity(min(prompts.count, 200))
-        var clustersByPromptID: [String: PromptCluster] = [:]
-        clustersByPromptID.reserveCapacity(prompts.count)
-        var metadataByPromptID: [String: PromptDisplayMetadata] = [:]
-        metadataByPromptID.reserveCapacity(prompts.count)
-        var humanCount = 0
-        var subagentCount = 0
-        var commandCount = 0
-
-        for prompt in prompts {
-            let cluster = PromptCluster.classify(prompt)
-            clustersByPromptID[prompt.id] = cluster
-            metadataByPromptID[prompt.id] = PromptDisplayMetadata.make(prompt.content)
-            switch cluster {
-            case .human:
-                humanCount += 1
-            case .subagent:
-                subagentCount += 1
-            case .command:
-                commandCount += 1
-            }
-
-            guard filter.includes(cluster) else {
-                continue
-            }
-            if normalizedQuery.isEmpty
-                || prompt.content.localizedCaseInsensitiveContains(normalizedQuery)
-                || prompt.sessionId.localizedCaseInsensitiveContains(normalizedQuery)
-                || prompt.agent.displayName.localizedCaseInsensitiveContains(normalizedQuery)
-                || cluster.displayName.localizedCaseInsensitiveContains(normalizedQuery) {
-                filtered.append(prompt)
-            }
-        }
-
-        return PromptHistoryFilterMetrics(
-            filteredPrompts: filtered,
-            clustersByPromptID: clustersByPromptID,
-            metadataByPromptID: metadataByPromptID,
-            humanCount: humanCount,
-            subagentCount: subagentCount,
-            commandCount: commandCount
-        )
-    }
-}
-
 private struct PromptDisplayMetadata: Sendable, Hashable {
     let characterCount: Int
     let lineCount: Int
@@ -1233,6 +1177,30 @@ private struct PromptDisplayMetadata: Sendable, Hashable {
 private struct PromptCommandParts: Sendable, Hashable {
     let command: String
     let arguments: String
+}
+
+private func promptSlashCommandToken(_ firstLine: String) -> String? {
+    guard let firstToken = firstLine
+        .split(whereSeparator: \.isWhitespace)
+        .first
+        .map(String.init),
+        firstToken.hasPrefix("/") else {
+        return nil
+    }
+
+    let commandBody = firstToken.dropFirst()
+    guard !commandBody.isEmpty,
+          !commandBody.contains("/") else {
+        return nil
+    }
+
+    guard commandBody.allSatisfy({ character in
+        character.isLetter || character.isNumber || character == "-" || character == "_"
+    }) else {
+        return nil
+    }
+
+    return "/" + String(commandBody)
 }
 
 private enum PromptCluster: String, CaseIterable, Hashable, Sendable {
@@ -1299,16 +1267,10 @@ private enum PromptCluster: String, CaseIterable, Hashable, Sendable {
         guard let firstLine = content
             .split(whereSeparator: \.isNewline)
             .first?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-            firstLine.hasPrefix("/") else {
+            .trimmingCharacters(in: .whitespacesAndNewlines) else {
             return false
         }
-        let command = firstLine
-            .dropFirst()
-            .prefix { !$0.isWhitespace && $0 != "/" }
-        return !command.isEmpty && command.allSatisfy { character in
-            character.isLetter || character.isNumber || character == "-" || character == "_"
-        }
+        return promptSlashCommandToken(firstLine) != nil
     }
 }
 
@@ -1330,6 +1292,19 @@ private enum PromptClusterFilter: String, CaseIterable, Identifiable, Sendable {
             "Subagent"
         case .command:
             "Command"
+        }
+    }
+
+    var coreFilter: PromptHistoryKindFilter {
+        switch self {
+        case .all:
+            .all
+        case .human:
+            .human
+        case .subagent:
+            .subagent
+        case .command:
+            .command
         }
     }
 

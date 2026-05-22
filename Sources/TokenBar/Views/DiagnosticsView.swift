@@ -7,6 +7,8 @@ struct DiagnosticsView: View {
     @State private var showWipeConfirm = false     // CL-P1-021
     @State private var wipeAck = ""                // CL-P1-021: type "WIPE"
     @State private var expandedSourceId: String?   // CL-P1-023
+    @State private var derivedRows = DiagnosticsDerivedRows.empty
+    @State private var isBuildingDerivedRows = false
     @AppStorage("tokenbar.pricingOverrides") private var pricingOverridesJSON = "{}"
 
     var body: some View {
@@ -26,6 +28,9 @@ struct DiagnosticsView: View {
             warningsCard
             checkpointsCard
         }
+        .task(id: diagnosticsDerivedRowsTaskID) {
+            await rebuildDerivedRows()
+        }
     }
 
     private var header: some View {
@@ -40,11 +45,11 @@ struct DiagnosticsView: View {
                 }
                 Spacer()
                 TopRightCluster(
-                    todayCost: tokenbarEstimatedCost(events: runtimeModel.events, days: 1),
-                    rangeCost: tokenbarEstimatedCost(events: runtimeModel.events, days: 30),
+                    todayCost: runtimeModel.popoverSnapshot.todayCost,
+                    rangeCost: runtimeModel.popoverSnapshot.last30Cost,
                     todayTokens: runtimeModel.snapshot.today.totalTokens,
                     totalTokens: runtimeModel.snapshot.last30Summary.totalTokens,
-                    todaySessions: tokenbarSessionCount(runtimeModel.events),
+                    todaySessions: runtimeModel.popoverSnapshot.todaySessionCount,
                     refreshState: runtimeModel.refreshState,
                     onRefresh: { Task { await runtimeModel.refresh() } }
                 )
@@ -108,6 +113,49 @@ struct DiagnosticsView: View {
         }
     }
 
+    private var diagnosticsDerivedRowsTaskID: String {
+        [
+            runtimeModel.eventSignature,
+            runtimeModel.customSources.map { "\($0.id):\($0.name):\($0.enabled)" }.joined(separator: ","),
+            runtimeModel.diagnostics.dataSourceStatuses.map { "\($0.sourceName):\($0.rootPath):\($0.discoveredFileCount):\($0.isReadable)" }.joined(separator: ","),
+            runtimeModel.diagnostics.lastIndexedAt.map { Int64(($0.timeIntervalSince1970 * 1_000).rounded()).description } ?? "never",
+        ].joined(separator: "|")
+    }
+
+    @MainActor
+    private func rebuildDerivedRows() async {
+        let started = Date()
+        let events = runtimeModel.events
+        let customSources = runtimeModel.customSources
+        let statuses = runtimeModel.diagnostics.dataSourceStatuses
+        let lastIndexedAt = runtimeModel.diagnostics.lastIndexedAt
+        isBuildingDerivedRows = true
+        TokenBarTelemetry.event(
+            "diagnostics.derived_rows.begin",
+            metadata: "events=\(events.count) custom_sources=\(customSources.count) statuses=\(statuses.count)",
+            success: true
+        )
+        let rows = await Task.detached(priority: .utility) {
+            DiagnosticsDerivedRows.make(
+                events: events,
+                customSources: customSources,
+                statuses: statuses,
+                lastIndexedAt: lastIndexedAt
+            )
+        }.value
+        guard !Task.isCancelled else {
+            isBuildingDerivedRows = false
+            return
+        }
+        derivedRows = rows
+        isBuildingDerivedRows = false
+        TokenBarTelemetry.timing(
+            "diagnostics.derived_rows",
+            startedAt: started,
+            metadata: "source_rows=\(rows.sourceRows.count) audit_rows=\(rows.dataAuditRows.count)"
+        )
+    }
+
     private func estimatedReparseSeconds() -> Int {
         // 1 second per ~100 events, min 1s, capped at 60s for UI display
         max(1, min(runtimeModel.eventCount / 100, 60))
@@ -120,7 +168,7 @@ struct DiagnosticsView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Token Data Audit")
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        Text("Indexed raw totals by source. Cache share is calculated from stored usage_events.")
+                        Text("Indexed raw totals by configured source. Cache share is calculated from stored usage_events.")
                             .font(.caption2)
                             .foregroundStyle(TokenBarStyle.muted)
                     }
@@ -163,10 +211,11 @@ struct DiagnosticsView: View {
     @ViewBuilder
     private func sourceEventsDrawer(matching path: String) -> some View {
         let prefix = (path as NSString).expandingTildeInPath
-        let matched = runtimeModel.events
-            .filter { $0.sourcePath.hasPrefix(prefix) || $0.sourcePath.contains(path) }
-            .sorted { $0.timestamp > $1.timestamp }
-            .prefix(50)
+        let matched = Array(
+            runtimeModel.events.reversed().lazy
+                .filter { $0.sourcePath.hasPrefix(prefix) || $0.sourcePath.contains(path) }
+                .prefix(50)
+        )
         if matched.isEmpty {
             Text("No indexed events for this source yet.")
                 .font(.caption)
@@ -174,7 +223,7 @@ struct DiagnosticsView: View {
                 .padding(8)
         } else {
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(Array(matched), id: \.id) { event in
+                ForEach(matched, id: \.id) { event in
                     HStack(spacing: 10) {
                         Text(event.timestamp.formatted(.dateTime.month(.twoDigits).day(.twoDigits).hour().minute()))
                             .font(.system(size: 10.5, design: .monospaced))
@@ -205,7 +254,7 @@ struct DiagnosticsView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Button {
                             withAnimation(.easeOut(duration: 0.18)) {
-                                expandedSourceId = (expandedSourceId == row.id.uuidString) ? nil : row.id.uuidString
+                                expandedSourceId = (expandedSourceId == row.id) ? nil : row.id
                             }
                         } label: {
                             HStack(spacing: 16) {
@@ -253,7 +302,7 @@ struct DiagnosticsView: View {
                         .buttonStyle(.plain)
                         // CL-P1-023: drawer listing the last 50 indexed events
                         // for the matching source path.
-                        if expandedSourceId == row.id.uuidString {
+                        if expandedSourceId == row.id {
                             sourceEventsDrawer(matching: row.path)
                                 .transition(.opacity)
                         }
@@ -367,6 +416,7 @@ struct DiagnosticsView: View {
         if !runtimeModel.indexingState.sources.isEmpty {
             return runtimeModel.indexingState.sources.map { source in
                 SourceRow(
+                    id: "indexing|\(source.sourceName)|\(source.rootPath)",
                     name: source.sourceName,
                     path: source.rootPath,
                     state: sourceRowState(source.phase),
@@ -377,35 +427,20 @@ struct DiagnosticsView: View {
             }
         }
 
-        if runtimeModel.diagnostics.dataSourceStatuses.isEmpty {
+        if derivedRows.sourceRows.isEmpty, isBuildingDerivedRows {
             return [
-                SourceRow(name: "Claude Code", path: "~/.claude/projects/", state: .pending, events: "pending", when: "after refresh", note: nil),
-                SourceRow(name: "Codex", path: "~/.codex/sessions/", state: .pending, events: "pending", when: "after refresh", note: nil),
-                SourceRow(name: "Hermes", path: "~/.hermes/state.db", state: .pending, events: "pending", when: "after refresh", note: "session-level model attribution"),
+                SourceRow(
+                    id: "diagnostics-loading",
+                    name: "Sources",
+                    path: "building source counts",
+                    state: .pending,
+                    events: "loading",
+                    when: "now",
+                    note: "counting indexed events off the main thread"
+                )
             ]
         }
-
-        return runtimeModel.diagnostics.dataSourceStatuses.map { status in
-            let eventCount = runtimeModel.events.filter { event in
-                event.sourcePath.hasPrefix(status.rootPath.replacingOccurrences(of: "~", with: NSHomeDirectory()))
-            }.count
-            let note: String?
-            if !status.isReadable {
-                note = "path unavailable - will retry"
-            } else if status.sourceName.localizedCaseInsensitiveContains("Hermes") {
-                note = "session-level model attribution"
-            } else {
-                note = nil
-            }
-            return SourceRow(
-                name: status.sourceName,
-                path: status.rootPath,
-                state: status.isReadable ? .ok : .err,
-                events: eventCount > 0 ? "\(eventCount.formatted()) events" : "\(status.discoveredFileCount.formatted()) files",
-                when: tokenbarRelativeTime(runtimeModel.diagnostics.lastIndexedAt),
-                note: note
-            )
-        }
+        return derivedRows.sourceRows
     }
 
     private func sourceRowState(_ phase: TokenBarIndexingSourcePhase) -> SourceRow.State {
@@ -462,23 +497,10 @@ struct DiagnosticsView: View {
     }
 
     private var dataAuditRows: [DataAuditRow] {
-        let grouped = Dictionary(grouping: runtimeModel.events, by: { $0.agent.displayName })
-        let rows = grouped.map { agent, events -> DataAuditRow in
-            let summary = UsageSummary(
-                inputTokens: events.reduce(0) { $0 + $1.inputTokens },
-                outputTokens: events.reduce(0) { $0 + $1.outputTokens },
-                cacheTokens: events.reduce(0) { $0 + $1.cacheTokens }
-            )
-            return DataAuditRow(name: agent, summary: summary)
+        if derivedRows.dataAuditRows.isEmpty, isBuildingDerivedRows {
+            return [DataAuditRow(name: "Building audit", summary: UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0))]
         }
-        .sorted { $0.summary.totalTokens > $1.summary.totalTokens }
-
-        let total = UsageSummary(
-            inputTokens: runtimeModel.events.reduce(0) { $0 + $1.inputTokens },
-            outputTokens: runtimeModel.events.reduce(0) { $0 + $1.outputTokens },
-            cacheTokens: runtimeModel.events.reduce(0) { $0 + $1.cacheTokens }
-        )
-        return [DataAuditRow(name: "All sources", summary: total)] + rows
+        return derivedRows.dataAuditRows
     }
 
     private func auditHead(_ text: String, align: Alignment = .trailing) -> some View {
@@ -521,15 +543,210 @@ struct DiagnosticsView: View {
     }
 }
 
-private struct SourceRow: Identifiable {
-    enum State {
+private struct DiagnosticsDerivedRows: Sendable, Hashable {
+    let sourceRows: [SourceRow]
+    let dataAuditRows: [DataAuditRow]
+
+    static let empty = DiagnosticsDerivedRows(sourceRows: [], dataAuditRows: [])
+
+    static func make(
+        events: [UsageEvent],
+        customSources: [CustomSourceRecord],
+        statuses: [UsageDataSourceStatus],
+        lastIndexedAt: Date?
+    ) -> DiagnosticsDerivedRows {
+        var builtInCounts: [AgentKind: Int] = [:]
+        var customCounts: [String: Int] = [:]
+        var auditTotals: [String: UsageSummary] = [:]
+        var total = UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0)
+        let allCustomNamesByID = Dictionary(uniqueKeysWithValues: customSources.map { ($0.id, $0.name) })
+        let enabledCustomNamesByID = Dictionary(uniqueKeysWithValues: customSources.filter(\.enabled).map { ($0.id, $0.name) })
+
+        for event in events {
+            let customID = customSourceID(from: event.id)
+            if let customID, allCustomNamesByID[customID] != nil {
+                customCounts[customID, default: 0] += 1
+            } else {
+                builtInCounts[event.agent, default: 0] += 1
+            }
+
+            let auditName = customID.flatMap { enabledCustomNamesByID[$0] } ?? event.agent.displayName
+            auditTotals[auditName] = add(event, to: auditTotals[auditName])
+            total = add(event, to: total)
+        }
+
+        let sourceRows: [SourceRow]
+        if statuses.isEmpty {
+            let builtInRows = [
+                builtInSourceRow(
+                    id: "builtin|claude",
+                    name: "Claude Code",
+                    path: "~/.claude/projects/",
+                    count: builtInCounts[.claudeCode, default: 0],
+                    lastIndexedAt: lastIndexedAt,
+                    note: nil
+                ),
+                builtInSourceRow(
+                    id: "builtin|codex",
+                    name: "Codex",
+                    path: "~/.codex/sessions/",
+                    count: builtInCounts[.codex, default: 0],
+                    lastIndexedAt: lastIndexedAt,
+                    note: nil
+                ),
+                builtInSourceRow(
+                    id: "builtin|hermes",
+                    name: "Hermes",
+                    path: "~/.hermes/state.db",
+                    count: builtInCounts[.hermes, default: 0],
+                    lastIndexedAt: lastIndexedAt,
+                    note: "session-level model attribution"
+                ),
+            ]
+            sourceRows = builtInRows + customSourceRows(
+                customSources: customSources,
+                customCounts: customCounts,
+                excluding: []
+            )
+        } else {
+            let statusRows = statuses.map { status in
+                let count = countForStatus(
+                    status,
+                    builtInCounts: builtInCounts,
+                    customSources: customSources,
+                    customCounts: customCounts
+                )
+                let note: String?
+                if !status.isReadable {
+                    note = "path unavailable - will retry"
+                } else if status.sourceName.localizedCaseInsensitiveContains("Hermes") {
+                    note = "session-level model attribution"
+                } else {
+                    note = nil
+                }
+                return SourceRow(
+                    id: "status|\(status.sourceName)|\(status.rootPath)",
+                    name: status.sourceName,
+                    path: status.rootPath,
+                    state: status.isReadable ? .ok : .err,
+                    events: count > 0 ? "\(count.formatted()) events" : "\(status.discoveredFileCount.formatted()) files",
+                    when: tokenbarRelativeTime(lastIndexedAt),
+                    note: note
+                )
+            }
+            let existingPaths = Set(statuses.map { normalizedPath($0.rootPath) })
+            sourceRows = statusRows + customSourceRows(
+                customSources: customSources,
+                customCounts: customCounts,
+                excluding: existingPaths
+            )
+        }
+
+        let auditRows = auditTotals.map { DataAuditRow(name: $0.key, summary: $0.value) }
+            .sorted { $0.summary.totalTokens > $1.summary.totalTokens }
+
+        return DiagnosticsDerivedRows(
+            sourceRows: sourceRows,
+            dataAuditRows: [DataAuditRow(name: "All sources", summary: total)] + auditRows
+        )
+    }
+
+    private static func add(_ event: UsageEvent, to summary: UsageSummary?) -> UsageSummary {
+        let summary = summary ?? UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0)
+        return UsageSummary(
+            inputTokens: summary.inputTokens + event.inputTokens,
+            outputTokens: summary.outputTokens + event.outputTokens,
+            cacheTokens: summary.cacheTokens + event.cacheTokens
+        )
+    }
+
+    private static func customSourceID(from eventID: String) -> String? {
+        guard eventID.hasPrefix("custom:") else { return nil }
+        let remainder = eventID.dropFirst("custom:".count)
+        guard let end = remainder.firstIndex(of: ":") else { return nil }
+        return String(remainder[..<end])
+    }
+
+    private static func builtInSourceRow(
+        id: String,
+        name: String,
+        path: String,
+        count: Int,
+        lastIndexedAt: Date?,
+        note: String?
+    ) -> SourceRow {
+        SourceRow(
+            id: id,
+            name: name,
+            path: path,
+            state: count > 0 ? .ok : .pending,
+            events: count > 0 ? "\(count.formatted()) events" : "pending",
+            when: count > 0 ? tokenbarRelativeTime(lastIndexedAt) : "after refresh",
+            note: note
+        )
+    }
+
+    private static func customSourceRows(
+        customSources: [CustomSourceRecord],
+        customCounts: [String: Int],
+        excluding existingPaths: Set<String>
+    ) -> [SourceRow] {
+        customSources.compactMap { source in
+            guard !existingPaths.contains(normalizedPath(source.directory)) else { return nil }
+            let eventCount = customCounts[source.id, default: 0]
+            let state: SourceRow.State = source.enabled ? (eventCount > 0 ? .ok : .pending) : .off
+            return SourceRow(
+                id: "custom|\(source.id)",
+                name: source.name,
+                path: source.directory,
+                state: state,
+                events: eventCount > 0 ? "\(eventCount.formatted()) events" : "pending",
+                when: source.enabled ? "waiting for index" : "disabled",
+                note: source.enabled ? "\(source.engine.displayName) · \(source.globPattern)" : "disabled"
+            )
+        }
+    }
+
+    private static func countForStatus(
+        _ status: UsageDataSourceStatus,
+        builtInCounts: [AgentKind: Int],
+        customSources: [CustomSourceRecord],
+        customCounts: [String: Int]
+    ) -> Int {
+        if let custom = customSources.first(where: {
+            $0.name == status.sourceName || normalizedPath($0.directory) == normalizedPath(status.rootPath)
+        }) {
+            return customCounts[custom.id, default: 0]
+        }
+
+        let sourceName = status.sourceName.lowercased()
+        let rootPath = status.rootPath.lowercased()
+        if sourceName.contains("codex") || rootPath.contains(".codex") {
+            return builtInCounts[.codex, default: 0]
+        }
+        if sourceName.contains("claude") || rootPath.contains(".claude") {
+            return builtInCounts[.claudeCode, default: 0]
+        }
+        if sourceName.contains("hermes") || rootPath.contains(".hermes") {
+            return builtInCounts[.hermes, default: 0]
+        }
+        return 0
+    }
+
+    private static func normalizedPath(_ path: String) -> String {
+        CodexDataSource.expandHome(in: path).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+}
+
+private struct SourceRow: Identifiable, Sendable, Hashable {
+    enum State: Sendable, Hashable {
         case ok
         case pending
         case off
         case err
     }
 
-    let id = UUID()
+    let id: String
     let name: String
     let path: String
     let state: State
@@ -574,8 +791,8 @@ private struct CheckpointRow: Identifiable {
     let duration: String
 }
 
-private struct DataAuditRow: Identifiable {
-    let id = UUID()
+private struct DataAuditRow: Identifiable, Sendable, Hashable {
+    var id: String { name }
     let name: String
     let summary: UsageSummary
 

@@ -53,6 +53,12 @@ struct ClaudeDataSourceTests {
     }
 
     @Test
+    func readableProjectNamePreservesHyphenatedWorkspaceSlugs() {
+        #expect(ClaudeDataSource.readableProjectName(fromSlug: "-Users-travis-Documents-TeamFile-claude-workspace-observ-cli") == "observ-cli")
+        #expect(ClaudeDataSource.readableProjectName(fromSlug: "-Users-travis-Documents-TeamFile-claude-workspace-observ--claude-worktrees-fix-alarm-rule-rel-datasource") == "fix-alarm-rule-rel-datasource")
+    }
+
+    @Test
     func projectSlugForSubagentFileUsesParentProjectDirectory() throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

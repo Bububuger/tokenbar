@@ -10,6 +10,7 @@ struct TokenBarPopoverSnapshot: Sendable, Hashable {
     let warningCount: Int
     let lastIndexedAt: Date?
     let todayCost: Double
+    let last30Cost: Double
     let todaySessionCount: Int
     let yesterdayDeltaText: String
     let inputShare: String
@@ -48,6 +49,7 @@ struct TokenBarPopoverSnapshot: Sendable, Hashable {
         let last30Start = calendar.date(byAdding: .day, value: -29, to: todayStart) ?? todayStart
 
         var todayCost = 0.0
+        var last30Cost = 0.0
         var todaySessionIDs = Set<String>()
         var yesterdayTotal = 0
         var projectCosts: [String: Double] = [:]
@@ -74,6 +76,7 @@ struct TokenBarPopoverSnapshot: Sendable, Hashable {
                 continue
             }
 
+            last30Cost += eventCost
             projectCosts[event.projectName, default: 0] += eventCost
             agentCosts[agentName, default: 0] += eventCost
             projectAgentTokens[event.projectName, default: [:]][agentName, default: 0] += eventTokens
@@ -161,6 +164,7 @@ struct TokenBarPopoverSnapshot: Sendable, Hashable {
             warningCount: snapshot.warningCount,
             lastIndexedAt: diagnostics.lastIndexedAt,
             todayCost: todayCost,
+            last30Cost: last30Cost,
             todaySessionCount: todaySessionIDs.count,
             yesterdayDeltaText: yesterdayDeltaText(todayTokens: snapshot.today.totalTokens, yesterdayTokens: yesterdayTotal),
             inputShare: shareText(snapshot.today.inputTokens, total: snapshot.today.totalTokens),

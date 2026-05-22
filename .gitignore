@@ -5,6 +5,7 @@
 .swiftpm/
 .codex/
 .harness/
+.tmp/
 dist/
 tokenbar.zip
 *.tar.gz

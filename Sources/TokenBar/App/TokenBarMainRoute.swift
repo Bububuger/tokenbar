@@ -1,4 +1,4 @@
-enum TokenBarMainRoute: Equatable {
+enum TokenBarMainRoute: Equatable, Hashable {
     case today
     case diagnostics
     case settings

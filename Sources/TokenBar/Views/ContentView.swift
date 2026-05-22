@@ -40,36 +40,44 @@ struct ContentView: View {
 
             ZStack {
                 TokenBarGlassBackground()
-                if runtimeModel.mainRoute == .settings {
-                    SettingsView()
-                        .environmentObject(runtimeModel)
-                        .onAppear { recordRouteViewAppear(.settings) }
-                } else {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: TokenBarStyle.sectionSpacing) {
-                            switch runtimeModel.mainRoute {
-                            case .today:
-                                OverviewPage(
-                                    selectedRange: $selectedRange,
-                                    rangeMetrics: $overviewRangeMetrics,
-                                    isRangeLoading: $isOverviewRangeUpdating
-                                )
-                                    .environmentObject(runtimeModel)
-                                    .onAppear { recordRouteViewAppear(.today) }
-                            case .diagnostics:
-                                DiagnosticsView()
-                                    .environmentObject(runtimeModel)
-                                    .onAppear { recordRouteViewAppear(.diagnostics) }
-                            case .settings:
-                                EmptyView()
-                            case .project(let projectName):
-                                projectPage(projectName)
+                // Route swaps cross-fade over 220ms — `.id(route)` forces
+                // SwiftUI to treat each route as a distinct view so
+                // `.transition(.opacity)` fires on swap.
+                Group {
+                    if runtimeModel.mainRoute == .settings {
+                        SettingsView()
+                            .environmentObject(runtimeModel)
+                            .onAppear { recordRouteViewAppear(.settings) }
+                    } else {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: TokenBarStyle.sectionSpacing) {
+                                switch runtimeModel.mainRoute {
+                                case .today:
+                                    OverviewPage(
+                                        selectedRange: $selectedRange,
+                                        rangeMetrics: $overviewRangeMetrics,
+                                        isRangeLoading: $isOverviewRangeUpdating
+                                    )
+                                        .environmentObject(runtimeModel)
+                                        .onAppear { recordRouteViewAppear(.today) }
+                                case .diagnostics:
+                                    DiagnosticsView()
+                                        .environmentObject(runtimeModel)
+                                        .onAppear { recordRouteViewAppear(.diagnostics) }
+                                case .settings:
+                                    EmptyView()
+                                case .project(let projectName):
+                                    projectPage(projectName)
+                                }
                             }
+                            .padding(TokenBarStyle.pagePadding)
                         }
-                        .padding(TokenBarStyle.pagePadding)
                     }
                 }
+                .id(runtimeModel.mainRoute)
+                .transition(.opacity)
             }
+            .animation(.smooth(duration: 0.22), value: runtimeModel.mainRoute)
         }
         .frame(minWidth: 1280, minHeight: 980)
         .foregroundStyle(TokenBarStyle.foreground)
@@ -246,44 +254,55 @@ struct ContentView: View {
 
     @ViewBuilder
     private func projectPage(_ projectName: String) -> some View {
-        if let detail = runtimeModel.projectDetail, detail.projectName == projectName {
-            let pageData = projectPageData?.isCurrent(
-                projectName: projectName,
-                selection: selectedRange,
-                eventSignature: runtimeModel.eventSignature,
-                pricingOverridesJSON: pricingOverridesJSON
-            ) == true
-                ? projectPageData
-                : ProjectPageData.placeholder(projectName: projectName, selection: selectedRange, detail: detail)
-            ProjectDetailView(
-                detail: detail,
-                projectPath: pageData?.projectPath,
-                allTimeSummary: pageData?.allTimeSummary ?? detail.summary,
-                allTimeCost: pageData?.allTimeCost ?? detail.estimatedCost,
-                events: pageData?.events ?? [],
-                selectedRange: $selectedRange,
-                refreshState: runtimeModel.refreshState,
-                todayCost: pageData?.todayCost ?? 0,
-                rangeCost: pageData?.rangeCost ?? detail.estimatedCost.totalCost,
-                todayTokens: pageData?.todayTokens ?? 0,
-                totalTokens: pageData?.totalTokens ?? detail.summary.totalTokens,
-                todaySessions: pageData?.todaySessions ?? detail.recentSessions.count,
-                onRefresh: { Task { await runtimeModel.refresh() } },
-                onBack: { runtimeModel.navigate(to: .today, source: "project.back") }
-            )
-            .id(projectName)
-            .onAppear { recordRouteViewAppear(.project(projectName)) }
-        } else {
-            ProjectDetailPendingView(projectName: projectName)
-                .onAppear {
-                    recordRouteViewAppear(.project(projectName))
-                    TokenBarTelemetry.event(
-                        "main.project.pending.appear",
-                        metadata: "project=\(projectName) events=\(runtimeModel.eventCount)",
-                        success: true
-                    )
+        let isDetailReady = (runtimeModel.projectDetail?.projectName == projectName)
+        Group {
+            if let detail = runtimeModel.projectDetail, detail.projectName == projectName {
+                let pageData = projectPageData?.isCurrent(
+                    projectName: projectName,
+                    selection: selectedRange,
+                    eventSignature: runtimeModel.eventSignature,
+                    pricingOverridesJSON: pricingOverridesJSON
+                ) == true
+                    ? projectPageData
+                    : ProjectPageData.placeholder(projectName: projectName, selection: selectedRange, detail: detail)
+                ProjectDetailView(
+                    detail: detail,
+                    projectPath: pageData?.projectPath,
+                    allTimeSummary: pageData?.allTimeSummary ?? detail.summary,
+                    allTimeCost: pageData?.allTimeCost ?? detail.estimatedCost,
+                    events: pageData?.events ?? [],
+                    selectedRange: $selectedRange,
+                    refreshState: runtimeModel.refreshState,
+                    todayCost: pageData?.todayCost ?? 0,
+                    rangeCost: pageData?.rangeCost ?? detail.estimatedCost.totalCost,
+                    todayTokens: pageData?.todayTokens ?? 0,
+                    totalTokens: pageData?.totalTokens ?? detail.summary.totalTokens,
+                    todaySessions: pageData?.todaySessions ?? detail.recentSessions.count,
+                    onRefresh: { Task { await runtimeModel.refresh() } },
+                    onBack: { runtimeModel.navigate(to: .today, source: "project.back") }
+                )
+                .id(projectName)
+                .onAppear { recordRouteViewAppear(.project(projectName)) }
+                .transition(.opacity)
+            } else {
+                // 180ms grace before the pending placeholder shows — if real
+                // data arrives within that window the user only ever sees the
+                // outer route cross-fade, no flash of placeholder.
+                DelayedAppear(delay: .milliseconds(180), fadeIn: .easeOut(duration: 0.12)) {
+                    ProjectDetailPendingView(projectName: projectName)
+                        .onAppear {
+                            recordRouteViewAppear(.project(projectName))
+                            TokenBarTelemetry.event(
+                                "main.project.pending.appear",
+                                metadata: "project=\(projectName) events=\(runtimeModel.eventCount)",
+                                success: true
+                            )
+                        }
                 }
+                .transition(.opacity)
+            }
         }
+        .animation(.easeOut(duration: 0.22), value: isDetailReady)
     }
 
     private func beginRouteTransition(from previous: TokenBarMainRoute, to route: TokenBarMainRoute) {
@@ -1409,6 +1428,34 @@ private struct OnboardingCard: View {
                     .padding(.top, 4)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// Holds back a view for `delay` after the wrapper appears, then fades it in.
+/// Used to suppress loading placeholders during fast async fetches so the user
+/// only ever sees a placeholder when a load truly takes longer than the grace
+/// window.
+private struct DelayedAppear<Content: View>: View {
+    var delay: Duration = .milliseconds(180)
+    var fadeIn: Animation = .easeOut(duration: 0.12)
+    @ViewBuilder var content: () -> Content
+
+    @State private var ready = false
+
+    var body: some View {
+        Group {
+            if ready {
+                content()
+                    .transition(.opacity)
+            } else {
+                Color.clear
+            }
+        }
+        .animation(fadeIn, value: ready)
+        .task {
+            try? await Task.sleep(for: delay)
+            ready = true
         }
     }
 }

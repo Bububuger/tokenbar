@@ -5,9 +5,11 @@ import TokenBarCore
 struct PopoverView: View {
     @EnvironmentObject private var runtimeModel: TokenBarRuntimeModel
     @Environment(\.openWindow) private var openWindowAction
+    @Environment(\.dismiss) private var dismissPopover
     @State private var selectedTab: PopoverTab = .projects
     // CL-P0-004: Popover Hero status pill mirrors menubar pause flag.
     @AppStorage("tokenbar.menuBarPaused") private var isPaused = false
+    @AppStorage("tokenbar.pricingOverrides") private var pricingOverridesJSON = "{}"
     // CL-P0-013: which PopKPI ("In" / "Out" / "Cache") is expanded inline.
     @State private var expandedPopKPI: String?
 
@@ -17,6 +19,12 @@ struct PopoverView: View {
         case models = "Models"
 
         var id: String { rawValue }
+    }
+
+    private enum PopoverRankingRowKind {
+        case project
+        case agent
+        case model
     }
 
     var body: some View {
@@ -46,10 +54,40 @@ struct PopoverView: View {
             }
             .padding(12)
         }
-        .frame(width: 360, height: 760)
+        .frame(width: 360)
         .foregroundStyle(TokenBarStyle.foreground)
-        .task { await runtimeModel.bootstrapIfNeeded() }
-        .onAppear { runtimeModel.updateRefreshState() }
+        .onAppear {
+            let started = Date()
+            TokenBarTelemetry.mark(
+                "popover.appear.begin",
+                metadata: "events=\(popover.eventsCount) refresh_state=\(runtimeModel.refreshState)"
+            )
+            runtimeModel.updateRefreshState()
+            TokenBarTelemetry.timing(
+                "popover.appear",
+                startedAt: started,
+                metadata: "events=\(popover.eventsCount)",
+                success: true
+            )
+            Task { @MainActor in
+                await Task.yield()
+                TokenBarTelemetry.timing(
+                    "popover.first_runloop",
+                    startedAt: started,
+                    metadata: "events=\(popover.eventsCount) refresh_state=\(runtimeModel.refreshState)"
+                )
+                try? await Task.sleep(for: .milliseconds(16))
+                TokenBarTelemetry.timing(
+                    "popover.first_frame_plus_16ms",
+                    startedAt: started,
+                    metadata: "events=\(popover.eventsCount) refresh_state=\(runtimeModel.refreshState)"
+                )
+            }
+        }
+    }
+
+    private var popover: TokenBarPopoverSnapshot {
+        runtimeModel.popoverSnapshot
     }
 
     private var hero: some View {
@@ -61,7 +99,7 @@ struct PopoverView: View {
                         .foregroundStyle(TokenBarStyle.muted)
                     // CL-P1-004: split unit suffix into 13pt faint glyph.
                     HStack(alignment: .firstTextBaseline, spacing: 1) {
-                        let split = tokenbarSplitStagedTokens(runtimeModel.snapshot.today.totalTokens)
+                        let split = tokenbarSplitStagedTokens(popover.today.totalTokens)
                         Text(split.number)
                             .font(.system(size: 26, weight: .semibold, design: .rounded))
                             .monospacedDigit()
@@ -72,8 +110,8 @@ struct PopoverView: View {
                                 .baselineOffset(4)
                         }
                     }
-                    .tbNumberTooltip(precise: runtimeModel.snapshot.today.totalTokens, window: "today")
-                    Text("\(todaySessionCount) sessions")
+                    .tbNumberTooltip(precise: popover.today.totalTokens, window: "today")
+                    Text("\(popover.todaySessionCount) sessions")
                         .font(.caption2)
                         .monospacedDigit()
                         .foregroundStyle(TokenBarStyle.faint)
@@ -84,20 +122,15 @@ struct PopoverView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("TokenBar")
                             .font(.system(size: 13.5, weight: .semibold))
-                        Text("Updated \(tokenbarRelativeTime(runtimeModel.diagnostics.lastIndexedAt))")
+                        Text("Updated \(tokenbarRelativeTime(popover.lastIndexedAt))")
                             .font(.caption2)
                             .foregroundStyle(TokenBarStyle.muted)
                         HStack(spacing: 3) {
-                            // CL-P2-001: $ glyph rendered with rounded design
-                            // so it matches the Hero numeric stack rather than
-                            // the monospaced digits used for the value.
-                            (
-                                Text("$").font(.system(size: 11.5, weight: .semibold, design: .rounded))
-                                + Text(tokenbarCurrency(runtimeModel.snapshot.estimatedCostToday.totalCost, maximumFractionDigits: 3).dropFirst())
-                                    .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
-                            )
+                            Text(tokenbarCompactCurrency(popover.todayCost))
+                                .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                                .monospacedDigit()
                                 .foregroundStyle(TokenBarStyle.cost)
-                                .tbNumberTooltip(precise: runtimeModel.snapshot.estimatedCostToday.totalCost, window: "today (est.)")
+                                .tbNumberTooltip(precise: popover.todayCost, window: "today (est.)")
                             Text("est.")
                                 .font(.system(size: 10))
                                 .foregroundStyle(TokenBarStyle.faint)
@@ -117,12 +150,13 @@ struct PopoverView: View {
                         TokenBarStatusPill(text: runtimeModel.refreshState.rawValue, color: TokenBarStyle.statusColor(for: runtimeModel.refreshState))
                     }
                     Button {
+                        TokenBarTelemetry.event("popover.refresh.click", success: true)
                         Task { await runtimeModel.refresh() }
                     } label: {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 11, weight: .semibold))
                             .frame(width: 22, height: 22)
-                            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                             .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
                             .rotationEffect(.degrees(runtimeModel.refreshState == .refreshing ? 360 : 0))
                             .animation(runtimeModel.refreshState == .refreshing
@@ -145,14 +179,14 @@ struct PopoverView: View {
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(TokenBarStyle.muted)
                 Spacer()
-                Text(yesterdayDeltaText)
+                Text(popover.yesterdayDeltaText)
                     .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(yesterdayDeltaText.contains("+") ? TokenBarStyle.cache : TokenBarStyle.faint)
+                    .foregroundStyle(popover.yesterdayDeltaText.contains("+") ? TokenBarStyle.cache : TokenBarStyle.faint)
             }
             HStack(spacing: 6) {
-                popKpiCard("In", value: runtimeModel.snapshot.today.inputTokens, pct: inputShare, color: TokenBarStyle.input)
-                popKpiCard("Out", value: runtimeModel.snapshot.today.outputTokens, pct: outputShare, color: TokenBarStyle.output)
-                popKpiCard("Cache", value: runtimeModel.snapshot.today.cacheTokens, pct: cacheShare, color: TokenBarStyle.cache)
+                popKpiCard("In", value: popover.today.inputTokens, pct: popover.inputShare, color: TokenBarStyle.input)
+                popKpiCard("Out", value: popover.today.outputTokens, pct: popover.outputShare, color: TokenBarStyle.output)
+                popKpiCard("Cache", value: popover.today.cacheTokens, pct: popover.cacheShare, color: TokenBarStyle.cache)
             }
             // CL-P0-013: clicking a PopKPI expands a mini detail row showing
             // today / yesterday / 7d-avg below the bar — collapses on second
@@ -167,14 +201,14 @@ struct PopoverView: View {
                     onClose: { withAnimation(.easeOut(duration: 0.18)) { self.expandedPopKPI = nil } }
                 )
             }
-            InputOutputCacheBar(summary: runtimeModel.snapshot.today, height: 4)
+            InputOutputCacheBar(summary: popover.today, height: 4)
         }
     }
 
     private func popKpiCard(_ title: String, value: Int, pct: String, color: Color) -> some View {
         PopKPI(
             title: title,
-            value: tokenbarTokens(value),
+            value: tokenbarCompactTokens(value),
             pct: pct,
             color: color,
             preciseValue: value,
@@ -226,11 +260,11 @@ struct PopoverView: View {
                     .tracking(0.7)
                     .foregroundStyle(TokenBarStyle.faint)
                 Spacer()
-                Text(hourlyActivityText)
+                Text(popover.hourlyActivityText)
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(TokenBarStyle.cache)
             }
-            HourlyHeatmapView(hours: hourly.hoursOfDay, showAxis: false)
+            HourlyHeatmapView(hours: popover.hourly.hoursOfDay, showAxis: false)
 
             HStack {
                 Text("Last 30 days")
@@ -239,13 +273,13 @@ struct PopoverView: View {
                 Spacer()
                 HeatLegend()
             }
-            UsageStackedBarChart(days: runtimeModel.snapshot.last30Days, height: 38)
+            UsageStackedBarChart(days: popover.last30Days, height: 38)
             HStack {
-                Text(runtimeModel.snapshot.last30Days.first?.date.formatted(.dateTime.month(.abbreviated).day()) ?? "")
+                Text(popover.last30Days.first?.date.formatted(.dateTime.month(.abbreviated).day()) ?? "")
                 Spacer()
-                Text("peak \(runtimeModel.snapshot.peakDay?.formatted(.dateTime.month(.abbreviated).day()) ?? "n/a")")
+                Text("peak \(popover.peakDay?.formatted(.dateTime.month(.abbreviated).day()) ?? "n/a")")
                 Spacer()
-                Text(runtimeModel.snapshot.last30Days.last?.date.formatted(.dateTime.month(.abbreviated).day()) ?? "")
+                Text(popover.last30Days.last?.date.formatted(.dateTime.month(.abbreviated).day()) ?? "")
             }
             .font(.system(size: 9.5, design: .monospaced))
             .foregroundStyle(TokenBarStyle.faint)
@@ -259,29 +293,20 @@ struct PopoverView: View {
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(TokenBarStyle.muted)
                 Spacer()
-                Picker("", selection: $selectedTab) {
-                    ForEach(PopoverTab.allCases) { tab in
-                        // CL-P2-004: design canvas spec is 10.5pt mono.
-                        Text(tab.rawValue)
-                            .font(.system(size: 10.5, weight: .medium))
-                            .tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .controlSize(.mini)
-                .frame(width: 185)
+                rankingTabPicker
             }
 
             VStack(spacing: 0) {
                 switch selectedTab {
                 case .projects:
-                    ForEach(Array(runtimeModel.snapshot.topProjects.prefix(5).enumerated()), id: \.element.id) { index, row in
+                    ForEach(Array(popover.projectRows.enumerated()), id: \.element.id) { index, row in
                         rankingRow(
+                            kind: .project,
                             index: index,
                             name: row.name,
-                            subtitle: projectAgentSubtitle(row.name),
-                            value: tokenbarTokens(row.summary.totalTokens),
-                            cost: "",
+                            subtitle: row.subtitle,
+                            value: tokenbarCompactTokens(row.summary.totalTokens),
+                            cost: tokenbarCompactCurrency(row.cost),
                             badge: nil,
                             summary: row.summary,
                             color: TokenBarStyle.input
@@ -291,34 +316,36 @@ struct PopoverView: View {
                         }
                     }
                 case .agents:
-                    ForEach(Array(runtimeModel.snapshot.topAgents.prefix(5).enumerated()), id: \.element.id) { index, row in
+                    ForEach(Array(popover.agentRows.enumerated()), id: \.element.id) { index, row in
                         rankingRow(
+                            kind: .agent,
                             index: index,
                             name: row.name,
-                            subtitle: agentModelSubtitle(row.name),
-                            value: tokenbarTokens(row.summary.totalTokens),
-                            cost: "",
-                            badge: shareText(row.summary.totalTokens, total: runtimeModel.snapshot.last30Summary.totalTokens),
+                            subtitle: row.subtitle,
+                            value: tokenbarCompactTokens(row.summary.totalTokens),
+                            cost: tokenbarCompactCurrency(row.cost),
+                            badge: row.badge,
                             summary: nil,
                             color: TokenBarStyle.agentColor(row.name),
                             action: nil
                         )
                     }
                 case .models:
-                    ForEach(Array(modelRows.prefix(5).enumerated()), id: \.element.id) { index, row in
+                    ForEach(Array(popover.modelRows.enumerated()), id: \.element.id) { index, row in
                         rankingRow(
+                            kind: .model,
                             index: index,
                             name: row.name,
-                            subtitle: row.attribution,
-                            value: tokenbarTokens(row.summary.totalTokens),
-                            cost: tokenbarCurrency(row.cost),
-                            badge: "\(tokenbarPercent(row.cacheRatio)) cache",
+                            subtitle: row.subtitle,
+                            value: tokenbarCompactTokens(row.summary.totalTokens),
+                            cost: tokenbarCompactCurrency(row.cost),
+                            badge: row.badge,
                             summary: nil,
-                            color: TokenBarStyle.agentColor(row.agentName),
+                            color: TokenBarStyle.agentColor(row.agentName ?? row.name),
                             action: nil
                         )
                     }
-                    if modelRows.isEmpty {
+                    if popover.modelRows.isEmpty {
                         Text("No model attribution yet.")
                             .font(.caption)
                             .foregroundStyle(TokenBarStyle.muted)
@@ -340,7 +367,7 @@ struct PopoverView: View {
                     .font(.system(size: 12.5, weight: .medium))
                     .padding(.horizontal, 11)
                     .padding(.vertical, 7)
-                    .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
             }
             .buttonStyle(.plain)
@@ -351,7 +378,7 @@ struct PopoverView: View {
             // collapses to a `quaternaryLabel` color and is no longer
             // clickable — avoids drawing attention to a healthy state.
             Group {
-                if warningCount == 0 {
+                if popover.warningCount == 0 {
                     HStack(spacing: 6) {
                         Circle()
                             .fill(Color(nsColor: .quaternaryLabelColor))
@@ -369,7 +396,7 @@ struct PopoverView: View {
                                 .fill(TokenBarStyle.warn)
                                 .frame(width: 6, height: 6)
                                 .shadow(color: TokenBarStyle.warn.opacity(0.55), radius: 5)
-                            Text("\(warningCount)")
+                            Text("\(popover.warningCount)")
                                 .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
                             Text("warnings")
                                 .font(.caption)
@@ -385,91 +412,22 @@ struct PopoverView: View {
         .overlay(Divider().overlay(TokenBarStyle.line), alignment: .top)
     }
 
-    private var hourly: HourlyUsageSnapshot {
-        UsageAggregator.makeHourlySnapshot(from: runtimeModel.events, referenceDate: Date(), days: 1)
-    }
-
-    private var hourlyActivityText: String {
-        guard let peak = hourly.peakHourOfDay else {
-            return "no peak yet"
-        }
-        return "peak \(String(format: "%02d:00", peak.hourOfDay)) · \(tokenbarTokens(peak.summary.totalTokens)) · \(tokenbarIdleHourRanges(hourly.hoursOfDay))"
-    }
-
-    private var warningCount: Int {
-        // CL-P0-022: snapshot.warningCount is the single source of truth.
-        runtimeModel.snapshot.warningCount
-    }
-
-    private var modelRows: [TokenBarModelBreakdown] {
-        tokenbarModelBreakdowns(events: runtimeModel.events, days: 30)
-    }
-
-    private var todaySessionCount: Int {
-        tokenbarSessionCount(runtimeModel.events)
-    }
-
-    private var yesterdayDeltaText: String {
-        let calendar = Calendar(identifier: .gregorian)
-        guard let yesterday = calendar.date(byAdding: .day, value: -1, to: Date()) else {
-            return "vs yest. n/a"
-        }
-        let yesterdayTotal = runtimeModel.events
-            .filter { calendar.isDate($0.timestamp, inSameDayAs: yesterday) }
-            .reduce(0) { $0 + $1.inputTokens + $1.outputTokens + $1.cacheTokens }
-        guard yesterdayTotal > 0 else {
-            return "vs yest. n/a"
-        }
-        let delta = Double(runtimeModel.snapshot.today.totalTokens - yesterdayTotal) / Double(yesterdayTotal)
-        let sign = delta >= 0 ? "+" : ""
-        let percent = Int((delta * 100).rounded())
-        if abs(percent) > 999 {
-            return "vs yest. \(sign)>999%"
-        }
-        return "vs yest. \(sign)\(percent)%"
-    }
-
-    private var inputShare: String { shareText(runtimeModel.snapshot.today.inputTokens, total: runtimeModel.snapshot.today.totalTokens) }
-    private var outputShare: String { shareText(runtimeModel.snapshot.today.outputTokens, total: runtimeModel.snapshot.today.totalTokens) }
-    private var cacheShare: String { shareText(runtimeModel.snapshot.today.cacheTokens, total: runtimeModel.snapshot.today.totalTokens) }
-
-    private func shareText(_ value: Int, total: Int) -> String {
-        guard total > 0 else { return "0%" }
-        return "\(Int((Double(value) / Double(total) * 100).rounded()))%"
-    }
-
-    private func projectAgentSubtitle(_ projectName: String) -> String {
-        let agents = runtimeModel.events
-            .filter { $0.projectName == projectName }
-            .reduce(into: [String: Int]()) { totals, event in
-                totals[event.agent.displayName, default: 0] += event.inputTokens + event.outputTokens + event.cacheTokens
-            }
-            .sorted { $0.value > $1.value }
-            .prefix(3)
-            .map(\.key)
-        return agents.isEmpty ? "local indexed project" : agents.joined(separator: " · ")
-    }
-
-    private func agentModelSubtitle(_ agentName: String) -> String {
-        let models = runtimeModel.events
-            .filter { $0.agent.displayName == agentName }
-            .reduce(into: [String: Int]()) { totals, event in
-                let model = event.modelName?.isEmpty == false ? event.modelName! : event.agent.displayName
-                totals[model, default: 0] += event.inputTokens + event.outputTokens + event.cacheTokens
-            }
-            .sorted { $0.value > $1.value }
-            .prefix(2)
-            .map(\.key)
-        return models.isEmpty ? "agent share" : models.joined(separator: " · ")
-    }
-
     private func openMain(route: TokenBarMainRoute) {
+        let started = Date()
         runtimeModel.mainRoute = route
+        dismissPopover()
         openWindowAction(id: "main")
         NSApp.activate(ignoringOtherApps: true)
+        TokenBarTelemetry.event(
+            "popover.open_main",
+            metadata: "route=\(route)",
+            success: true,
+            elapsed: Date().timeIntervalSince(started)
+        )
     }
 
     private func rankingRow(
+        kind: PopoverRankingRowKind,
         index: Int,
         name: String,
         subtitle: String,
@@ -480,15 +438,16 @@ struct PopoverView: View {
         color: Color,
         action: (() -> Void)?
     ) -> some View {
-        Button {
+        let badgeColor = popoverRankColor(index: index, fallback: color)
+        return Button {
             action?()
         } label: {
             HStack(spacing: 8) {
                 Text("\(index + 1)")
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(color)
+                    .foregroundStyle(badgeColor)
                     .frame(width: 18, height: 18)
-                    .background(color.opacity(0.18), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .background(badgeColor.opacity(0.20), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(name)
                         .font(.system(size: 12.5, weight: .medium))
@@ -497,35 +456,91 @@ struct PopoverView: View {
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(TokenBarStyle.faint)
                         .lineLimit(1)
-                    if let summary {
-                        InputOutputCacheBar(summary: summary, height: 3)
-                            .frame(width: 74)
-                    }
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(value)
                         .font(.system(size: 12, design: .monospaced))
-                    if !cost.isEmpty {
-                        Text(cost)
-                            .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(TokenBarStyle.cost)
-                    }
-                    if let badge {
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                        .frame(width: 66, alignment: .trailing)
+                        .tbTooltip("\(name) · \(value) tokens")
+                    if kind == .project, let summary {
+                        InputOutputCacheBar(summary: summary, height: 3)
+                            .frame(width: 66)
+                    } else if let badge, kind == .model {
                         Text(badge)
-                            .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 8.8, weight: .semibold, design: .monospaced))
                             .foregroundStyle(TokenBarStyle.cache)
+                            .lineLimit(1)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(TokenBarStyle.cache.opacity(0.10), in: Capsule())
+                            .background(TokenBarStyle.cache.opacity(0.11), in: Capsule())
+                    } else if let badge {
+                        Text(badge)
+                            .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                            .foregroundStyle(TokenBarStyle.faint)
+                            .lineLimit(1)
                     }
                 }
+                .frame(width: 68, alignment: .trailing)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(cost.isEmpty ? "—" : cost)
+                        .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                        .monospacedDigit()
+                        .foregroundStyle(cost.isEmpty ? TokenBarStyle.faint : TokenBarStyle.cost)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                        .frame(width: 62, alignment: .trailing)
+                        .tbTooltip("\(name) · estimated cost \(cost.isEmpty ? "n/a" : cost)")
+                }
+                .frame(width: 62, alignment: .trailing)
             }
             .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.plain)
-        .disabled(action == nil)
+        .allowsHitTesting(action != nil)
         .overlay(Divider().overlay(TokenBarStyle.line.opacity(0.55)), alignment: .bottom)
+        .help("\(name)\n\(subtitle)")
+    }
+
+    private func popoverRankColor(index: Int, fallback: Color) -> Color {
+        switch index {
+        case 0: TokenBarStyle.accent
+        case 1: TokenBarStyle.output
+        case 2: TokenBarStyle.cache
+        case 3: Color(nsColor: .systemPurple)
+        default: fallback.opacity(0.75)
+        }
+    }
+
+    private var rankingTabPicker: some View {
+        HStack(spacing: 1) {
+            ForEach(PopoverTab.allCases) { tab in
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        selectedTab = tab
+                    }
+                    TokenBarTelemetry.event("popover.ranking_tab.change", metadata: "tab=\(tab.rawValue)", success: true)
+                } label: {
+                    let selected = selectedTab == tab
+                    Text(tab.rawValue)
+                        .font(.system(size: 10.5, weight: selected ? .semibold : .medium, design: .rounded))
+                        .foregroundStyle(selected ? Color.white : TokenBarStyle.muted)
+                        .frame(width: 58, height: 24)
+                        .background(
+                            selected ? TokenBarStyle.selectionBlue : Color.clear,
+                            in: Capsule()
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(TokenBarStyle.surfaceRaised.opacity(0.82), in: Capsule())
+        .overlay(Capsule().stroke(TokenBarStyle.line, lineWidth: 1))
     }
 }
 
@@ -584,7 +599,7 @@ struct PopKPI: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(
             isExpanded ? TokenBarStyle.accent.opacity(0.55) : TokenBarStyle.line,
             lineWidth: isExpanded ? 1.5 : 1

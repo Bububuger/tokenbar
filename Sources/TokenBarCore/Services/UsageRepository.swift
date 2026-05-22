@@ -107,6 +107,16 @@ public struct UsageRepository: Sendable {
         }
     }
 
+    public func resetIndexForFullReparse() throws {
+        try database.queue.write { db in
+            try db.execute(sql: "DELETE FROM usage_events")
+            try db.execute(sql: "DELETE FROM prompts")
+            try db.execute(sql: "DELETE FROM source_watermarks")
+            try db.execute(sql: "DELETE FROM source_warnings")
+            try db.execute(sql: "DELETE FROM checkpoints")
+        }
+    }
+
     public func deleteRecords(before cutoff: Date) throws {
         try database.queue.write { db in
             let millis = cutoff.tokenBarMillisecondsSince1970
@@ -190,6 +200,29 @@ public struct UsageRepository: Sendable {
                 return nil
             }
             return checkpoint(from: row)
+        }
+    }
+
+    public func latestWarnings(limit: Int = 50) throws -> [UsageSourceWarning] {
+        try database.queue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+            SELECT source_name, source_path, line_number, message
+            FROM source_warnings
+            WHERE checkpoint_id = (
+                SELECT id FROM checkpoints ORDER BY id DESC LIMIT 1
+            )
+            ORDER BY id DESC
+            LIMIT ?
+            """, arguments: [limit])
+
+            return rows.map { row in
+                UsageSourceWarning(
+                    sourceName: row["source_name"],
+                    sourcePath: row["source_path"],
+                    lineNumber: row["line_number"],
+                    message: row["message"]
+                )
+            }
         }
     }
 
@@ -364,21 +397,12 @@ public struct UsageRepository: Sendable {
     public func listCustomSources() throws -> [CustomSourceRecord] {
         try database.queue.read { db in
             let rows = try Row.fetchAll(db, sql: """
-            SELECT id, name, directory, glob_pattern, format, display_agent, enabled, created_at
+            SELECT id, name, directory, glob_pattern, format, display_agent, enabled, field_mapping, created_at
             FROM custom_sources
             ORDER BY created_at ASC, name ASC
             """)
             return rows.map { row in
-                CustomSourceRecord(
-                    id: row["id"],
-                    name: row["name"],
-                    directory: row["directory"],
-                    globPattern: row["glob_pattern"],
-                    format: CustomSourceFormat(rawValue: row["format"] as String) ?? .unknown,
-                    displayAgent: row["display_agent"],
-                    enabled: (row["enabled"] as Int) != 0,
-                    createdAt: .tokenBarDate(millisecondsSince1970: row["created_at"])
-                )
+                customSourceRecord(from: row)
             }
         }
     }
@@ -387,15 +411,16 @@ public struct UsageRepository: Sendable {
         try database.queue.write { db in
             try db.execute(
                 sql: """
-                INSERT INTO custom_sources (id, name, directory, glob_pattern, format, display_agent, enabled, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO custom_sources (id, name, directory, glob_pattern, format, display_agent, enabled, field_mapping, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     directory = excluded.directory,
                     glob_pattern = excluded.glob_pattern,
                     format = excluded.format,
                     display_agent = excluded.display_agent,
-                    enabled = excluded.enabled
+                    enabled = excluded.enabled,
+                    field_mapping = excluded.field_mapping
                 """,
                 arguments: [
                     source.id,
@@ -405,6 +430,7 @@ public struct UsageRepository: Sendable {
                     source.format.rawValue,
                     source.displayAgent,
                     source.enabled ? 1 : 0,
+                    encodeFieldMapping(source.fieldMapping),
                     source.createdAt.tokenBarMillisecondsSince1970,
                 ]
             )
@@ -711,6 +737,35 @@ public struct UsageRepository: Sendable {
             contentHash: row["content_hash"],
             sourcePath: row["source_path"]
         )
+    }
+
+    private func customSourceRecord(from row: Row) -> CustomSourceRecord {
+        CustomSourceRecord(
+            id: row["id"],
+            name: row["name"],
+            directory: row["directory"],
+            globPattern: row["glob_pattern"],
+            format: CustomSourceFormat(rawValue: row["format"] as String) ?? .unknown,
+            displayAgent: row["display_agent"],
+            enabled: (row["enabled"] as Int) != 0,
+            fieldMapping: decodeFieldMapping(row["field_mapping"]),
+            createdAt: .tokenBarDate(millisecondsSince1970: row["created_at"])
+        )
+    }
+
+    private func decodeFieldMapping(_ raw: String?) -> CustomSourceFieldMapping {
+        guard let raw, let data = raw.data(using: .utf8) else {
+            return .default
+        }
+        do {
+            return try JSONDecoder().decode(CustomSourceFieldMapping.self, from: data)
+        } catch {
+            return .default
+        }
+    }
+
+    private func encodeFieldMapping(_ mapping: CustomSourceFieldMapping) -> String {
+        (try? String(data: JSONEncoder().encode(mapping), encoding: .utf8)) ?? "{}"
     }
 
     private func checkpoint(from row: Row) -> CheckpointSummary {

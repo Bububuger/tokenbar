@@ -36,6 +36,21 @@ public enum RefreshIntervalOption: String, CaseIterable, Sendable, Hashable {
             nil
         }
     }
+
+    public var refreshCadence: TimeInterval? {
+        switch self {
+        case .auto:
+            5
+        case .oneMinute:
+            60
+        case .fiveMinutes:
+            300
+        case .thirtyMinutes:
+            1_800
+        case .manualOnly:
+            nil
+        }
+    }
 }
 
 public enum RefreshState: String, Sendable, Hashable {

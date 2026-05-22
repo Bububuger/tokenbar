@@ -2,10 +2,23 @@ import AppKit
 import SwiftUI
 import TokenBarCore
 
+let tokenbarDefaultPricingRows: [PricingRow] = [
+    PricingRow(model: "gpt-5.5", input: "2.5", output: "10", cache: "0.25"),
+    PricingRow(model: "gpt-5-codex", input: "2.5", output: "10", cache: "0.25"),
+    PricingRow(model: "claude-opus-4.7", input: "15", output: "75", cache: "1.5"),
+    PricingRow(model: "claude-sonnet-4.5", input: "3", output: "15", cache: "0.3"),
+    PricingRow(model: "gpt-5-mini", input: "0.25", output: "2", cache: "0.025"),
+    PricingRow(model: "o4-mini", input: "1.1", output: "4.4", cache: "0.275"),
+    PricingRow(model: "claude-haiku-4", input: "0.8", output: "4", cache: "0.08"),
+    PricingRow(model: "hermes-3-70b", input: "0.4", output: "0.8", cache: "0.1"),
+    PricingRow(model: "composer-1", input: "1.2", output: "6", cache: "0.12"),
+]
+
 struct SettingsView: View {
     @EnvironmentObject private var runtimeModel: TokenBarRuntimeModel
     @State private var showAddSource = false
     @AppStorage("tokenbar.theme") private var theme = "System"
+    @State private var editingSource: CustomSourceRecord?
     // CL-P0-017 / CL-P0-018: per-row overrides persisted as JSON in
     // UserDefaults. Reset to Defaults wipes the dict.
     @AppStorage("tokenbar.pricingOverrides") private var pricingOverridesJSON = "{}"
@@ -14,18 +27,11 @@ struct SettingsView: View {
     @State private var showResetConfirm = false
     @State private var showResetAllConfirm = false  // CL-P1-019
     @State private var resetAck = ""                // CL-P1-019: type "RESET"
+    @State private var sourceSaveMessage: String?
+    private let themeOptions = ["System", "Light", "Dark"]
+    private let pricingColumns: [CGFloat] = [208, 96, 96, 96, 95, 128]
 
-    static let defaultPricingRows: [PricingRow] = [
-        PricingRow(model: "gpt-5.5", input: "2.5", output: "10", cache: "0.25"),
-        PricingRow(model: "gpt-5-codex", input: "2.5", output: "10", cache: "0.25"),
-        PricingRow(model: "claude-opus-4.7", input: "15", output: "75", cache: "1.5"),
-        PricingRow(model: "claude-sonnet-4.5", input: "3", output: "15", cache: "0.3"),
-        PricingRow(model: "gpt-5-mini", input: "0.25", output: "2", cache: "0.025"),
-        PricingRow(model: "o4-mini", input: "1.1", output: "4.4", cache: "0.275"),
-        PricingRow(model: "claude-haiku-4", input: "0.8", output: "4", cache: "0.08"),
-        PricingRow(model: "hermes-3-70b", input: "0.4", output: "0.8", cache: "0.1"),
-        PricingRow(model: "composer-1", input: "1.2", output: "6", cache: "0.12"),
-    ]
+    static let defaultPricingRows = tokenbarDefaultPricingRows
 
     private var pricingRows: [PricingRow] {
         let overrides = decodedOverrides()
@@ -50,11 +56,13 @@ struct SettingsView: View {
         dict[model] = values
         if let data = try? JSONEncoder().encode(dict), let str = String(data: data, encoding: .utf8) {
             pricingOverridesJSON = str
+            runtimeModel.rebuildPopoverSnapshot(trigger: "pricing-override")
         }
     }
 
     private func resetAllOverrides() {
         pricingOverridesJSON = "{}"
+        runtimeModel.rebuildPopoverSnapshot(trigger: "pricing-reset")
     }
 
     /// CL-P1-018: NSSavePanel-driven JSON export of the entire local index.
@@ -82,6 +90,7 @@ struct SettingsView: View {
                 let name: String
                 let directory: String
                 let enabled: Bool
+                let fieldMapping: CustomSourceFieldMapping
             }
         }
 
@@ -90,11 +99,17 @@ struct SettingsView: View {
             summary: .init(
                 todayTotalTokens: runtimeModel.snapshot.today.totalTokens,
                 last30TotalTokens: runtimeModel.snapshot.last30Summary.totalTokens,
-                estimatedCostToday: runtimeModel.snapshot.estimatedCostToday.totalCost,
-                estimatedCostLast30: runtimeModel.snapshot.estimatedCostLast30.totalCost
+                estimatedCostToday: tokenbarEstimatedCost(events: runtimeModel.events, days: 1),
+                estimatedCostLast30: tokenbarEstimatedCost(events: runtimeModel.events, days: 30)
             ),
             customSources: runtimeModel.customSources.map {
-                .init(id: $0.id, name: $0.name, directory: $0.directory, enabled: $0.enabled)
+                .init(
+                    id: $0.id,
+                    name: $0.name,
+                    directory: $0.directory,
+                    enabled: $0.enabled,
+                    fieldMapping: $0.fieldMapping
+                )
             },
             eventCount: runtimeModel.events.count,
             promptCount: runtimeModel.prompts.count
@@ -105,54 +120,6 @@ struct SettingsView: View {
         encoder.dateEncodingStrategy = .iso8601
         if let data = try? encoder.encode(payload) {
             try? data.write(to: url)
-        }
-    }
-
-    /// CL-P2-008: lightweight design-tokens reference rendered inline in
-    /// Settings (no separate Tokens window). Each swatch copies its hex on
-    /// click — useful when designers compare against the source-of-truth.
-    private var designTokensSection: some View {
-        settingsSection(
-            title: "Design Tokens",
-            subtitle: "Brand swatches and semantic surfaces. Click any swatch to copy its hex."
-        ) {
-            let rows: [(String, Color, String)] = [
-                ("Accent (light)", TokenBarStyle.accent, "#0A9489"),
-                ("Cost (light)", TokenBarStyle.cost, "#C5781A"),
-                ("Lime", TokenBarStyle.lime, "#73E600"),
-                ("Input (systemBlue)", TokenBarStyle.input, "system"),
-                ("Output (systemOrange)", TokenBarStyle.output, "system"),
-                ("Cache (systemGreen)", TokenBarStyle.cache, "system"),
-                ("Warn (systemYellow)", TokenBarStyle.warn, "system"),
-                ("Error (systemRed)", TokenBarStyle.error, "system"),
-                ("Separator", TokenBarStyle.line, "system"),
-            ]
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                ForEach(rows, id: \.0) { row in
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(row.2, forType: .string)
-                    } label: {
-                        HStack(spacing: 8) {
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .fill(row.1)
-                                .frame(width: 28, height: 18)
-                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(TokenBarStyle.line, lineWidth: 1))
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(row.0)
-                                    .font(.caption)
-                                Text(row.2)
-                                    .font(.system(size: 10, design: .monospaced))
-                                    .foregroundStyle(TokenBarStyle.faint)
-                            }
-                            Spacer()
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Click to copy \(row.2)")
-                }
-            }
         }
     }
 
@@ -167,32 +134,76 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .top) {
-            // CL-P2-009: switched to SwiftUI Form + `.formStyle(.grouped)` so
-            // sections inherit the system Settings visual treatment
-            // (grouped backgrounds, 10pt corners, sticky section headers)
-            // while keeping the existing per-section content.
-            Form {
-                Section { header }
-                Section("Checkpoint Interval") { checkpointSection }
-                Section("Prompts") { promptSection }
-                Section("Theme") { themeSection }
-                Section("Pricing") { pricingSection }
-                Section("Custom Sources") { customSourcesSection }
-                Section("Data & Retention") { retentionSection }
-                Section("Design Tokens") { designTokensSection }
-            }
-            .formStyle(.grouped)
+        GeometryReader { geometry in
+            ZStack {
+                TokenBarGlassBackground()
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        header
+                        checkpointSection
+                        promptSection
+                        themeSection
+                        pricingSection
+                        retentionSection
+                        customSourcesSection
+                    }
+                    .padding(16)
+                }
+                .scrollIndicators(.visible)
 
-            if showAddSource {
-                AddCustomSourceOverlay(isPresented: $showAddSource)
+                if showAddSource {
+                    AddCustomSourceOverlay(
+                        isPresented: $showAddSource,
+                        source: editingSource,
+                        onSaved: showSourceSaved
+                    )
                     .environmentObject(runtimeModel)
+                    .id(editingSource?.id ?? "new")
+                    .frame(width: min(560, max(320, geometry.size.width - 64)))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                     .zIndex(10)
+                }
+
+                if let sourceSaveMessage {
+                    Text(sourceSaveMessage)
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(TokenBarStyle.foreground)
+                        .padding(.horizontal, 14)
+                        .frame(height: 32)
+                        .background(TokenBarStyle.cache.opacity(0.18), in: Capsule())
+                        .overlay(Capsule().stroke(TokenBarStyle.cache.opacity(0.35), lineWidth: 1))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .padding(.top, 18)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .zIndex(11)
+                }
             }
         }
         // CL-P0-020: previously the onAppear forced theme back to "Dark" to
         // hide the WIP Light/System modes. Now that the entire style layer is
         // backed by semantic colors, all three options round-trip correctly.
+        .onChange(of: showAddSource) { _, newValue in
+            if !newValue {
+                editingSource = nil
+            }
+        }
+        .onChange(of: theme) { _, newValue in
+            TokenBarTelemetry.event("settings.theme.change", metadata: "value=\(newValue)", success: true)
+        }
+    }
+
+    private func showSourceSaved(_ name: String) {
+        withAnimation(.easeOut(duration: 0.16)) {
+            sourceSaveMessage = "Source saved: \(name)"
+        }
+        Task {
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            await MainActor.run {
+                withAnimation(.easeIn(duration: 0.16)) {
+                    sourceSaveMessage = nil
+                }
+            }
+        }
     }
 
     private var header: some View {
@@ -206,8 +217,8 @@ struct SettingsView: View {
             }
             Spacer()
             TopRightCluster(
-                todayCost: runtimeModel.snapshot.estimatedCostToday.totalCost,
-                rangeCost: runtimeModel.snapshot.estimatedCostLast30.totalCost,
+                todayCost: tokenbarEstimatedCost(events: runtimeModel.events, days: 1),
+                rangeCost: tokenbarEstimatedCost(events: runtimeModel.events, days: 30),
                 todayTokens: runtimeModel.snapshot.today.totalTokens,
                 totalTokens: runtimeModel.snapshot.last30Summary.totalTokens,
                 todaySessions: tokenbarSessionCount(runtimeModel.events),
@@ -253,13 +264,7 @@ struct SettingsView: View {
             title: "Theme",
             subtitle: "System tracks the OS appearance; Light and Dark force an override."
         ) {
-            HStack(spacing: 12) {
-                // CL-P0-020: all three tiles are now enabled because the style
-                // layer has been migrated to Apple semantic colors (CL-P0-007).
-                themeTile("System", enabled: true)
-                themeTile("Light", enabled: true)
-                themeTile("Dark", enabled: true)
-            }
+            ThemeChoiceGrid(selection: $theme, options: themeOptions)
         }
     }
 
@@ -271,12 +276,12 @@ struct SettingsView: View {
             VStack(spacing: 0) {
                 Grid(horizontalSpacing: 14, verticalSpacing: 0) {
                     GridRow {
-                        priceHead("Model")
-                        priceHead("Input $/1M")
-                        priceHead("Output $/1M")
-                        priceHead("Cache $/1M")
-                        priceHead("Source")
-                        Color.clear.frame(width: 110)
+                        priceHead("Model", width: pricingColumns[0])
+                        priceHead("Input $/1M", width: pricingColumns[1])
+                        priceHead("Output $/1M", width: pricingColumns[2])
+                        priceHead("Cache $/1M", width: pricingColumns[3])
+                        priceHead("Source", width: pricingColumns[4])
+                        priceHead("Actions", width: pricingColumns[5], align: .trailing)
                     }
                     Divider().gridCellColumns(6).overlay(TokenBarStyle.line)
                     ForEach(pricingRows) { row in
@@ -311,15 +316,17 @@ struct SettingsView: View {
                 Text(row.model)
                     .font(.system(size: 13, design: .monospaced))
                     .lineLimit(1)
-                priceField($editBuffer.input)
-                priceField($editBuffer.output)
-                priceField($editBuffer.cache)
-                Text("editing")
+                    .frame(width: pricingColumns[0], alignment: .leading)
+                priceField($editBuffer.input, width: pricingColumns[1])
+                priceField($editBuffer.output, width: pricingColumns[2])
+                priceField($editBuffer.cache, width: pricingColumns[3])
+                Text(row.source == "default" ? "default" : "override")
                     .font(.caption)
                     .foregroundStyle(TokenBarStyle.accent)
+                    .frame(width: pricingColumns[4], alignment: .leading)
                 HStack(spacing: 4) {
                     Button("Save") {
-                        saveOverride(row.model, values: editBuffer)
+                        saveOverride(row.model, values: editBuffer.normalized)
                         editingModel = nil
                     }
                     .keyboardShortcut(.defaultAction)
@@ -327,6 +334,7 @@ struct SettingsView: View {
                     Button("Cancel") { editingModel = nil }
                         .keyboardShortcut(.cancelAction)
                 }
+                .frame(width: pricingColumns[5], alignment: .trailing)
                 .controlSize(.small)
             }
             .padding(.vertical, 9)
@@ -335,31 +343,36 @@ struct SettingsView: View {
                 Text(row.model)
                     .font(.system(size: 13, design: .monospaced))
                     .lineLimit(1)
-                priceCell(row.input)
-                priceCell(row.output)
-                priceCell(row.cache)
+                    .frame(width: pricingColumns[0], alignment: .leading)
+                priceCell(row.input, width: pricingColumns[1])
+                priceCell(row.output, width: pricingColumns[2])
+                priceCell(row.cache, width: pricingColumns[3])
                 Text(row.source)
                     .font(.caption)
                     .foregroundStyle(row.source == "override" ? TokenBarStyle.warn : TokenBarStyle.cache)
+                    .frame(width: pricingColumns[4], alignment: .leading)
                 Button("Edit") {
                     editBuffer = PricingValues(input: row.input, output: row.output, cache: row.cache)
                     editingModel = row.model
                 }
                 .controlSize(.small)
+                .frame(width: pricingColumns[5], alignment: .trailing)
             }
             .padding(.vertical, 9)
         }
     }
 
-    private func priceField(_ binding: Binding<String>) -> some View {
+    private func priceField(_ binding: Binding<String>, width: CGFloat) -> some View {
         TextField("", text: binding)
             .textFieldStyle(.roundedBorder)
             .font(.system(size: 12, design: .monospaced))
-            .frame(width: 80)
+            .frame(width: width)
             .overlay(
-                RoundedRectangle(cornerRadius: 4)
-                    .stroke(binding.wrappedValue.isValidPrice ? Color.clear : TokenBarStyle.error,
-                            lineWidth: 1.5)
+                RoundedRectangle(cornerRadius: 5)
+                    .stroke(
+                        binding.wrappedValue.trimmedPrice.isValidPrice ? Color.clear : TokenBarStyle.error,
+                        lineWidth: 1.5
+                    )
             )
     }
 
@@ -373,15 +386,13 @@ struct SettingsView: View {
                 customSourceTile(name: "Claude Code", path: "~/.claude/projects", color: TokenBarStyle.output, enabled: true)
                 customSourceTile(name: "Hermes", path: "~/.hermes/state.db", color: TokenBarStyle.output, enabled: true)
                 ForEach(runtimeModel.customSources) { source in
-                    // CL-P1-017: per-row toggle + delete affordance for custom
-                    // sources. Full path editing reuses the AddCustomSource
-                    // modal (still TODO) — the toggle and delete cover the
-                    // most-requested mid-lifecycle changes today.
                     editableCustomSourceTile(source: source)
                 }
             }
         } trailing: {
             Button {
+                TokenBarTelemetry.event("settings.custom_source.add.open", success: true)
+                editingSource = nil
                 showAddSource = true
             } label: {
                 Label("Add", systemImage: "plus")
@@ -515,68 +526,14 @@ struct SettingsView: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(selected ? Color.white : TokenBarStyle.muted)
+                .foregroundStyle(selected ? TokenBarStyle.foreground : TokenBarStyle.muted)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
-                .background(selected ? Color(red: 0.14, green: 0.57, blue: 0.90) : Color.clear, in: Capsule())
+                .background(selected ? TokenBarStyle.accent.opacity(0.22) : Color.clear, in: Capsule())
         }
         .buttonStyle(.plain)
-        .background(Color.white.opacity(0.035), in: Capsule())
+        .background(TokenBarStyle.surfaceRaised, in: Capsule())
         .overlay(Capsule().stroke(TokenBarStyle.line, lineWidth: 1))
-    }
-
-    private func themeTile(_ name: String, enabled: Bool) -> some View {
-        Button {
-            if enabled {
-                theme = name
-            }
-        } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                ZStack(alignment: .topTrailing) {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(themeGradient(name))
-                    if !enabled {
-                        Text("Soon")
-                            .font(.system(size: 9.5, weight: .semibold))
-                            .foregroundStyle(TokenBarStyle.warn)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(TokenBarStyle.warn.opacity(0.12), in: Capsule())
-                            .padding(7)
-                    }
-                    VStack(alignment: .leading, spacing: 5) {
-                        Capsule().fill(themeLine(name)).frame(width: 44, height: 4)
-                        Capsule().fill(theme == name ? TokenBarStyle.input : Color.white.opacity(0.18)).frame(width: 74, height: 4)
-                        Capsule().fill(themeLine(name)).frame(width: 58, height: 4)
-                        Spacer()
-                        Capsule().fill(themeLine(name)).frame(width: 68, height: 4)
-                    }
-                    .padding(10)
-                }
-                .frame(height: 78)
-
-                HStack {
-                    Text(name)
-                        .font(.caption)
-                    Spacer()
-                    Circle()
-                        .stroke(theme == name ? TokenBarStyle.input : TokenBarStyle.line, lineWidth: 1.5)
-                        .frame(width: 14, height: 14)
-                        .overlay {
-                            if theme == name {
-                                Circle().fill(TokenBarStyle.input).frame(width: 6, height: 6)
-                            }
-                        }
-                }
-            }
-            .padding(10)
-            .background(Color.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(theme == name ? TokenBarStyle.input.opacity(0.45) : TokenBarStyle.line, lineWidth: 1))
-            .opacity(enabled ? 1 : 0.58)
-        }
-        .buttonStyle(.plain)
-        .frame(maxWidth: .infinity)
-        .help(enabled ? "Use the canonical TokenBar dark theme." : "Light/System require a full light token set before they can be enabled.")
     }
 
     /// CL-P1-017: editable variant of `customSourceTile` for user-added
@@ -588,18 +545,34 @@ struct SettingsView: View {
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 3) {
                 Text(source.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                Text(source.directory).font(.system(size: 11.5, design: .monospaced))
+                Text(source.globPattern.isEmpty || source.globPattern == "**/*.jsonl"
+                     ? source.directory
+                     : "\(source.directory)/\(source.globPattern)")
+                    .font(.system(size: 11.5, design: .monospaced))
                     .foregroundStyle(TokenBarStyle.muted).lineLimit(1)
             }
             Spacer()
+            Button {
+                TokenBarTelemetry.event("settings.custom_source.edit.open", metadata: "name=\(source.name)", success: true)
+                editingSource = source
+                showAddSource = true
+            } label: {
+                Image(systemName: "pencil")
+            }
+            .buttonStyle(.plain)
+            .help("Edit this source")
             Toggle("", isOn: Binding(
                 get: { source.enabled },
-                set: { _ in Task { await runtimeModel.toggleCustomSource(source) } }
+                set: { _ in
+                    TokenBarTelemetry.event("settings.custom_source.toggle.click", metadata: "name=\(source.name)", success: true)
+                    Task { await runtimeModel.toggleCustomSource(source) }
+                }
             ))
             .labelsHidden()
             .controlSize(.small)
             .help(source.enabled ? "Disable this source" : "Enable this source")
             Button(role: .destructive) {
+                TokenBarTelemetry.event("settings.custom_source.remove.click", metadata: "name=\(source.name)", success: true)
                 Task { await runtimeModel.removeCustomSource(id: source.id) }
             } label: {
                 Image(systemName: "trash")
@@ -608,7 +581,7 @@ struct SettingsView: View {
             .help("Remove this source")
         }
         .padding(13)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
     }
 
@@ -627,57 +600,281 @@ struct SettingsView: View {
                     .lineLimit(1)
             }
             Spacer()
-            PendingActionButton("Edit")
+            Text("Built-In")
+                .font(.caption2)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .foregroundStyle(TokenBarStyle.faint)
+                .background(TokenBarStyle.surface.opacity(0.5), in: Capsule())
         }
         .padding(13)
-        .background(Color.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(TokenBarStyle.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
     }
 
-    private func priceHead(_ text: String) -> some View {
+    private func priceHead(_ text: String, width: CGFloat, align: Alignment = .leading) -> some View {
         Text(text.uppercased())
             .font(.system(size: 10.5, weight: .semibold))
             .tracking(0.8)
             .foregroundStyle(TokenBarStyle.faint)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: width, alignment: align)
     }
 
-    private func priceCell(_ text: String) -> some View {
+    private func priceCell(_ text: String, width: CGFloat) -> some View {
         Text(text)
             .font(.system(size: 12.5, design: .monospaced))
             .monospacedDigit()
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: width, alignment: .leading)
     }
 
-    private func themeGradient(_ name: String) -> LinearGradient {
-        switch name {
-        case "Light":
-            LinearGradient(colors: [Color.white, Color(red: 0.91, green: 0.94, blue: 0.96)], startPoint: .top, endPoint: .bottom)
+}
+
+private struct ThemeChoiceGrid: View {
+    @Binding var selection: String
+    let options: [String]
+
+    private let columns = [
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12)
+    ]
+
+    var body: some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+            ForEach(options, id: \.self) { option in
+                ThemeChoiceTile(option: option, selected: selection == option) {
+                    selection = option
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct ThemeChoiceTile: View {
+    let option: String
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 10) {
+                ThemePreview(option: option)
+                    .aspectRatio(16 / 10, contentMode: .fit)
+                    .overlay(alignment: .topTrailing) {
+                        if selected {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 10.5, weight: .bold))
+                                .foregroundStyle(Color(nsColor: .windowBackgroundColor))
+                                .frame(width: 26, height: 26)
+                                .background(TokenBarStyle.accent, in: Circle())
+                                .padding(10)
+                        }
+                    }
+                HStack(alignment: .bottom, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(option)
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                            .foregroundStyle(TokenBarStyle.foreground)
+                        Text(subtitle)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(TokenBarStyle.faint)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Circle()
+                        .stroke(selected ? TokenBarStyle.accent : TokenBarStyle.line, lineWidth: selected ? 2 : 1.5)
+                        .frame(width: 18, height: 18)
+                        .overlay {
+                            if selected {
+                                Circle()
+                                    .fill(TokenBarStyle.accent)
+                                    .frame(width: 8, height: 8)
+                            }
+                        }
+                }
+            }
+            .padding(10)
+            .background(TokenBarStyle.surfaceRaised.opacity(selected ? 0.92 : 0.58),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(selected ? TokenBarStyle.accent.opacity(0.70) : TokenBarStyle.line, lineWidth: selected ? 1.6 : 1)
+            )
+            .shadow(color: selected ? TokenBarStyle.accent.opacity(0.14) : Color.clear, radius: 10)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var subtitle: String {
+        switch option {
         case "System":
-            LinearGradient(colors: [Color.white, Color.white, Color(red: 0.06, green: 0.14, blue: 0.18), Color(red: 0.04, green: 0.08, blue: 0.10)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            "match macOS appearance"
+        case "Light":
+            "paper · for daylight"
         default:
-            LinearGradient(colors: [Color(red: 0.07, green: 0.16, blue: 0.20), Color(red: 0.04, green: 0.08, blue: 0.11)], startPoint: .top, endPoint: .bottom)
+            "ink · the canonical look"
+        }
+    }
+}
+
+private struct ThemePreview: View {
+    let option: String
+
+    var body: some View {
+        ZStack {
+            preview(mode: option == "Light" ? .light : .dark)
+            if option == "System" {
+                preview(mode: .light)
+                    .clipShape(ThemePreviewDiagonal())
+                ThemePreviewDiagonal()
+                    .stroke(Color.white.opacity(0.22), lineWidth: 1)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(TokenBarStyle.line.opacity(0.8), lineWidth: 1))
+    }
+
+    private enum Mode {
+        case light
+        case dark
+    }
+
+    private func preview(mode: Mode) -> some View {
+        let isLight = mode == .light
+        let background = isLight ? Color(red: 0.96, green: 0.97, blue: 0.98) : Color(red: 0.05, green: 0.10, blue: 0.12)
+        let panel = isLight ? Color.white : Color(red: 0.07, green: 0.13, blue: 0.16)
+        let line = isLight ? Color.black.opacity(0.12) : Color.white.opacity(0.10)
+        let muted = isLight ? Color.black.opacity(0.16) : Color.white.opacity(0.14)
+
+        return HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+                TokenBarBrandGlyph(size: 18)
+                    .padding(.bottom, 6)
+                ForEach(0..<5, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(index == 0 ? Color.black.opacity(isLight ? 0.28 : 0.30) : muted)
+                        .frame(width: index == 0 ? 64 : 48, height: 5)
+                }
+                Spacer()
+            }
+            .padding(8)
+            .frame(width: 58)
+            .background(isLight ? Color.white : Color(red: 0.035, green: 0.075, blue: 0.09))
+            .overlay(Rectangle().fill(line).frame(width: 1), alignment: .trailing)
+
+            VStack(alignment: .leading, spacing: 8) {
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(isLight ? Color.black.opacity(0.68) : Color.white.opacity(0.70))
+                    .frame(width: 86, height: 7)
+                HStack(spacing: 5) {
+                    previewMetric(color: TokenBarStyle.accent, panel: panel, line: line)
+                    previewMetric(color: TokenBarStyle.output, panel: panel, line: line)
+                    previewMetric(color: TokenBarStyle.cache, panel: panel, line: line)
+                }
+                ZStack(alignment: .bottom) {
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(panel)
+                        .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).stroke(line, lineWidth: 1))
+                    HStack(alignment: .bottom, spacing: 5) {
+                        ForEach(0..<15, id: \.self) { index in
+                            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                                .fill(index == 9 ? TokenBarStyle.accent : muted.opacity(1.8))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: previewBarHeight(index))
+                        }
+                    }
+                    .padding(8)
+                }
+            }
+            .padding(8)
+            .background(background)
         }
     }
 
-    private func themeLine(_ name: String) -> Color {
-        name == "Light" ? Color.black.opacity(0.14) : Color.white.opacity(0.15)
+    private func previewMetric(color: Color, panel: Color, line: Color) -> some View {
+        RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .fill(panel)
+            .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).stroke(line, lineWidth: 1))
+            .overlay(alignment: .center) {
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(color)
+                    .frame(width: 44, height: 4)
+            }
+            .frame(height: 24)
+    }
+
+    private func previewBarHeight(_ index: Int) -> CGFloat {
+        let heights: [CGFloat] = [24, 34, 18, 48, 29, 62, 40, 52, 25, 74, 36, 31, 22, 54, 34]
+        return heights[index % heights.count]
+    }
+}
+
+private struct ThemePreviewDiagonal: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: rect.origin)
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.closeSubpath()
+        return path
     }
 }
 
 private struct AddCustomSourceOverlay: View {
     @EnvironmentObject private var runtimeModel: TokenBarRuntimeModel
     @Binding var isPresented: Bool
-    @State private var name = "hermes-agent"
-    @State private var pathGlob = "~/.hermes/runs/*.jsonl"
+    let source: CustomSourceRecord?
+    let onSaved: (String) -> Void
+    @State private var name = ""
+    @State private var displayAgent = ""
+    @State private var pathGlob = ""
+    @State private var format: CustomSourceFormat = .auto
     @State private var mappingOpen = false
     @State private var inputField = "usage.input_tokens"
     @State private var outputField = "usage.output_tokens"
     @State private var cacheField = "usage.cache_read_tokens"
     @State private var modelField = "model"
+    @State private var detectionState: SourceDetectionState = .idle
+
+    init(
+        isPresented: Binding<Bool>,
+        source: CustomSourceRecord? = nil,
+        onSaved: @escaping (String) -> Void = { _ in }
+    ) {
+        _isPresented = isPresented
+        self.source = source
+        self.onSaved = onSaved
+        if let source {
+            _name = State(initialValue: source.name)
+            let initialPath = (source.globPattern.isEmpty || source.globPattern == "**/*.jsonl")
+            ? source.directory
+            : "\(source.directory)/\(source.globPattern)"
+            _pathGlob = State(initialValue: initialPath.replacingOccurrences(of: "//", with: "/"))
+            _displayAgent = State(initialValue: source.displayAgent)
+            _format = State(initialValue: source.format)
+            _mappingOpen = State(initialValue: source.fieldMapping != .default)
+            _inputField = State(initialValue: source.fieldMapping.inputTokens)
+            _outputField = State(initialValue: source.fieldMapping.outputTokens)
+            _cacheField = State(initialValue: source.fieldMapping.cacheTokens)
+            _modelField = State(initialValue: source.fieldMapping.model)
+            _detectionState = State(initialValue: .success("Saved source. Run Detect again after changing the path or mapping."))
+        } else {
+            _name = State(initialValue: "")
+            _displayAgent = State(initialValue: "")
+            _pathGlob = State(initialValue: "")
+            _format = State(initialValue: .auto)
+            _mappingOpen = State(initialValue: false)
+            _inputField = State(initialValue: CustomSourceFieldMapping.default.inputTokens)
+            _outputField = State(initialValue: CustomSourceFieldMapping.default.outputTokens)
+            _cacheField = State(initialValue: CustomSourceFieldMapping.default.cacheTokens)
+            _modelField = State(initialValue: CustomSourceFieldMapping.default.model)
+            _detectionState = State(initialValue: .idle)
+        }
+    }
 
     var body: some View {
-        ZStack(alignment: .top) {
+        ZStack(alignment: .center) {
             Color.black.opacity(0.45)
                 .ignoresSafeArea()
                 .onTapGesture { isPresented = false }
@@ -686,9 +883,9 @@ private struct AddCustomSourceOverlay: View {
                 VStack(spacing: 0) {
                     HStack(alignment: .top, spacing: 14) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Add Custom Source")
+                            Text(source == nil ? "Add Custom Source" : "Edit Custom Source")
                                 .font(.system(size: 16, weight: .semibold, design: .rounded))
-                            Text("Point TokenBar at any agent's local log. It tails the file in place and infers the schema.")
+                            Text("Point TokenBar at an agent log. Detect validates the path and schema before the source can be saved.")
                                 .font(.caption)
                                 .foregroundStyle(TokenBarStyle.muted)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -708,12 +905,29 @@ private struct AddCustomSourceOverlay: View {
                     Divider().overlay(TokenBarStyle.line)
 
                     VStack(alignment: .leading, spacing: 14) {
-                        field("Name", text: $name)
-                        field("Path or glob", text: $pathGlob, trailing: {
-                            Button("Browse...") {
-                                browsePath()
-                            }
+                        field("Name", text: $name, prompt: "e.g. Hermes Runs")
+                        field("Display Agent", text: $displayAgent, prompt: "e.g. Hermes")
+                        field("Path or glob", text: $pathGlob, prompt: "~/agent/logs/*.jsonl", trailing: {
+                            HStack(spacing: 7) {
+                                Button("Browse...") {
+                                    browsePath()
+                                }
                                 .buttonStyle(SettingsButtonStyle())
+                                Button {
+                                    detectSource()
+                                } label: {
+                                    if detectionState == .detecting {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                            .frame(width: 48)
+                                    } else {
+                                        Text("Detect")
+                                            .frame(width: 48)
+                                    }
+                                }
+                                .buttonStyle(SettingsButtonStyle(kind: .primary))
+                                .disabled(pathGlob.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || detectionState == .detecting)
+                            }
                         })
 
                         detectionBlock
@@ -728,18 +942,13 @@ private struct AddCustomSourceOverlay: View {
                         .buttonStyle(.plain)
 
                         if mappingOpen {
-                            // CL-P0-019: fields are now editable; mappings are
-                            // persisted in the source's `name` slot as a
-                            // structured JSON suffix (until CustomSourceRecord
-                            // gets first-class mapping fields). Empty input
-                            // means "use auto schema detection".
                             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                                 field("Input field", text: $inputField)
                                 field("Output field", text: $outputField)
                                 field("Cache field", text: $cacheField)
                                 field("Model field", text: $modelField)
                             }
-                            Text("Mapping is saved alongside this source. Leave a field blank to fall back to auto detection.")
+                            Text("Saved mappings are used for auto/unknown JSONL custom sources.")
                                 .font(.caption2)
                                 .foregroundStyle(TokenBarStyle.muted)
                         }
@@ -755,77 +964,222 @@ private struct AddCustomSourceOverlay: View {
                         Spacer()
                         Button("Cancel") { isPresented = false }
                             .buttonStyle(SettingsButtonStyle())
-                        Button("Add Source") {
+                        Button(source == nil ? "Add Source" : "Save Source") {
                             addSource()
                         }
                         .buttonStyle(SettingsButtonStyle(kind: .primary))
-                        .disabled(pathGlob.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(!canSave)
                     }
                     .padding(.horizontal, 18)
                     .padding(.vertical, 14)
                 }
             }
-            .frame(width: 540)
-            .padding(.top, 72)
         }
+        .onChange(of: pathGlob) { _, _ in resetDetectionAfterEdit() }
+        .onChange(of: inputField) { _, _ in resetDetectionAfterEdit() }
+        .onChange(of: outputField) { _, _ in resetDetectionAfterEdit() }
+        .onChange(of: cacheField) { _, _ in resetDetectionAfterEdit() }
+        .onChange(of: modelField) { _, _ in resetDetectionAfterEdit() }
     }
 
     private var detectionBlock: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "checkmark")
+        let style = detectionStyle
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: style.icon)
                 .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(TokenBarStyle.cache)
+                .foregroundStyle(style.color)
                 .frame(width: 18, height: 18)
-                .background(TokenBarStyle.cache.opacity(0.16), in: Circle())
+                .background(style.color.opacity(0.16), in: Circle())
             VStack(alignment: .leading, spacing: 4) {
-                Text("Detected JSONL · auto schema · \(pathGlob.isEmpty ? 0 : 1) path matched")
+                Text(style.title)
                     .font(.system(size: 12.5, weight: .medium))
-                Text("input -> \(inputField) · output -> \(outputField) · cache -> \(cacheField)")
+                Text(style.detail)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(TokenBarStyle.muted)
                     .lineLimit(2)
             }
         }
         .padding(11)
-        .background(TokenBarStyle.input.opacity(0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(TokenBarStyle.input.opacity(0.18), lineWidth: 1))
+        .background(style.color.opacity(0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(style.color.opacity(0.18), lineWidth: 1))
     }
 
-    private func field(_ label: String, text: Binding<String>) -> some View {
-        field(label, text: text) { EmptyView() }
+    private var canSave: Bool {
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        guard !pathGlob.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        return detectionState.isSuccess
     }
 
-    private func field<Trailing: View>(_ label: String, text: Binding<String>, @ViewBuilder trailing: () -> Trailing) -> some View {
+    private var detectionStyle: (icon: String, color: Color, title: String, detail: String) {
+        switch detectionState {
+        case .idle:
+            return (
+                "scope",
+                TokenBarStyle.faint,
+                "Detection required",
+                "Fill the source details, then run Detect to validate files and field mapping."
+            )
+        case .detecting:
+            return (
+                "ellipsis",
+                TokenBarStyle.input,
+                "Checking source",
+                "Scanning the path and reading a small JSONL sample."
+            )
+        case .success(let message):
+            return (
+                "checkmark",
+                TokenBarStyle.cache,
+                "Detection passed",
+                message
+            )
+        case .failure(let message):
+            return (
+                "exclamationmark",
+                TokenBarStyle.error,
+                "Detection failed",
+                message
+            )
+        }
+    }
+
+    private func field(_ label: String, text: Binding<String>, prompt: String = "") -> some View {
+        field(label, text: text, prompt: prompt) { EmptyView() }
+    }
+
+    private func field<Trailing: View>(
+        _ label: String,
+        text: Binding<String>,
+        prompt: String = "",
+        @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
                 .sectionLabel()
             HStack(spacing: 8) {
-                TextField("", text: text)
+                TextField(prompt, text: text)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12.5, design: .monospaced))
                     .padding(.horizontal, 11)
                     .frame(height: 32)
-                    .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .background(TokenBarStyle.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
                 trailing()
             }
         }
     }
 
+    private func resetDetectionAfterEdit() {
+        if detectionState.isSuccess || detectionState.isFailure {
+            detectionState = .idle
+        }
+    }
+
+    private func detectSource() {
+        let started = Date()
+        let rawPath = pathGlob.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawPath.isEmpty else {
+            detectionState = .failure("Path is required.")
+            TokenBarTelemetry.event(
+                "custom_source.detect",
+                metadata: "path=empty",
+                success: false,
+                elapsed: Date().timeIntervalSince(started),
+                error: "Path is required."
+            )
+            return
+        }
+        detectionState = .detecting
+        let mapping = normalizedFieldMapping()
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                Self.detect(rawPathGlob: rawPath, fieldMapping: mapping)
+            }.value
+            await MainActor.run {
+                switch result {
+                case .success(let format, let message):
+                    self.format = format
+                    self.detectionState = .success(message)
+                    TokenBarTelemetry.event(
+                        "custom_source.detect",
+                        metadata: "path=\(rawPath) format=\(format.displayName)",
+                        success: true,
+                        elapsed: Date().timeIntervalSince(started)
+                    )
+                case .failure(let message):
+                    self.detectionState = .failure(message)
+                    TokenBarTelemetry.event(
+                        "custom_source.detect",
+                        metadata: "path=\(rawPath)",
+                        success: false,
+                        elapsed: Date().timeIntervalSince(started),
+                        error: message
+                    )
+                }
+            }
+        }
+    }
+
     private func addSource() {
+        let started = Date()
+        guard canSave else {
+            TokenBarTelemetry.event(
+                "custom_source.save",
+                metadata: "name=\(name)",
+                success: false,
+                elapsed: Date().timeIntervalSince(started),
+                error: "Detection has not passed."
+            )
+            return
+        }
         let split = splitPathGlob(pathGlob)
         Task {
-            await runtimeModel.addCustomSource(
-                name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                directory: split.directory,
-                globPattern: split.glob,
-                format: .auto,
-                displayAgent: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Custom" : name
-            )
+            let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedDisplayAgent = displayAgent.trimmingCharacters(in: .whitespacesAndNewlines)
+            let finalName = trimmedName.isEmpty ? "Custom Source" : trimmedName
+            let finalDisplayAgent = trimmedDisplayAgent.isEmpty ? finalName : trimmedDisplayAgent
+            let fieldMapping = normalizedFieldMapping()
+            if let source {
+                await runtimeModel.updateCustomSource(
+                    source,
+                    name: finalName,
+                    directory: split.directory,
+                    globPattern: split.glob,
+                    format: format,
+                    displayAgent: finalDisplayAgent,
+                    fieldMapping: fieldMapping
+                )
+            } else {
+                await runtimeModel.addCustomSource(
+                    name: finalName,
+                    directory: split.directory,
+                    globPattern: split.glob,
+                    format: format,
+                    displayAgent: finalDisplayAgent,
+                    fieldMapping: fieldMapping
+                )
+            }
             await MainActor.run {
+                TokenBarTelemetry.event(
+                    "custom_source.save",
+                    metadata: "name=\(finalName) mode=\(source == nil ? "add" : "edit")",
+                    success: true,
+                    elapsed: Date().timeIntervalSince(started)
+                )
+                onSaved(finalName)
                 isPresented = false
             }
         }
+    }
+
+    private func normalizedFieldMapping() -> CustomSourceFieldMapping {
+        let defaults = CustomSourceFieldMapping.default
+        return CustomSourceFieldMapping(
+            inputTokens: inputField.nonEmptyMapping(defaults.inputTokens),
+            outputTokens: outputField.nonEmptyMapping(defaults.outputTokens),
+            cacheTokens: cacheField.nonEmptyMapping(defaults.cacheTokens),
+            model: modelField.nonEmptyMapping(defaults.model)
+        )
     }
 
     private func browsePath() {
@@ -842,6 +1196,12 @@ private struct AddCustomSourceOverlay: View {
     private func splitPathGlob(_ raw: String) -> (directory: String, glob: String) {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.contains("*") else {
+            let expanded = CodexDataSource.expandHome(in: trimmed)
+            var isDirectory = ObjCBool(false)
+            if FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory),
+               !isDirectory.boolValue {
+                return Self.splitConcreteFilePath(trimmed)
+            }
             return (trimmed, "**/*.jsonl")
         }
         let parts = trimmed.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
@@ -851,6 +1211,167 @@ private struct AddCustomSourceOverlay: View {
         let dir = parts[..<firstWildcard].joined(separator: "/")
         let glob = parts[firstWildcard...].joined(separator: "/")
         return (dir.isEmpty ? "." : dir, glob.isEmpty ? "**/*.jsonl" : glob)
+    }
+
+    nonisolated private static func detect(
+        rawPathGlob: String,
+        fieldMapping: CustomSourceFieldMapping
+    ) -> SourceDetectionResult {
+        let split = splitPathGlob(rawPathGlob)
+        let files = discoverFiles(directory: split.directory, globPattern: split.glob)
+        guard let sample = files.first else {
+            return .failure("No readable files matched this path.")
+        }
+
+        let detected = SourceFormatDetector.detect(fileURL: sample)
+        switch detected {
+        case .claudeCodeJSONL, .codexJSONL:
+            return .success(detected, "\(detected.displayName) · \(files.count) file(s) matched.")
+        case .auto, .unknown:
+            guard mappedJSONLooksValid(fileURL: sample, mapping: fieldMapping) else {
+                return .failure("Sample file is JSONL, but the configured token fields were not found.")
+            }
+            return .success(.auto, "Custom JSONL mapping · \(files.count) file(s) matched.")
+        }
+    }
+
+    nonisolated private static func discoverFiles(directory: String, globPattern: String) -> [URL] {
+        let expanded = CodexDataSource.expandHome(in: directory)
+        let root = URL(fileURLWithPath: expanded, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: root.path(percentEncoded: false)) else {
+            return []
+        }
+
+        let recursive = globPattern.contains("**")
+        let suffix = globPattern.split(separator: "*").last.map(String.init) ?? ".jsonl"
+        if recursive {
+            guard let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ) else { return [] }
+            return enumerator.compactMap { item -> URL? in
+                guard let url = item as? URL else { return nil }
+                guard url.lastPathComponent.hasSuffix(suffix) else { return nil }
+                return url
+            }
+            .prefix(25)
+            .sorted { $0.path < $1.path }
+        }
+
+        return ((try? FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )) ?? [])
+        .filter { $0.lastPathComponent.hasSuffix(suffix) }
+        .prefix(25)
+        .sorted { $0.path < $1.path }
+    }
+
+    nonisolated private static func mappedJSONLooksValid(fileURL: URL, mapping: CustomSourceFieldMapping) -> Bool {
+        guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else {
+            return false
+        }
+        for line in text.split(whereSeparator: \.isNewline).prefix(40) {
+            guard
+                let data = String(line).data(using: .utf8),
+                let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                continue
+            }
+            if mappedIntValue(from: object, path: mapping.inputTokens) != nil,
+               mappedIntValue(from: object, path: mapping.outputTokens) != nil,
+               mappedIntValue(from: object, path: mapping.cacheTokens) != nil {
+                return true
+            }
+        }
+        return false
+    }
+
+    nonisolated private static func mappedIntValue(from object: [String: Any], path: String) -> Int? {
+        let value = mappedValue(from: object, path: path)
+        switch value {
+        case let intValue as Int:
+            return intValue
+        case let intValue as Int64:
+            return Int(intValue)
+        case let doubleValue as Double:
+            return Int(doubleValue)
+        case let num as NSNumber:
+            return num.intValue
+        case let stringValue as String:
+            return Int(stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
+        default:
+            return nil
+        }
+    }
+
+    nonisolated private static func mappedValue(from object: [String: Any], path: String) -> Any? {
+        let parts = path.split(separator: ".").map(String.init)
+        var current: Any = object
+        for part in parts {
+            if let index = Int(part), let array = current as? [Any], array.indices.contains(index) {
+                current = array[index]
+                continue
+            }
+            guard let dictionary = current as? [String: Any], let next = dictionary[part] else {
+                return nil
+            }
+            current = next
+        }
+        return current
+    }
+
+    nonisolated private static func splitPathGlob(_ raw: String) -> (directory: String, glob: String) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.contains("*") else {
+            let expanded = CodexDataSource.expandHome(in: trimmed)
+            var isDirectory = ObjCBool(false)
+            if FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory),
+               !isDirectory.boolValue {
+                return splitConcreteFilePath(trimmed)
+            }
+            return (trimmed, "**/*.jsonl")
+        }
+        let parts = trimmed.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard let firstWildcard = parts.firstIndex(where: { $0.contains("*") }) else {
+            return (trimmed, "**/*.jsonl")
+        }
+        let dir = parts[..<firstWildcard].joined(separator: "/")
+        let glob = parts[firstWildcard...].joined(separator: "/")
+        return (dir.isEmpty ? "." : dir, glob.isEmpty ? "**/*.jsonl" : glob)
+    }
+
+    nonisolated private static func splitConcreteFilePath(_ raw: String) -> (directory: String, glob: String) {
+        guard let slash = raw.lastIndex(of: "/") else {
+            return (".", raw)
+        }
+        let directory = String(raw[..<slash])
+        let fileName = String(raw[raw.index(after: slash)...])
+        return (directory.isEmpty ? "/" : directory, fileName.isEmpty ? "**/*.jsonl" : fileName)
+    }
+
+    private enum SourceDetectionState: Equatable {
+        case idle
+        case detecting
+        case success(String)
+        case failure(String)
+
+        var isSuccess: Bool {
+            if case .success = self { return true }
+            return false
+        }
+
+        var isFailure: Bool {
+            if case .failure = self { return true }
+            return false
+        }
+    }
+
+    private enum SourceDetectionResult: Sendable {
+        case success(CustomSourceFormat, String)
+        case failure(String)
     }
 }
 
@@ -871,46 +1392,29 @@ struct PricingValues: Codable, Hashable {
     var isValid: Bool {
         input.isValidPrice && output.isValidPrice && cache.isValidPrice
     }
+
+    var normalized: PricingValues {
+        .init(
+            input: input.trimmedPrice,
+            output: output.trimmedPrice,
+            cache: cache.trimmedPrice
+        )
+    }
 }
 
 extension String {
     var isValidPrice: Bool {
-        guard let v = Double(self) else { return false }
+        guard let v = Double(trimmedPrice) else { return false }
         return v >= 0
     }
-}
 
-private struct PendingActionButton: View {
-    let title: String
-    var systemImage: String?
-    var kind: SettingsButtonStyle.Kind = .normal
-
-    init(_ title: String, systemImage: String? = nil, kind: SettingsButtonStyle.Kind = .normal) {
-        self.title = title
-        self.systemImage = systemImage
-        self.kind = kind
+    var trimmedPrice: String {
+        trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    var body: some View {
-        HStack(spacing: 6) {
-            if let systemImage {
-                Image(systemName: systemImage)
-            }
-            Text(title)
-            Text("Soon")
-                .font(.system(size: 9.5, weight: .semibold))
-                .foregroundStyle(TokenBarStyle.warn)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .background(TokenBarStyle.warn.opacity(0.12), in: Capsule())
-        }
-        .font(.system(size: 11.5, weight: .medium))
-        .padding(.horizontal, 10)
-        .frame(height: 28)
-        .foregroundStyle(kind == .danger ? TokenBarStyle.error : TokenBarStyle.muted)
-        .background(Color.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
-        .help("Coming soon")
+    func nonEmptyMapping(_ fallback: String) -> String {
+        let value = trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? fallback : value
     }
 }
 
@@ -928,6 +1432,7 @@ private struct SettingsButtonStyle: ButtonStyle {
 
     var kind: Kind = .normal
     var size: Size = .regular
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -937,39 +1442,42 @@ private struct SettingsButtonStyle: ButtonStyle {
             .foregroundStyle(foreground)
             .background(background, in: RoundedRectangle(cornerRadius: size == .small ? 6 : 8, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: size == .small ? 6 : 8, style: .continuous).stroke(stroke, lineWidth: 1))
-            .opacity(configuration.isPressed ? 0.75 : 1)
+            .opacity(!isEnabled ? 0.45 : (configuration.isPressed ? 0.75 : 1))
     }
 
     private var foreground: Color {
+        guard isEnabled else { return TokenBarStyle.faint }
         switch kind {
         case .normal:
-            TokenBarStyle.foreground
+            return TokenBarStyle.foreground
         case .primary:
-            .white
+            return .white
         case .danger:
-            TokenBarStyle.error
+            return TokenBarStyle.error
         }
     }
 
     private var background: Color {
+        guard isEnabled else { return TokenBarStyle.surfaceRaised.opacity(0.55) }
         switch kind {
         case .normal:
-            Color.white.opacity(0.035)
+            return TokenBarStyle.surfaceRaised
         case .primary:
-            Color(red: 0.12, green: 0.54, blue: 0.82)
+            return TokenBarStyle.accent
         case .danger:
-            TokenBarStyle.error.opacity(0.08)
+            return TokenBarStyle.error.opacity(0.08)
         }
     }
 
     private var stroke: Color {
+        guard isEnabled else { return TokenBarStyle.line.opacity(0.55) }
         switch kind {
         case .normal:
-            TokenBarStyle.line
+            return TokenBarStyle.line
         case .primary:
-            Color.white.opacity(0.12)
+            return TokenBarStyle.accent.opacity(0.35)
         case .danger:
-            TokenBarStyle.error.opacity(0.30)
+            return TokenBarStyle.error.opacity(0.30)
         }
     }
 }

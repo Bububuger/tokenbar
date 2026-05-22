@@ -4,31 +4,61 @@ import TokenBarCore
 
 enum TokenBarStyle {
     static let pagePadding: CGFloat = 24
-    static let cardPadding: CGFloat = 16
-    static let sectionSpacing: CGFloat = 16
-    static let cardCornerRadius: CGFloat = 14
+    static let cardPadding: CGFloat = 14
+    static let sectionSpacing: CGFloat = 14
+    static let cardCornerRadius: CGFloat = 10
     static let sidebarWidth: CGFloat = 248
 
+    private static func adaptiveColor(_ name: String, dark: NSColor, light: NSColor) -> Color {
+        Color(nsColor: NSColor(name: NSColor.Name(name)) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+        })
+    }
+
     // MARK: - Semantic foreground / structure (CL-P0-007 / DESIGN§5.1)
-    //
-    // All non-brand colors are sourced from Apple's dynamic system catalog so
-    // they adapt to light/dark, Increase Contrast, and Reduce Transparency
-    // automatically. The `Color(nsColor: .xxx)` wrappers keep the old call
-    // sites compiling (TokenBarStyle.foreground / .muted / etc.).
-    static let foreground = Color(nsColor: .labelColor)
-    static let muted = Color(nsColor: .secondaryLabelColor)
-    static let faint = Color(nsColor: .tertiaryLabelColor)
-    static let line = Color(nsColor: .separatorColor)
+    static let foreground = adaptiveColor(
+        "TokenBarForeground",
+        dark: NSColor(red: 0.92, green: 0.96, blue: 0.96, alpha: 1),
+        light: NSColor(red: 0.15, green: 0.17, blue: 0.18, alpha: 1)
+    )
+    static let muted = adaptiveColor(
+        "TokenBarMuted",
+        dark: NSColor(red: 0.56, green: 0.62, blue: 0.66, alpha: 1),
+        light: NSColor(red: 0.45, green: 0.48, blue: 0.49, alpha: 1)
+    )
+    static let faint = adaptiveColor(
+        "TokenBarFaint",
+        dark: NSColor(red: 0.35, green: 0.42, blue: 0.46, alpha: 1),
+        light: NSColor(red: 0.64, green: 0.67, blue: 0.68, alpha: 1)
+    )
+    static let line = adaptiveColor(
+        "TokenBarLine",
+        dark: NSColor(red: 0.14, green: 0.21, blue: 0.24, alpha: 1),
+        light: NSColor(red: 0.84, green: 0.86, blue: 0.86, alpha: 1)
+    )
 
     // MARK: - Token category colors (CL-P0-010 / DESIGN§3.B.2)
-    //
-    // Input / Output / Cache must remain visually distinct under deuteranopia,
-    // so we use Apple's `systemBlue / .systemOrange / .systemGreen`. They are
-    // semantically locked to "Input / Output / Cache" — agents reuse a separate
-    // palette below (see `agentColor`).
-    static let input = Color(nsColor: .systemBlue)
-    static let output = Color(nsColor: .systemOrange)
-    static let cache = Color(nsColor: .systemGreen)
+    static let input = adaptiveColor(
+        "TokenBarInput",
+        dark: NSColor(red: 0.32, green: 0.79, blue: 0.82, alpha: 1),
+        light: NSColor(red: 73 / 255, green: 163 / 255, blue: 176 / 255, alpha: 1)
+    )
+    static let output = adaptiveColor(
+        "TokenBarOutput",
+        dark: NSColor(red: 0.90, green: 0.52, blue: 0.31, alpha: 1),
+        light: NSColor(red: 204 / 255, green: 124 / 255, blue: 94 / 255, alpha: 1)
+    )
+    static let cache = adaptiveColor(
+        "TokenBarCache",
+        dark: NSColor(red: 0.50, green: 0.86, blue: 0.56, alpha: 1),
+        light: NSColor(red: 0.43, green: 0.66, blue: 0.50, alpha: 1)
+    )
+
+    static let selectionBlue = adaptiveColor(
+        "TokenBarSelectionBlue",
+        dark: NSColor(red: 0.15, green: 0.55, blue: 0.95, alpha: 1),
+        light: NSColor(red: 0.02, green: 0.49, blue: 0.98, alpha: 1)
+    )
 
     // Cost retains its warm-orange identity from the design, but adapts to
     // light/dark via a NSColor dynamic provider (CL-P0-009 substitute for
@@ -36,14 +66,15 @@ enum TokenBarStyle {
     static let cost = Color(nsColor: NSColor(name: "TokenBarCost") { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             ? NSColor(red: 0.94, green: 0.64, blue: 0.24, alpha: 1)
-            : NSColor(red: 0.77, green: 0.47, blue: 0.10, alpha: 1)
+            : NSColor(red: 0.72, green: 0.39, blue: 0.20, alpha: 1)
     })
 
-    // Brand accent (DESIGN§3.B.1) — teal kept as the one custom brand color.
+    // Brand accent (DESIGN§3.B.1). In light mode this is a data/accent color,
+    // not a page wash; the popover background stays neutral like a native menu.
     static let accent = Color(nsColor: NSColor(name: "TokenBarAccent") { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             ? NSColor(red: 0.06, green: 0.71, blue: 0.65, alpha: 1)
-            : NSColor(red: 0.04, green: 0.58, blue: 0.54, alpha: 1)
+            : NSColor(red: 73 / 255, green: 163 / 255, blue: 176 / 255, alpha: 1)
     })
 
     // MARK: - Status colors (DESIGN§3.C)
@@ -60,6 +91,26 @@ enum TokenBarStyle {
     static let warn = Color(nsColor: .systemYellow)
     static let error = Color(nsColor: .systemRed)
 
+    static let appBackground = Color(nsColor: NSColor(name: "TokenBarAppBackground") { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(red: 0.035, green: 0.075, blue: 0.095, alpha: 1)
+            : NSColor(red: 0.988, green: 0.990, blue: 0.990, alpha: 1)
+    })
+
+    static let surface = Color(nsColor: NSColor(name: "TokenBarSurface") { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(red: 0.055, green: 0.115, blue: 0.145, alpha: 1)
+            : NSColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.82)
+    })
+
+    static let surfaceRaised = Color(nsColor: NSColor(name: "TokenBarSurfaceRaised") { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(red: 0.075, green: 0.145, blue: 0.18, alpha: 1)
+            : NSColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.94)
+    })
+
+    static let controlFill = Color(nsColor: .controlBackgroundColor)
+
     /// Agent attribution palette (CL-P0-011 / DESIGN§3.B.2).
     /// Codex anchors to brand accent (teal) so it no longer collides with the
     /// Input token color (which is system blue). All others are pulled from
@@ -67,13 +118,21 @@ enum TokenBarStyle {
     static func agentColor(_ name: String) -> Color {
         switch name {
         case "Codex":
-            return accent
+            return selectionBlue
         case "Claude", "Claude Code":
-            return Color(nsColor: .systemOrange)
+            return output
         case "Gemini", "Gemini CLI":
-            return Color(nsColor: .systemPurple)
+            return adaptiveColor(
+                "TokenBarGemini",
+                dark: NSColor(red: 0.73, green: 0.49, blue: 0.96, alpha: 1),
+                light: NSColor(red: 0.41, green: 0.52, blue: 0.47, alpha: 1)
+            )
         case "Hermes":
-            return Color(nsColor: .systemPink)
+            return adaptiveColor(
+                "TokenBarHermes",
+                dark: NSColor(red: 0.95, green: 0.45, blue: 0.68, alpha: 1),
+                light: NSColor(red: 0.70, green: 0.40, blue: 0.72, alpha: 1)
+            )
         default:
             return muted
         }
@@ -180,6 +239,10 @@ func tokenbarTokens(_ value: Int) -> String {
     TokenBarNumberFormatting.stagedTokens(value)
 }
 
+func tokenbarCompactTokens(_ value: Int) -> String {
+    TokenBarNumberFormatting.compactTokens(value, fractionDigits: 2)
+}
+
 /// CL-P1-004: split a staged token string ("1.5M") into ("1.5", "M") so the
 /// Hero can render the unit suffix in a smaller, faint font. Returns
 /// (number, suffix) where suffix may be empty.
@@ -193,14 +256,27 @@ func tokenbarSplitStagedTokens(_ value: Int) -> (number: String, suffix: String)
 }
 
 func tokenbarCurrency(_ value: Double, maximumFractionDigits: Int = 2) -> String {
+    let absValue = abs(value)
     let formatter = NumberFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.numberStyle = .currency
-    formatter.currencyCode = "USD"
-    formatter.currencySymbol = "$"
+    formatter.numberStyle = .decimal
+    formatter.usesGroupingSeparator = false
     formatter.maximumFractionDigits = maximumFractionDigits
-    formatter.minimumFractionDigits = value >= 10 ? 0 : 2
-    return formatter.string(from: NSNumber(value: value)) ?? "$0.00"
+    formatter.minimumFractionDigits = min(maximumFractionDigits, absValue >= 10 ? 0 : 2)
+    let formatted = formatter.string(from: NSNumber(value: absValue)) ?? String(format: "%.\(maximumFractionDigits)f", absValue)
+    return "\(value < 0 ? "-" : "")$\(formatted)"
+}
+
+func tokenbarCompactCurrency(_ value: Double) -> String {
+    let absValue = abs(value)
+    let sign = value < 0 ? "-" : ""
+    if absValue >= 1_000_000 {
+        return "\(sign)$\(String(format: "%.2f", absValue / 1_000_000))M"
+    }
+    if absValue >= 1_000 {
+        return "\(sign)$\(String(format: "%.2f", absValue / 1_000))K"
+    }
+    return tokenbarCurrency(value, maximumFractionDigits: absValue < 10 ? 2 : 1)
 }
 
 func tokenbarPercent(_ value: Double) -> String {
@@ -307,6 +383,127 @@ private func formatIdleRange(start: Int, end: Int) -> String {
     return String(format: "%02d-%02d", start, end)
 }
 
+private let tokenbarPricingOverridesKey = "tokenbar.pricingOverrides"
+
+func tokenbarPricingOverrides(defaults: UserDefaults = .standard) -> [String: PricingValues] {
+    guard let json = defaults.string(forKey: tokenbarPricingOverridesKey),
+          let data = json.data(using: .utf8),
+          let overrides = try? JSONDecoder().decode([String: PricingValues].self, from: data) else {
+        return [:]
+    }
+    return overrides
+}
+
+struct TokenBarPricingLookup {
+    private let overridesByModel: [String: PricingValues]
+    private let defaultsByModel: [String: PricingValues]
+
+    init(defaults: UserDefaults = .standard) {
+        overridesByModel = tokenbarPricingOverrides(defaults: defaults).reduce(into: [:]) { result, entry in
+            result[Self.key(for: entry.key)] = entry.value.normalized
+        }
+        defaultsByModel = tokenbarDefaultPricingRows.reduce(into: [:]) { result, row in
+            result[Self.key(for: row.model)] = PricingValues(input: row.input, output: row.output, cache: row.cache).normalized
+        }
+    }
+
+    func values(for modelName: String) -> PricingValues? {
+        let key = Self.key(for: modelName)
+        guard !key.isEmpty else { return nil }
+        return overridesByModel[key] ?? defaultsByModel[key]
+    }
+
+    func estimatedCost(for event: UsageEvent) -> Double {
+        let modelName = event.modelName?.isEmpty == false ? event.modelName! : event.agent.displayName
+        if let pricing = values(for: modelName),
+           let inputRate = Double(pricing.input),
+           let outputRate = Double(pricing.output),
+           let cacheRate = Double(pricing.cache) {
+            return (
+                Double(event.inputTokens) * inputRate
+                + Double(event.outputTokens) * outputRate
+                + Double(event.cacheTokens) * cacheRate
+            ) / 1_000_000
+        }
+
+        let eventTokens = event.inputTokens + event.outputTokens + event.cacheTokens
+        return Double(eventTokens) * event.agent.defaultCostPerMillionTokens / 1_000_000
+    }
+
+    private static func key(for modelName: String) -> String {
+        modelName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+}
+
+private func tokenbarPricingValues(for modelName: String, defaults: UserDefaults = .standard) -> PricingValues? {
+    let trimmedModel = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedModel.isEmpty else { return nil }
+    return TokenBarPricingLookup(defaults: defaults).values(for: trimmedModel)
+}
+
+func tokenbarEstimatedCost(for event: UsageEvent, defaults: UserDefaults = .standard) -> Double {
+    TokenBarPricingLookup(defaults: defaults).estimatedCost(for: event)
+}
+
+func tokenbarEstimatedCost(
+    events: [UsageEvent],
+    days: Int? = nil,
+    referenceDate: Date = Date(),
+    calendar: Calendar = Calendar(identifier: .gregorian),
+    where include: ((UsageEvent) -> Bool)? = nil
+) -> Double {
+    let boundedEvents: [UsageEvent]
+    if let days {
+        let todayStart = calendar.startOfDay(for: referenceDate)
+        let windowStart = calendar.date(byAdding: .day, value: -(days - 1), to: todayStart) ?? todayStart
+        let windowEnd = calendar.date(byAdding: .day, value: 1, to: todayStart) ?? referenceDate
+        boundedEvents = events.filter { $0.timestamp >= windowStart && $0.timestamp < windowEnd }
+    } else {
+        boundedEvents = events
+    }
+
+    let pricing = TokenBarPricingLookup()
+    return boundedEvents
+        .filter { include?($0) ?? true }
+        .reduce(0.0) { $0 + pricing.estimatedCost(for: $1) }
+}
+
+func tokenbarCostProjection(events: [UsageEvent]) -> UsageCostProjection {
+    let pricing = TokenBarPricingLookup()
+    var totalsByModel: [String: (tokens: Int, cost: Double)] = [:]
+    for event in events {
+        let modelName = event.modelName?.isEmpty == false ? event.modelName! : event.agent.displayName
+        let eventTokens = event.inputTokens + event.outputTokens + event.cacheTokens
+        let current = totalsByModel[modelName] ?? (tokens: 0, cost: 0)
+        totalsByModel[modelName] = (
+            tokens: current.tokens + eventTokens,
+            cost: current.cost + pricing.estimatedCost(for: event)
+        )
+    }
+
+    let totalTokens = totalsByModel.values.reduce(0) { $0 + $1.tokens }
+    let rows = totalsByModel.map { model, totals in
+        UsageCostBreakdown(
+            name: model,
+            totalTokens: totals.tokens,
+            cost: totals.cost,
+            percentage: totalTokens > 0 ? Double(totals.tokens) / Double(totalTokens) : 0
+        )
+    }
+    .sorted { lhs, rhs in
+        if lhs.totalTokens == rhs.totalTokens {
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+        return lhs.totalTokens > rhs.totalTokens
+    }
+    let totalCost = rows.reduce(0.0) { $0 + $1.cost }
+    return UsageCostProjection(
+        totalCost: totalCost,
+        blendedRatePerMillion: totalTokens > 0 ? totalCost / Double(totalTokens) * 1_000_000 : 0,
+        byAgent: rows
+    )
+}
+
 func tokenbarModelBreakdowns(
     events: [UsageEvent],
     projectName: String? = nil,
@@ -337,6 +534,7 @@ func tokenbarModelBreakdowns(
     }
 
     var grouped: [String: Accumulator] = [:]
+    let pricing = TokenBarPricingLookup()
     for event in filtered {
         let modelName = event.modelName?.isEmpty == false ? event.modelName! : event.agent.displayName
         var current = grouped[modelName] ?? Accumulator()
@@ -344,7 +542,7 @@ func tokenbarModelBreakdowns(
         current.inputTokens += event.inputTokens
         current.outputTokens += event.outputTokens
         current.cacheTokens += event.cacheTokens
-        current.cost += Double(eventTokens) * event.agent.defaultCostPerMillionTokens / 1_000_000
+        current.cost += pricing.estimatedCost(for: event)
         current.agentTokens[event.agent.displayName, default: 0] += eventTokens
         grouped[modelName] = current
     }
@@ -385,12 +583,12 @@ func tokenbarModelBreakdowns(
 /// fade-in delay as system tooltips, free `Esc`-to-dismiss, free A11y.
 extension View {
     func tbNumberTooltip(precise value: Int, window: String) -> some View {
-        let pretty = value.formatted(.number)
+        let pretty = tokenbarCompactTokens(value)
         return self.help("\(pretty) tokens · \(window)")
     }
 
     func tbNumberTooltip(precise cost: Double, window: String) -> some View {
-        let pretty = cost.formatted(.currency(code: "USD").precision(.fractionLength(0...4)))
+        let pretty = tokenbarCompactCurrency(cost)
         return self.help("\(pretty) · \(window)")
     }
 
@@ -410,6 +608,7 @@ enum TokenBarRankingKind {
 /// string with no cost column.
 struct TokenBarRankingRow: Identifiable, Hashable {
     let name: String
+    let summary: UsageSummary
     let totalTokens: Int
     let subtitle: String
     let cost: Double
@@ -436,6 +635,7 @@ func tokenbarRankingRows(
     let windowEnd = calendar.date(byAdding: .day, value: 1, to: todayStart) ?? referenceDate
     let filtered = events.filter { $0.timestamp >= windowStart && $0.timestamp < windowEnd }
 
+    let pricing = TokenBarPricingLookup()
     return rows.map { row in
         let rowEvents = filtered.filter { event in
             switch kind {
@@ -444,12 +644,12 @@ func tokenbarRankingRows(
             }
         }
         let cost = rowEvents.reduce(0.0) { partial, event in
-            let tokens = event.inputTokens + event.outputTokens + event.cacheTokens
-            return partial + Double(tokens) * event.agent.defaultCostPerMillionTokens / 1_000_000
+            partial + pricing.estimatedCost(for: event)
         }
         let subtitle = rankingSubtitle(events: rowEvents, kind: kind, max: maxSubtitle)
         return TokenBarRankingRow(
             name: row.name,
+            summary: row.summary,
             totalTokens: row.summary.totalTokens,
             subtitle: subtitle,
             cost: cost
@@ -492,7 +692,7 @@ func tokenbarMirrorValue(
     case .tokens:
         tokenbarTokens(todayTokens)
     case .cost:
-        tokenbarCurrency(todayCost, maximumFractionDigits: 2)
+        tokenbarCompactCurrency(todayCost)
     case .sessions:
         "\(todaySessions)"
     case .off:
@@ -509,13 +709,51 @@ func tokenbarMirrorValue(
 /// back to `controlBackgroundColor` so the surface stays legible without vibrancy.
 struct TokenBarGlassBackground: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        Group {
-            if reduceTransparency {
-                Color(nsColor: .controlBackgroundColor)
-            } else {
-                Rectangle().fill(.regularMaterial)
+        ZStack {
+            TokenBarStyle.appBackground
+            if !reduceTransparency {
+                if colorScheme == .light {
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.94),
+                            Color(red: 0.965, green: 0.980, blue: 1.0).opacity(0.20),
+                            Color(red: 1.0, green: 0.985, blue: 0.992).opacity(0.16),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    RadialGradient(
+                        colors: [
+                            Color(red: 0.64, green: 0.82, blue: 1.0).opacity(0.08),
+                            Color.clear
+                        ],
+                        center: .topTrailing,
+                        startRadius: 20,
+                        endRadius: 260
+                    )
+                    RadialGradient(
+                        colors: [
+                            Color(red: 1.0, green: 0.80, blue: 0.90).opacity(0.08),
+                            Color.clear
+                        ],
+                        center: .bottom,
+                        startRadius: 18,
+                        endRadius: 240
+                    )
+                } else {
+                    LinearGradient(
+                        colors: [
+                            TokenBarStyle.accent.opacity(0.14),
+                            TokenBarStyle.appBackground.opacity(0.45),
+                            TokenBarStyle.cost.opacity(0.08),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                }
             }
         }
         .ignoresSafeArea()
@@ -553,11 +791,8 @@ struct TokenBarCard<Content: View>: View {
         content
             .padding(padding)
             .foregroundStyle(TokenBarStyle.foreground)
-            // CL-P0-007: card uses `controlBackgroundColor` so it sits cleanly
-            // on both light and dark variants without a custom gradient or the
-            // heavy 18pt shadow (NSPopover already adds its own shadow).
             .background(
-                Color(nsColor: .controlBackgroundColor),
+                TokenBarStyle.surface,
                 in: RoundedRectangle(cornerRadius: TokenBarStyle.cardCornerRadius, style: .continuous)
             )
             .overlay(
@@ -845,7 +1080,7 @@ struct TokenBarKPIDetailDrawer: View {
                                 .font(.system(size: 10, weight: .semibold))
                                 .tracking(0.5)
                                 .foregroundStyle(TokenBarStyle.faint)
-                            Text(tokenbarCurrency(cost, maximumFractionDigits: 3))
+                            Text(tokenbarCompactCurrency(cost))
                                 .font(.system(size: 16, weight: .semibold, design: .rounded))
                                 .monospacedDigit()
                                 .foregroundStyle(TokenBarStyle.cost)
@@ -864,7 +1099,7 @@ struct TokenBarKPIDetailDrawer: View {
                 .font(.system(size: 10, weight: .semibold))
                 .tracking(0.5)
                 .foregroundStyle(TokenBarStyle.faint)
-            Text(tokenbarTokens(value))
+            Text(tokenbarCompactTokens(value))
                 .font(.system(size: 16, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(accent)
@@ -873,9 +1108,16 @@ struct TokenBarKPIDetailDrawer: View {
     }
 }
 
+private enum TokenBarBarPart: Equatable {
+    case input
+    case output
+    case cache
+}
+
 struct InputOutputCacheBar: View {
     let summary: UsageSummary
     var height: CGFloat = 6
+    @State private var hoveredPart: TokenBarBarPart?
 
     var body: some View {
         Group {
@@ -889,11 +1131,17 @@ struct InputOutputCacheBar: View {
                         Rectangle()
                             .fill(TokenBarStyle.input)
                             .frame(width: proxy.size.width * CGFloat(summary.inputTokens) / CGFloat(total))
+                            .contentShape(Rectangle())
+                            .onHover { hoveredPart = $0 ? .input : (hoveredPart == .input ? nil : hoveredPart) }
                         Rectangle()
                             .fill(TokenBarStyle.output)
                             .frame(width: proxy.size.width * CGFloat(summary.outputTokens) / CGFloat(total))
+                            .contentShape(Rectangle())
+                            .onHover { hoveredPart = $0 ? .output : (hoveredPart == .output ? nil : hoveredPart) }
                         Rectangle()
                             .fill(TokenBarStyle.cache)
+                            .contentShape(Rectangle())
+                            .onHover { hoveredPart = $0 ? .cache : (hoveredPart == .cache ? nil : hoveredPart) }
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: height / 2, style: .continuous))
@@ -901,6 +1149,24 @@ struct InputOutputCacheBar: View {
         }
         .frame(height: height)
         .background(TokenBarStyle.line, in: RoundedRectangle(cornerRadius: height / 2, style: .continuous))
+        .overlay(alignment: .top) {
+            if let hoveredPart {
+                TokenBarHoverBadge(text: segmentTooltip(hoveredPart), width: 92)
+                    .offset(y: -22)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private func segmentTooltip(_ part: TokenBarBarPart) -> String {
+        switch part {
+        case .input:
+            return "In \(tokenbarCompactTokens(summary.inputTokens))"
+        case .output:
+            return "Out \(tokenbarCompactTokens(summary.outputTokens))"
+        case .cache:
+            return "Cache \(tokenbarCompactTokens(summary.cacheTokens))"
+        }
     }
 }
 
@@ -910,6 +1176,7 @@ struct UsageStackedBarChart: View {
     /// CL-P1-008: optional click handler. When non-nil, every bar becomes
     /// clickable and a hover tooltip shows MM-DD · tokens · cost.
     var onSelect: ((UsageDay) -> Void)? = nil
+    @State private var hoveredDay: UsageDay?
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 5) {
@@ -930,12 +1197,18 @@ struct UsageStackedBarChart: View {
                 .frame(height: max(6, height * max(0.06, day.intensity)))
                 .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 .opacity(day.summary.totalTokens > 0 ? 1 : 0.30)
-                .help("\(day.date.formatted(.dateTime.month(.abbreviated).day())) · \(tokenbarTokens(day.summary.totalTokens))")
                 .contentShape(Rectangle())
+                .onHover { hoveredDay = $0 ? day : nil }
                 .onTapGesture { onSelect?(day) }
             }
         }
         .frame(height: height, alignment: .bottom)
+        .overlay(alignment: .top) {
+            if let hoveredDay {
+                TokenBarHoverBadge(text: dayTooltip(hoveredDay), width: 330)
+                    .offset(y: -22)
+            }
+        }
     }
 
     private var displayDays: [UsageDay] {
@@ -945,6 +1218,10 @@ struct UsageStackedBarChart: View {
 
     private func segmentHeight(_ tokens: Int, total: Int) -> CGFloat {
         max(1, CGFloat(tokens) / CGFloat(total) * height)
+    }
+
+    private func dayTooltip(_ day: UsageDay) -> String {
+        "\(day.date.formatted(.dateTime.month(.abbreviated).day())) · Total \(tokenbarCompactTokens(day.summary.totalTokens)) · In \(tokenbarCompactTokens(day.summary.inputTokens)) · Out \(tokenbarCompactTokens(day.summary.outputTokens)) · Cache \(tokenbarCompactTokens(day.summary.cacheTokens))"
     }
 }
 
@@ -995,9 +1272,19 @@ struct UsageHeatmapStripView: View {
 struct HourlyHeatmapView: View {
     let hours: [UsageHourOfDay]
     var showAxis = true
+    @State private var hoveredHour: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Spacer()
+                TokenBarHoverBadge(
+                    text: hoveredHour.map(hourTooltip) ?? "Hover an hour",
+                    width: 330,
+                    isPlaceholder: hoveredHour == nil
+                )
+            }
+            .frame(height: 20)
             HStack(spacing: 3) {
                 ForEach(0..<24, id: \.self) { hour in
                     let item = normalizedHour(hour)
@@ -1006,12 +1293,12 @@ struct HourlyHeatmapView: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: 15)
                         .overlay {
-                            if Calendar.current.component(.hour, from: Date()) == hour {
+                            if hoveredHour == hour {
                                 RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                    .stroke(TokenBarStyle.input.opacity(0.95), lineWidth: 1)
+                                    .stroke(TokenBarStyle.foreground.opacity(0.85), lineWidth: 1)
                             }
                         }
-                        .help("\(String(format: "%02d:00", hour)) · \(tokenbarTokens(item?.summary.totalTokens ?? 0))")
+                        .onHover { hoveredHour = $0 ? hour : nil }
                 }
             }
             if showAxis {
@@ -1034,6 +1321,30 @@ struct HourlyHeatmapView: View {
 
     private func normalizedHour(_ hour: Int) -> UsageHourOfDay? {
         hours.first { $0.hourOfDay == hour }
+    }
+
+    private func hourTooltip(_ hour: Int) -> String {
+        let summary = normalizedHour(hour)?.summary ?? UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0)
+        return "\(String(format: "%02d:00", hour)) · Total \(tokenbarCompactTokens(summary.totalTokens)) · In \(tokenbarCompactTokens(summary.inputTokens)) · Out \(tokenbarCompactTokens(summary.outputTokens)) · Cache \(tokenbarCompactTokens(summary.cacheTokens))"
+    }
+}
+
+struct TokenBarHoverBadge: View {
+    let text: String
+    var width: CGFloat = 320
+    var isPlaceholder = false
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+            .lineLimit(1)
+            .minimumScaleFactor(0.86)
+            .foregroundStyle(isPlaceholder ? TokenBarStyle.faint : TokenBarStyle.foreground)
+            .frame(width: width, alignment: .trailing)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(TokenBarStyle.surfaceRaised, in: Capsule())
+            .overlay(Capsule().stroke(TokenBarStyle.line, lineWidth: 1))
     }
 }
 
@@ -1059,7 +1370,7 @@ struct DateRangeControl: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(option == "Custom" ? TokenBarStyle.faint : (selection == option ? Color.white : TokenBarStyle.muted))
+                .foregroundStyle(option == "Custom" ? TokenBarStyle.faint : (selection == option ? TokenBarStyle.foreground : TokenBarStyle.muted))
                 .padding(.horizontal, option == "Custom" ? 9 : 11)
                 .padding(.vertical, 6)
                 .background(
@@ -1075,7 +1386,7 @@ struct DateRangeControl: View {
             }
         }
         .padding(3)
-        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
         .popover(isPresented: $showCustomMenu, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 10) {
@@ -1128,7 +1439,7 @@ struct DateRangeControl: View {
                 .font(.system(size: 12, design: .monospaced))
                 .padding(.horizontal, 8)
                 .frame(height: 28)
-                .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
         }
     }
@@ -1239,14 +1550,12 @@ struct ModelBreakdownTable: View {
     }
 
     private var tableHeader: some View {
-        Grid(horizontalSpacing: 14, verticalSpacing: 0) {
-            GridRow {
-                Text("Model").gridColumnAlignment(.leading)
-                Text("Input · Output · Cache")
-                Text("Cache %")
-                Text("Tokens")
-                Text("Cost").gridColumnAlignment(.trailing)
-            }
+        HStack(spacing: 14) {
+            Text("Model").frame(width: 230, alignment: .leading)
+            Text("Input · Output · Cache").frame(maxWidth: .infinity, alignment: .leading)
+            Text("Cache %").frame(width: 72, alignment: .trailing)
+            Text("Tokens").frame(width: 92, alignment: .trailing)
+            Text("Cost").frame(width: 82, alignment: .trailing)
         }
         .font(.system(size: 10.5, weight: .semibold))
         .tracking(0.8)
@@ -1260,42 +1569,73 @@ private struct ModelBreakdownRow: View {
     let row: TokenBarModelBreakdown
 
     var body: some View {
-        Grid(horizontalSpacing: 14, verticalSpacing: 0) {
-            GridRow {
-                HStack(spacing: 9) {
-                    Circle()
-                        .fill(TokenBarStyle.agentColor(row.agentName))
-                        .frame(width: 7, height: 7)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(row.name)
-                            .font(.system(size: 12.5, weight: .medium, design: .monospaced))
-                            .lineLimit(1)
-                        Text(row.attribution)
-                            .font(.system(size: 10.5, design: .monospaced))
-                            .foregroundStyle(TokenBarStyle.faint)
-                            .lineLimit(1)
-                    }
+        HStack(spacing: 14) {
+            HStack(spacing: 9) {
+                Circle()
+                    .fill(TokenBarStyle.agentColor(row.agentName))
+                    .frame(width: 7, height: 7)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.name)
+                        .font(.system(size: 12.5, weight: .medium, design: .monospaced))
+                        .lineLimit(1)
+                    Text(row.attribution)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(TokenBarStyle.faint)
+                        .lineLimit(1)
                 }
-                InputOutputCacheBar(summary: row.summary, height: 8)
-                    .frame(minWidth: 180)
-                Text(tokenbarPercent(row.cacheRatio))
-                    .font(.caption)
-                    .foregroundStyle(TokenBarStyle.cache)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 2)
-                    .background(TokenBarStyle.cache.opacity(0.10), in: Capsule())
-                Text(tokenbarTokens(row.summary.totalTokens))
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(TokenBarStyle.foreground)
-                Text(tokenbarCurrency(row.cost))
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(TokenBarStyle.foreground)
-                    .gridColumnAlignment(.trailing)
             }
-            .padding(.vertical, 10)
+            .frame(width: 230, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 6) {
+                InputOutputCacheBar(summary: row.summary, height: 8)
+                    .frame(maxWidth: .infinity)
+                HStack(spacing: 14) {
+                    Text("in \(tokenbarCompactTokens(row.summary.inputTokens))")
+                    Text("out \(tokenbarCompactTokens(row.summary.outputTokens))")
+                    Text("cache \(tokenbarCompactTokens(row.summary.cacheTokens))")
+                    Spacer(minLength: 0)
+                }
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundStyle(TokenBarStyle.faint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(tokenbarPercent(row.cacheRatio))
+                .font(.caption)
+                .foregroundStyle(TokenBarStyle.cache)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(TokenBarStyle.cache.opacity(0.10), in: Capsule())
+                .frame(width: 72, alignment: .trailing)
+                .help("Cache \(row.summary.cacheTokens.formatted()) of \(row.summary.totalTokens.formatted()) tokens")
+
+            Text(tokenbarCompactTokens(row.summary.totalTokens))
+                .font(.system(size: 12.5, design: .monospaced))
+                .monospacedDigit()
+                .foregroundStyle(TokenBarStyle.foreground)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+                .frame(width: 92, alignment: .trailing)
+                .tbNumberTooltip(precise: row.summary.totalTokens, window: row.name)
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(tokenbarCompactCurrency(row.cost))
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .monospacedDigit()
+                    .foregroundStyle(TokenBarStyle.cost)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.80)
+                    .tbNumberTooltip(precise: row.cost, window: row.name)
+                Text(tokenbarPercent(row.percentage))
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(TokenBarStyle.faint)
+                    .lineLimit(1)
+            }
+            .frame(width: 82, alignment: .trailing)
         }
+        .padding(.vertical, 10)
         .overlay(Divider().overlay(TokenBarStyle.line.opacity(0.7)), alignment: .bottom)
     }
 }
@@ -1355,15 +1695,15 @@ struct TokenBarDonut: View {
 private func heatColor(_ intensity: Double) -> Color {
     switch intensity {
     case ..<0.08:
-        Color(nsColor: .quaternaryLabelColor)
+        TokenBarStyle.line.opacity(0.58)
     case ..<0.28:
-        Color(nsColor: .systemGreen).opacity(0.30)
+        TokenBarStyle.cache.opacity(0.28)
     case ..<0.55:
-        Color(nsColor: .systemGreen).opacity(0.55)
+        TokenBarStyle.cache.opacity(0.50)
     case ..<0.82:
-        Color(nsColor: .systemGreen).opacity(0.75)
+        TokenBarStyle.cache.opacity(0.72)
     default:
-        Color(nsColor: .systemGreen).opacity(0.95)
+        TokenBarStyle.cache.opacity(0.95)
     }
 }
 

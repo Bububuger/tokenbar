@@ -388,6 +388,7 @@ public struct CustomSourceRecord: Identifiable, Sendable, Hashable {
     public var format: CustomSourceFormat
     public var displayAgent: String
     public var enabled: Bool
+    public var fieldMapping: CustomSourceFieldMapping
     public let createdAt: Date
 
     public init(
@@ -398,6 +399,7 @@ public struct CustomSourceRecord: Identifiable, Sendable, Hashable {
         format: CustomSourceFormat = .auto,
         displayAgent: String = "Custom",
         enabled: Bool = true,
+        fieldMapping: CustomSourceFieldMapping = .default,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -407,8 +409,35 @@ public struct CustomSourceRecord: Identifiable, Sendable, Hashable {
         self.format = format
         self.displayAgent = displayAgent
         self.enabled = enabled
+        self.fieldMapping = fieldMapping
         self.createdAt = createdAt
     }
+}
+
+public struct CustomSourceFieldMapping: Sendable, Hashable, Codable {
+    public var inputTokens: String
+    public var outputTokens: String
+    public var cacheTokens: String
+    public var model: String
+
+    public init(
+        inputTokens: String,
+        outputTokens: String,
+        cacheTokens: String,
+        model: String
+    ) {
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheTokens = cacheTokens
+        self.model = model
+    }
+
+    public static let `default` = CustomSourceFieldMapping(
+        inputTokens: "usage.input_tokens",
+        outputTokens: "usage.output_tokens",
+        cacheTokens: "usage.cache_read_tokens",
+        model: "model"
+    )
 }
 
 public struct SourceWatermark: Sendable, Hashable {

@@ -73,7 +73,7 @@ public actor UsageStore {
         calendar: Calendar,
         lastRebuildError newLastRebuildError: String? = nil
     ) -> UsageStoreState {
-        warnings = newWarnings
+        warnings = userActionableWarnings(newWarnings)
         lastIndexedAt = indexedAt
         lastRebuildError = newLastRebuildError
         _ = try? repository.replaceEvents(newEvents)
@@ -93,7 +93,8 @@ public actor UsageStore {
         calendar: Calendar,
         lastRebuildError newLastRebuildError: String?
     ) -> UsageStoreState {
-        warnings = newWarnings
+        let visibleWarnings = userActionableWarnings(newWarnings)
+        warnings = visibleWarnings
         lastIndexedAt = startedAt
         lastRebuildError = newLastRebuildError
         _ = try? repository.insertCheckpoint(
@@ -103,7 +104,7 @@ public actor UsageStore {
             events: events,
             prompts: prompts,
             nextWatermarks: nextWatermarks,
-            warnings: newWarnings,
+            warnings: visibleWarnings,
             error: newLastRebuildError
         )
         return makeState(referenceDate: referenceDate, calendar: calendar)
@@ -114,7 +115,10 @@ public actor UsageStore {
     }
 
     public func reparseAll() throws {
-        try repository.deleteAllWatermarks()
+        warnings = []
+        lastIndexedAt = nil
+        lastRebuildError = nil
+        try repository.resetIndexForFullReparse()
     }
 
     public func pruneRecords(before cutoff: Date) throws {
@@ -143,19 +147,29 @@ public actor UsageStore {
     private func makeState(referenceDate: Date, calendar: Calendar) -> UsageStoreState {
         let events = (try? repository.allEvents()) ?? []
         let prompts = (try? repository.allPrompts()) ?? []
+        let latestCheckpoint = try? repository.latestCheckpoint()
+        let effectiveWarnings = warnings.isEmpty && lastIndexedAt == nil
+            ? userActionableWarnings((try? repository.latestWarnings()) ?? [])
+            : warnings
+        let effectiveLastIndexedAt = lastIndexedAt ?? latestCheckpoint?.startedAt
+        let effectiveRebuildError = lastRebuildError ?? latestCheckpoint?.error
         let baseSnapshot = (try? repository.makeSnapshot(referenceDate: referenceDate, calendar: calendar))
             ?? UsageAggregator.makeSnapshot(from: events, referenceDate: referenceDate, calendar: calendar)
         // CL-P0-022: snapshot.warningCount is the single source of truth used
         // by Popover footer, Sidebar Diagnostics badge, and Diagnostics view.
-        let snapshot = baseSnapshot.with(warningCount: warnings.count)
+        let snapshot = baseSnapshot.with(warningCount: effectiveWarnings.count)
         return UsageStoreState(
             events: events,
             prompts: prompts,
             snapshot: snapshot,
-            warnings: warnings,
-            lastIndexedAt: lastIndexedAt,
-            lastRebuildError: lastRebuildError,
-            lastCheckpoint: try? repository.latestCheckpoint()
+            warnings: effectiveWarnings,
+            lastIndexedAt: effectiveLastIndexedAt,
+            lastRebuildError: effectiveRebuildError,
+            lastCheckpoint: latestCheckpoint
         )
+    }
+
+    private func userActionableWarnings(_ sourceWarnings: [UsageSourceWarning]) -> [UsageSourceWarning] {
+        sourceWarnings.filter(\.isUserActionable)
     }
 }

@@ -9,6 +9,7 @@ struct ProjectDetailView: View {
     let prompts: [PromptRecord]
     let events: [UsageEvent]
     let refreshState: RefreshState
+    let switchState: ProjectSwitchState?
     let todayCost: Double
     let rangeCost: Double
     let todayTokens: Int
@@ -19,6 +20,7 @@ struct ProjectDetailView: View {
 
     @State private var selectedRange = "30d"
     @State private var revealPrompts = false
+    @AppStorage("tokenbar.pricingOverrides") private var pricingOverridesJSON = "{}"
     // CL-P1-016: which session row is expanded into the detail drawer.
     @State private var expandedSession: String?
     // CL-P0-033: Reveal is gated by the global "Store prompt text in clear"
@@ -28,25 +30,44 @@ struct ProjectDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: TokenBarStyle.sectionSpacing) {
-            header
-            kpiRow
-            RangeBarsCard(
+            staged(header, start: 0.02, end: 0.18)
+            staged(kpiRow, start: 0.12, end: 0.34)
+            staged(RangeBarsCard(
                 days: rangeDays,
                 title: tokenbarRangeTitle(selectedRange),
                 subtitle: tokenbarRangeAvailabilityNote(selection: selectedRange, availableDays: detail.last30Days.count)
-            )
+            ), start: 0.30, end: 0.54)
             HStack(alignment: .top, spacing: TokenBarStyle.sectionSpacing) {
-                agentShareCard
-                recentSessionsCard
+                staged(agentShareCard, start: 0.42, end: 0.68)
+                staged(recentSessionsCard, start: 0.48, end: 0.72)
             }
-            ModelBreakdownTable(
+            staged(ModelBreakdownTable(
                 title: "Model",
                 subtitle: "Cost and token attribution used by \(detail.projectName).",
-                totalCost: tokenbarCurrency(detail.estimatedCost.totalCost),
+                totalCost: tokenbarCompactCurrency(projectRangeCost),
                 rows: modelRows
-            )
-            promptHistoryCard
+            ), start: 0.62, end: 0.84)
+            staged(promptHistoryCard, start: 0.76, end: 0.96)
         }
+        .animation(.easeInOut(duration: 0.16), value: switchProgress)
+        .animation(.easeOut(duration: 0.22), value: switchState?.phase)
+    }
+
+    private var switchProgress: Double {
+        switchState?.progress ?? 1.0
+    }
+
+    private func reveal(_ start: Double, _ end: Double) -> Double {
+        guard end > start else { return switchProgress >= end ? 1 : 0 }
+        return min(max((switchProgress - start) / (end - start), 0), 1)
+    }
+
+    private func staged<Content: View>(_ content: Content, start: Double, end: Double) -> some View {
+        let amount = reveal(start, end)
+        return content
+            .opacity(0.18 + 0.82 * amount)
+            .offset(y: 14 * (1 - amount))
+            .blur(radius: max(0, 1.6 * (1 - amount)))
     }
 
     private var header: some View {
@@ -82,8 +103,8 @@ struct ProjectDetailView: View {
                     )
                     DateRangeControl(selection: $selectedRange)
                     HStack(spacing: 34) {
-                        statBlock(label: "Est. cost", value: tokenbarCurrency(detail.estimatedCost.totalCost), color: TokenBarStyle.cost)
-                        statBlock(label: "All-time total", value: tokenbarTokens(allTimeSummary.totalTokens), color: TokenBarStyle.foreground)
+                        statBlock(label: "Est. cost", value: tokenbarCompactCurrency(projectRangeCost), color: TokenBarStyle.cost)
+                        statBlock(label: "All-time total", value: tokenbarCompactTokens(allTimeSummary.totalTokens), color: TokenBarStyle.foreground)
                     }
                 }
             }
@@ -109,6 +130,13 @@ struct ProjectDetailView: View {
             projectName: detail.projectName,
             days: tokenbarDaysForRange(selectedRange)
         )
+    }
+
+    private var projectRangeCost: Double {
+        tokenbarEstimatedCost(
+            events: events,
+            days: tokenbarDaysForRange(selectedRange)
+        ) { $0.projectName == detail.projectName }
     }
 
     private var agentShareCard: some View {
@@ -165,27 +193,39 @@ struct ProjectDetailView: View {
                                     expandedSession = (expandedSession == session.sessionId) ? nil : session.sessionId
                                 }
                             } label: {
-                                HStack(spacing: 12) {
+                                HStack(spacing: 8) {
                                     Circle()
                                         .fill(TokenBarStyle.agentColor(session.agentName))
                                         .frame(width: 7, height: 7)
                                     Text(session.timestamp.formatted(.dateTime.month(.twoDigits).day(.twoDigits).hour().minute()))
                                         .font(.system(size: 12, design: .monospaced))
                                         .foregroundStyle(TokenBarStyle.muted)
-                                    Spacer()
+                                        .frame(width: 82, alignment: .leading)
+                                    Text(shortSessionID(session.sessionId))
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundStyle(TokenBarStyle.faint)
+                                        .lineLimit(1)
+                                        .frame(width: 74, alignment: .leading)
                                     Text(session.agentName)
                                         .font(.system(size: 11, design: .monospaced))
                                         .foregroundStyle(TokenBarStyle.muted)
                                         .padding(.horizontal, 8)
                                         .padding(.vertical, 2)
-                                        .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
+                                        .background(TokenBarStyle.surfaceRaised, in: Capsule())
+                                        .lineLimit(1)
+                                        .frame(width: 82, alignment: .center)
                                     Text(tokenbarTokens(session.summary.totalTokens))
                                         .font(.system(size: 13, design: .monospaced))
                                         .monospacedDigit()
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.75)
+                                        .frame(width: 70, alignment: .trailing)
                                     Image(systemName: expandedSession == session.sessionId ? "chevron.up" : "chevron.down")
                                         .font(.system(size: 9, weight: .semibold))
                                         .foregroundStyle(TokenBarStyle.faint)
+                                        .frame(width: 12, alignment: .trailing)
                                 }
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .buttonStyle(.plain)
                             // CL-P1-016: drawer with input/output/cache split.
@@ -195,13 +235,15 @@ struct ProjectDetailView: View {
                                     sessionStat("Output", value: session.summary.outputTokens, color: TokenBarStyle.output)
                                     sessionStat("Cache", value: session.summary.cacheTokens, color: TokenBarStyle.cache)
                                     Spacer()
-                                    Text("session " + session.sessionId.prefix(8))
+                                    Text(session.sessionId)
                                         .font(.system(size: 10, design: .monospaced))
                                         .foregroundStyle(TokenBarStyle.faint)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
                                 }
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 8)
-                                .background(Color(nsColor: .controlBackgroundColor).opacity(0.55),
+                                .background(TokenBarStyle.surfaceRaised,
                                             in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                                 .transition(.opacity)
                             }
@@ -213,6 +255,11 @@ struct ProjectDetailView: View {
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func shortSessionID(_ sessionId: String) -> String {
+        guard !sessionId.isEmpty else { return "session n/a" }
+        return "sid " + String(sessionId.prefix(8))
     }
 
     private var promptHistoryCard: some View {
@@ -234,7 +281,7 @@ struct ProjectDetailView: View {
                             .font(.caption)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
+                            .background(TokenBarStyle.surfaceRaised, in: Capsule())
                             .overlay(Capsule().stroke(TokenBarStyle.line, lineWidth: 1))
                     }
                     .buttonStyle(.plain)
@@ -271,7 +318,7 @@ struct ProjectDetailView: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(11)
-                            .background(Color.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                             .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(TokenBarStyle.line.opacity(0.7), lineWidth: 1))
                         }
                     }

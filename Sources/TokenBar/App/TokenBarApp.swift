@@ -12,12 +12,12 @@ struct TokenBarApp: App {
         MenuBarExtra {
             PopoverView()
                 .environmentObject(runtimeModel)
+                .tokenBarAppAppearance()
                 .preferredColorScheme(preferredColorScheme)
                 // CL-P2-013: TokenBar's number-heavy layout is built around
                 // LTR. Pin the layout direction so RTL locales degrade
                 // gracefully instead of mirroring numbers + chart axes.
                 .environment(\.layoutDirection, .leftToRight)
-                .task { await runtimeModel.bootstrapIfNeeded() }
         } label: {
             TokenBarStatusItem(runtimeModel: runtimeModel)
         }
@@ -31,6 +31,7 @@ struct TokenBarApp: App {
         Window("TokenBar", id: "main") {
             ContentView()
                 .environmentObject(runtimeModel)
+                .tokenBarAppAppearance()
                 .preferredColorScheme(preferredColorScheme)
                 .environment(\.layoutDirection, .leftToRight) // CL-P2-013
                 .task { await runtimeModel.bootstrapIfNeeded() }
@@ -55,11 +56,41 @@ struct TokenBarApp: App {
     }
 }
 
+private struct TokenBarAppAppearanceModifier: ViewModifier {
+    @AppStorage("tokenbar.theme") private var theme = "System"
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { apply(theme) }
+            .onChange(of: theme) { _, newValue in
+                apply(newValue)
+            }
+    }
+
+    private func apply(_ value: String) {
+        switch value {
+        case "Light":
+            NSApp.appearance = NSAppearance(named: .aqua)
+        case "Dark":
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+        default:
+            NSApp.appearance = nil
+        }
+    }
+}
+
+private extension View {
+    func tokenBarAppAppearance() -> some View {
+        modifier(TokenBarAppAppearanceModifier())
+    }
+}
+
 private struct TokenBarStatusItem: View {
     @Environment(\.openWindow) private var openWindowAction
     @State private var didHandleLaunchOpen = false
     @AppStorage("tokenbar.menuBarMirrorMode") private var mirrorModeRaw = MenuBarMirrorMode.off.rawValue
     @AppStorage("tokenbar.menuBarPaused") private var isPaused = false
+    @AppStorage("tokenbar.pricingOverrides") private var pricingOverridesJSON = "{}"
     @ObservedObject var runtimeModel: TokenBarRuntimeModel
     // CL-P0-025: when the user pauses tracking from the TopRight flyout, the
     // menubar mirror text must freeze at the value visible at the moment of
@@ -144,7 +175,7 @@ private struct TokenBarStatusItem: View {
         tokenbarMirrorValue(
             mode: mirrorMode,
             todayTokens: runtimeModel.snapshot.today.totalTokens,
-            todayCost: runtimeModel.snapshot.estimatedCostToday.totalCost,
+            todayCost: tokenbarEstimatedCost(events: runtimeModel.events, days: 1),
             todaySessions: tokenbarSessionCount(runtimeModel.events)
         )
     }

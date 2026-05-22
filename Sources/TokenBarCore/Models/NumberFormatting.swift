@@ -27,6 +27,23 @@ public enum TokenBarNumberFormatting {
         }
     }
 
+    public static func compactTokens(_ value: Int, fractionDigits: Int = 2) -> String {
+        let clamped = max(0, value)
+        let dValue = Double(clamped)
+        switch clamped {
+        case ..<1_000:
+            return "\(clamped)"
+        case ..<1_000_000:
+            return fixed(dValue / 1_000, suffix: "K", fractionDigits: fractionDigits)
+        case ..<1_000_000_000:
+            return fixed(dValue / 1_000_000, suffix: "M", fractionDigits: fractionDigits)
+        case ..<999_500_000_000:
+            return fixed(dValue / 1_000_000_000, suffix: "B", fractionDigits: fractionDigits)
+        default:
+            return ">999B"
+        }
+    }
+
     /// Clamp a parsed token integer to a non-negative value while signalling
     /// whether the original input was negative. Used by parsers so they can
     /// emit a warning when raw data is malformed (CL-P0-029).
@@ -48,5 +65,10 @@ public enum TokenBarNumberFormatting {
             return "\(formatted)\(suffix)"
         }
         return "\(Int(value.rounded()))\(suffix)"
+    }
+
+    private static func fixed(_ value: Double, suffix: String, fractionDigits: Int) -> String {
+        let digits = max(0, min(fractionDigits, 3))
+        return String(format: "%.\(digits)f%@", value, suffix)
     }
 }

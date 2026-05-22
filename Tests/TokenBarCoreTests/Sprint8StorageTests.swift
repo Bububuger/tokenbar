@@ -125,6 +125,85 @@ struct Sprint8StorageTests {
     }
 
     @Test
+    func reparseAllClearsIndexedRowsBeforeRebuild() async throws {
+        let dbURL = temporaryDatabaseURL()
+        let repository = try UsageRepository(databaseURL: dbURL)
+        let referenceDate = fixedDate()
+        let warning = UsageSourceWarning(
+            sourceName: "Codex",
+            sourcePath: "/tmp/source.jsonl",
+            lineNumber: 7,
+            message: "stale warning"
+        )
+        let watermark = SourceWatermark(
+            sourcePath: "/tmp/source.jsonl",
+            agent: .codex,
+            lastMtime: referenceDate,
+            lastByteOffset: 128,
+            lastEventId: "old-event",
+            lastInode: 42,
+            updatedAt: referenceDate
+        )
+
+        _ = try repository.insertCheckpoint(
+            trigger: "initial-index",
+            startedAt: referenceDate,
+            endedAt: referenceDate,
+            events: [
+                dbEvent(id: "old-event", agent: .codex, projectName: "tokenbar", sessionId: "old", timestamp: referenceDate, inputTokens: 10, outputTokens: 2, cacheTokens: 1),
+            ],
+            prompts: [
+                prompt(id: "old-prompt", timestamp: referenceDate),
+            ],
+            nextWatermarks: [watermark],
+            warnings: [warning],
+            error: nil
+        )
+
+        let store = try UsageStore(databaseURL: dbURL)
+        try await store.reparseAll()
+
+        let verifier = try UsageRepository(databaseURL: dbURL)
+        #expect(try verifier.allEvents().isEmpty)
+        #expect(try verifier.allPrompts().isEmpty)
+        #expect(try verifier.watermarks().isEmpty)
+        #expect(try verifier.latestCheckpoint() == nil)
+    }
+
+    @Test
+    func storeStateRestoresLatestCheckpointWarningsAfterRestart() async throws {
+        let dbURL = temporaryDatabaseURL()
+        let repository = try UsageRepository(databaseURL: dbURL)
+        let referenceDate = fixedDate()
+        let warning = UsageSourceWarning(
+            sourceName: "Codex",
+            sourcePath: "/tmp/source.jsonl",
+            lineNumber: 11,
+            message: "malformed JSON"
+        )
+
+        _ = try repository.insertCheckpoint(
+            trigger: "bootstrap",
+            startedAt: referenceDate,
+            endedAt: referenceDate,
+            events: [
+                dbEvent(id: "event", agent: .codex, projectName: "tokenbar", sessionId: "s", timestamp: referenceDate, inputTokens: 10, outputTokens: 1, cacheTokens: 2),
+            ],
+            prompts: [],
+            nextWatermarks: [],
+            warnings: [warning],
+            error: nil
+        )
+
+        let restartedStore = try UsageStore(databaseURL: dbURL)
+        let state = await restartedStore.state(referenceDate: referenceDate, calendar: Calendar(identifier: .gregorian))
+
+        #expect(state.warnings == [warning])
+        #expect(state.snapshot.warningCount == 1)
+        #expect(state.lastIndexedAt == referenceDate)
+    }
+
+    @Test
     func migrationRoundTripsUsageEventModelName() throws {
         let dbURL = temporaryDatabaseURL()
         let queue = try DatabaseQueue(path: dbURL.path)
@@ -413,6 +492,95 @@ struct Sprint8StorageTests {
     }
 
     @Test
+    func customSourceMigrationAddsDefaultFieldMappingForLegacyRows() throws {
+        let dbURL = temporaryDatabaseURL()
+        let queue = try DatabaseQueue(path: dbURL.path)
+        try queue.write { db in
+            try db.execute(sql: """
+            CREATE TABLE custom_sources (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                directory TEXT NOT NULL,
+                glob_pattern TEXT NOT NULL,
+                format TEXT NOT NULL,
+                display_agent TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL
+            )
+            """)
+            try db.execute(
+                sql: """
+                INSERT INTO custom_sources (id, name, directory, glob_pattern, format, display_agent, enabled, created_at)
+                VALUES ('legacy', 'Legacy', '/tmp/legacy', '**/*.jsonl', 'auto', 'Legacy', 1, 1_000_000_000)
+                """)
+        }
+
+        let repository = try UsageRepository(databaseURL: dbURL)
+        let listed = try repository.listCustomSources()
+
+        #expect(listed.count == 1)
+        #expect(listed[0].id == "legacy")
+        #expect(listed[0].fieldMapping == .default)
+        #expect(listed[0].fieldMapping.inputTokens == "usage.input_tokens")
+        #expect(listed[0].fieldMapping.outputTokens == "usage.output_tokens")
+        #expect(listed[0].fieldMapping.cacheTokens == "usage.cache_read_tokens")
+        #expect(listed[0].fieldMapping.model == "model")
+    }
+
+    @Test
+    func customSourceUpsertRoundTripsFieldMappingAndCreatedAt() throws {
+        let repository = try UsageRepository(databaseURL: temporaryDatabaseURL())
+        let initialCreatedAt = fixedDate()
+        let source = CustomSourceRecord(
+            id: "mapping",
+            name: "Mapping Source",
+            directory: "/tmp/mapping",
+            globPattern: "**/*.jsonl",
+            format: .auto,
+            displayAgent: "Mapping",
+            fieldMapping: CustomSourceFieldMapping(
+                inputTokens: "foo.input",
+                outputTokens: "foo.output",
+                cacheTokens: "foo.cache",
+                model: "foo.model"
+            ),
+            createdAt: initialCreatedAt
+        )
+
+        try repository.upsertCustomSource(source)
+        let firstListed = try repository.listCustomSources()
+        let first = try #require(firstListed.first)
+        #expect(first.fieldMapping == source.fieldMapping)
+
+        let updated = CustomSourceRecord(
+            id: source.id,
+            name: "Mapping Source Updated",
+            directory: "/tmp/mapping",
+            globPattern: "**/*.jsonl",
+            format: .auto,
+            displayAgent: "Mapping",
+            enabled: false,
+            fieldMapping: CustomSourceFieldMapping(
+                inputTokens: "bar.input",
+                outputTokens: "bar.output",
+                cacheTokens: "bar.cache",
+                model: "bar.model"
+            ),
+            createdAt: Date(timeIntervalSince1970: initialCreatedAt.timeIntervalSince1970 + 60)
+        )
+
+        try repository.upsertCustomSource(updated)
+        let secondListed = try repository.listCustomSources()
+        let second = try #require(secondListed.first)
+
+        #expect(secondListed.count == 1)
+        #expect(second.name == "Mapping Source Updated")
+        #expect(second.fieldMapping == updated.fieldMapping)
+        #expect(second.enabled == false)
+        #expect(second.createdAt.timeIntervalSince1970 == initialCreatedAt.timeIntervalSince1970)
+    }
+
+    @Test
     func formatDetectorClassifiesClaudeAndCodexShapes() throws {
         let directory = temporaryDirectory()
         let claude = directory.appendingPathComponent("claude.jsonl")
@@ -426,6 +594,49 @@ struct Sprint8StorageTests {
         #expect(SourceFormatDetector.detect(fileURL: claude) == .claudeCodeJSONL)
         #expect(SourceFormatDetector.detect(fileURL: codex) == .codexJSONL)
         #expect(SourceFormatDetector.detect(fileURL: unknown) == .unknown)
+    }
+
+    @Test
+    func customSourceParsesUnknownJSONLWithFieldMapping() async throws {
+        let directory = temporaryDirectory()
+        let eventFile = directory.appendingPathComponent("mapped.jsonl")
+        try ([
+            #"{"timestamp":"2026-05-18T10:11:12.000Z","cwd":"/tmp/tokenbar","sessionId":"mapped-session","model":"mapped-model","stats":{"prompt":12,"completion":34,"cache":56}}"#,
+        ].joined(separator: "\n") + "\n").write(to: eventFile, atomically: true, encoding: .utf8)
+
+        let record = CustomSourceRecord(
+            id: "mapped-source",
+            name: "Mapped Source",
+            directory: directory.path,
+            globPattern: "*.jsonl",
+            format: .auto,
+            displayAgent: "Mapped",
+            fieldMapping: CustomSourceFieldMapping(
+                inputTokens: "stats.prompt",
+                outputTokens: "stats.completion",
+                cacheTokens: "stats.cache",
+                model: "model"
+            ),
+            createdAt: fixedDate()
+        )
+        let source = CustomUsageEventSource(record: record)
+
+        let result = try await source.loadEvents(
+            since: [:],
+            referenceDate: fixedDate(),
+            calendar: Calendar(identifier: .gregorian)
+        )
+
+        let event = try #require(result.events.first)
+        #expect(result.events.count == 1)
+        #expect(!result.warnings.contains { $0.message == "usage fields are incomplete for custom mapping" })
+        #expect(event.agent == .custom)
+        #expect(event.projectName == "tokenbar")
+        #expect(event.sessionId == "mapped-session")
+        #expect(event.modelName == "mapped-model")
+        #expect(event.inputTokens == 12)
+        #expect(event.outputTokens == 34)
+        #expect(event.cacheTokens == 56)
     }
 
     @Test

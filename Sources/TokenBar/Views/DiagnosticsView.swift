@@ -7,11 +7,14 @@ struct DiagnosticsView: View {
     @State private var showWipeConfirm = false     // CL-P1-021
     @State private var wipeAck = ""                // CL-P1-021: type "WIPE"
     @State private var expandedSourceId: String?   // CL-P1-023
+    @AppStorage("tokenbar.pricingOverrides") private var pricingOverridesJSON = "{}"
 
     var body: some View {
         VStack(alignment: .leading, spacing: TokenBarStyle.sectionSpacing) {
             header
+            dataAuditCard
             sourcesCard
+            warningsCard
             checkpointsCard
         }
     }
@@ -28,8 +31,8 @@ struct DiagnosticsView: View {
                 }
                 Spacer()
                 TopRightCluster(
-                    todayCost: runtimeModel.snapshot.estimatedCostToday.totalCost,
-                    rangeCost: runtimeModel.snapshot.estimatedCostLast30.totalCost,
+                    todayCost: tokenbarEstimatedCost(events: runtimeModel.events, days: 1),
+                    rangeCost: tokenbarEstimatedCost(events: runtimeModel.events, days: 30),
                     todayTokens: runtimeModel.snapshot.today.totalTokens,
                     totalTokens: runtimeModel.snapshot.last30Summary.totalTokens,
                     todaySessions: tokenbarSessionCount(runtimeModel.events),
@@ -43,6 +46,7 @@ struct DiagnosticsView: View {
                 // CL-P0-021: Refresh is disabled while a refresh is in flight
                 // and the icon spins to surface the "click registered" state.
                 Button {
+                    TokenBarTelemetry.event("diagnostics.refresh.click", success: true)
                     Task { await runtimeModel.refresh() }
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
@@ -52,6 +56,7 @@ struct DiagnosticsView: View {
                 .disabled(runtimeModel.refreshState == .refreshing)
 
                 Button {
+                    TokenBarTelemetry.event("diagnostics.reparse_all.confirm.open", success: true)
                     showReparseConfirm = true
                 } label: {
                     Label("Reparse all", systemImage: "arrow.triangle.2.circlepath")
@@ -69,6 +74,7 @@ struct DiagnosticsView: View {
                 }
 
                 Button(role: .destructive) {
+                    TokenBarTelemetry.event("diagnostics.wipe_prompts.confirm.open", success: true)
                     showWipeConfirm = true
                     wipeAck = ""
                 } label: {
@@ -93,6 +99,51 @@ struct DiagnosticsView: View {
     private func estimatedReparseSeconds() -> Int {
         // 1 second per ~100 events, min 1s, capped at 60s for UI display
         max(1, min(runtimeModel.events.count / 100, 60))
+    }
+
+    private var dataAuditCard: some View {
+        TokenBarCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Token Data Audit")
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        Text("Indexed raw totals by source. Cache share is calculated from stored usage_events.")
+                            .font(.caption2)
+                            .foregroundStyle(TokenBarStyle.muted)
+                    }
+                    Spacer()
+                    Text("\(runtimeModel.events.count.formatted()) events")
+                        .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(TokenBarStyle.faint)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(TokenBarStyle.surfaceRaised, in: Capsule())
+                }
+
+                Grid(horizontalSpacing: 14, verticalSpacing: 0) {
+                    GridRow {
+                        auditHead("Source", align: .leading)
+                        auditHead("Input")
+                        auditHead("Output")
+                        auditHead("Cache")
+                        auditHead("Cache %")
+                    }
+                    Divider().gridCellColumns(5).overlay(TokenBarStyle.line)
+                    ForEach(dataAuditRows) { row in
+                        GridRow {
+                            auditCell(row.name, align: .leading)
+                            auditCell(row.input)
+                            auditCell(row.output, color: TokenBarStyle.output)
+                            auditCell(row.cache, color: TokenBarStyle.cache)
+                            auditCell(row.cacheShare, color: row.cacheShareValue < 0.10 ? TokenBarStyle.warn : TokenBarStyle.muted)
+                        }
+                        .padding(.vertical, 8)
+                        Divider().gridCellColumns(5).overlay(TokenBarStyle.line.opacity(0.55))
+                    }
+                }
+            }
+        }
     }
 
     /// CL-P1-023: drawer body — most recent 50 events whose `sourcePath`
@@ -180,6 +231,7 @@ struct DiagnosticsView: View {
                                 // CL-P1-022: per-source reparse hook. Delete
                                 // the matching watermark prefix and refresh.
                                 Button("Reparse") {
+                                    TokenBarTelemetry.event("diagnostics.source.reparse.click", metadata: "source=\(row.path)", success: true)
                                     Task { await runtimeModel.reparseSource(row.path) }
                                 }
                                 .controlSize(.small)
@@ -196,6 +248,62 @@ struct DiagnosticsView: View {
                     }
                     .padding(.vertical, 10)
                     .overlay(Divider().overlay(TokenBarStyle.line.opacity(0.7)), alignment: .bottom)
+                }
+            }
+        }
+    }
+
+    private var warningsCard: some View {
+        TokenBarCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Actionable Warnings")
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        Text("Internal indexing notes are hidden. Only source issues that may need your action appear here.")
+                            .font(.caption2)
+                            .foregroundStyle(TokenBarStyle.muted)
+                    }
+                    Spacer()
+                    Text("\(runtimeModel.sourceWarnings.count)")
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(runtimeModel.sourceWarnings.isEmpty ? TokenBarStyle.faint : TokenBarStyle.warn)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background((runtimeModel.sourceWarnings.isEmpty ? TokenBarStyle.surfaceRaised : TokenBarStyle.warn.opacity(0.12)), in: Capsule())
+                }
+
+                if runtimeModel.sourceWarnings.isEmpty {
+                    Text("No source issues need action from the latest refresh.")
+                        .font(.caption)
+                        .foregroundStyle(TokenBarStyle.muted)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(runtimeModel.sourceWarnings.prefix(10).enumerated()), id: \.offset) { _, warning in
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 8) {
+                                    Text(warning.sourceName)
+                                        .font(.system(size: 11.5, weight: .semibold))
+                                    if let line = warning.lineNumber {
+                                        Text("line \(line)")
+                                            .font(.system(size: 10.5, design: .monospaced))
+                                            .foregroundStyle(TokenBarStyle.faint)
+                                    }
+                                    Spacer()
+                                }
+                                Text(warning.message)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(TokenBarStyle.warn)
+                                    .lineLimit(2)
+                                Text(warning.sourcePath)
+                                    .font(.system(size: 10.5, design: .monospaced))
+                                    .foregroundStyle(TokenBarStyle.faint)
+                                    .lineLimit(1)
+                            }
+                            .padding(.vertical, 8)
+                            .overlay(Divider().overlay(TokenBarStyle.line.opacity(0.55)), alignment: .bottom)
+                        }
+                    }
                 }
             }
         }
@@ -225,7 +333,7 @@ struct DiagnosticsView: View {
                                 .foregroundStyle(TokenBarStyle.muted)
                                 .padding(.horizontal, 9)
                                 .padding(.vertical, 3)
-                                .background(Color.white.opacity(0.04), in: Capsule())
+                                .background(TokenBarStyle.surfaceRaised, in: Capsule())
                             tableCell(row.events)
                             tableCell(row.prompts)
                             tableCell(row.warnings, color: row.warnings == "0" ? TokenBarStyle.faint : TokenBarStyle.warn)
@@ -287,7 +395,7 @@ struct DiagnosticsView: View {
             trigger: checkpoint.trigger,
             events: "\(checkpoint.eventsAdded)",
             prompts: "\(checkpoint.promptsAdded)",
-            warnings: "\(checkpoint.warnings)",
+            warnings: "\(runtimeModel.diagnostics.parserWarningCount)",
             duration: duration.map(formatDuration) ?? "running"
         )
         let uiRefresh = CheckpointRow(
@@ -311,6 +419,43 @@ struct DiagnosticsView: View {
             uiRefresh,
             indexState,
         ]
+    }
+
+    private var dataAuditRows: [DataAuditRow] {
+        let grouped = Dictionary(grouping: runtimeModel.events, by: { $0.agent.displayName })
+        let rows = grouped.map { agent, events -> DataAuditRow in
+            let summary = UsageSummary(
+                inputTokens: events.reduce(0) { $0 + $1.inputTokens },
+                outputTokens: events.reduce(0) { $0 + $1.outputTokens },
+                cacheTokens: events.reduce(0) { $0 + $1.cacheTokens }
+            )
+            return DataAuditRow(name: agent, summary: summary)
+        }
+        .sorted { $0.summary.totalTokens > $1.summary.totalTokens }
+
+        let total = UsageSummary(
+            inputTokens: runtimeModel.events.reduce(0) { $0 + $1.inputTokens },
+            outputTokens: runtimeModel.events.reduce(0) { $0 + $1.outputTokens },
+            cacheTokens: runtimeModel.events.reduce(0) { $0 + $1.cacheTokens }
+        )
+        return [DataAuditRow(name: "All sources", summary: total)] + rows
+    }
+
+    private func auditHead(_ text: String, align: Alignment = .trailing) -> some View {
+        Text(text.uppercased())
+            .font(.system(size: 10.5, weight: .semibold))
+            .tracking(0.8)
+            .foregroundStyle(TokenBarStyle.faint)
+            .frame(maxWidth: .infinity, alignment: align)
+    }
+
+    private func auditCell(_ text: String, color: Color? = nil, align: Alignment = .trailing) -> some View {
+        Text(text)
+            .font(.system(size: 12.5, design: .monospaced))
+            .monospacedDigit()
+            .lineLimit(1)
+            .foregroundStyle(color ?? TokenBarStyle.foreground)
+            .frame(maxWidth: .infinity, alignment: align)
     }
 
     private func tableHead(_ text: String) -> some View {
@@ -389,34 +534,22 @@ private struct CheckpointRow: Identifiable {
     let duration: String
 }
 
-private struct PendingDiagnosticsAction: View {
-    let title: String
-    var kind: DiagnosticsButtonStyle.Kind = .ghost
-    var size: DiagnosticsButtonStyle.Size = .regular
+private struct DataAuditRow: Identifiable {
+    let id = UUID()
+    let name: String
+    let summary: UsageSummary
 
-    init(_ title: String, kind: DiagnosticsButtonStyle.Kind = .ghost, size: DiagnosticsButtonStyle.Size = .regular) {
-        self.title = title
-        self.kind = kind
-        self.size = size
+    var input: String { tokenbarCompactTokens(summary.inputTokens) }
+    var output: String { tokenbarCompactTokens(summary.outputTokens) }
+    var cache: String { tokenbarCompactTokens(summary.cacheTokens) }
+
+    var cacheShareValue: Double {
+        guard summary.totalTokens > 0 else { return 0 }
+        return Double(summary.cacheTokens) / Double(summary.totalTokens)
     }
 
-    var body: some View {
-        HStack(spacing: 6) {
-            Text(title)
-            Text("Soon")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(TokenBarStyle.warn)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .background(TokenBarStyle.warn.opacity(0.12), in: Capsule())
-        }
-        .font(.system(size: size == .small ? 10.5 : 12, weight: .medium))
-        .padding(.horizontal, size == .small ? 8 : 11)
-        .frame(height: size == .small ? 24 : 32)
-        .foregroundStyle(kind == .danger ? TokenBarStyle.error : TokenBarStyle.muted)
-        .background(Color.white.opacity(0.025), in: RoundedRectangle(cornerRadius: size == .small ? 6 : 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: size == .small ? 6 : 8, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
-        .help("Coming soon")
+    var cacheShare: String {
+        String(format: "%.2f%%", cacheShareValue * 100)
     }
 }
 
@@ -460,9 +593,9 @@ private struct DiagnosticsButtonStyle: ButtonStyle {
     private var background: Color {
         switch kind {
         case .primary:
-            Color(red: 0.12, green: 0.54, blue: 0.82)
+            TokenBarStyle.accent
         case .ghost:
-            Color.white.opacity(0.035)
+            TokenBarStyle.surfaceRaised
         case .danger:
             TokenBarStyle.error.opacity(0.08)
         }
@@ -471,7 +604,7 @@ private struct DiagnosticsButtonStyle: ButtonStyle {
     private var stroke: Color {
         switch kind {
         case .primary:
-            Color.white.opacity(0.12)
+            TokenBarStyle.accent.opacity(0.35)
         case .ghost:
             TokenBarStyle.line
         case .danger:

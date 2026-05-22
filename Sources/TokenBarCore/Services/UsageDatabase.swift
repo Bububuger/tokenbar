@@ -110,6 +110,7 @@ public final class UsageDatabase: @unchecked Sendable {
                 format TEXT NOT NULL,
                 display_agent TEXT NOT NULL,
                 enabled INTEGER NOT NULL DEFAULT 1,
+                field_mapping TEXT NOT NULL DEFAULT '{"inputTokens":"usage.input_tokens","outputTokens":"usage.output_tokens","cacheTokens":"usage.cache_read_tokens","model":"model"}',
                 created_at INTEGER NOT NULL
             );
             """)
@@ -146,6 +147,19 @@ public final class UsageDatabase: @unchecked Sendable {
                 try db.execute(sql: "DELETE FROM source_watermarks")
             }
             try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_events_model_name ON usage_events(model_name);")
+        }
+        migrator.registerMigration("v5_add_custom_source_field_mapping") { db in
+            let columns = try db.columns(in: "custom_sources")
+            if !columns.contains(where: { $0.name == "field_mapping" }) {
+                try db.alter(table: "custom_sources") { table in
+                    table.add(column: "field_mapping", .text)
+                }
+                try db.execute(sql: """
+                UPDATE custom_sources
+                SET field_mapping = '{"inputTokens":"usage.input_tokens","outputTokens":"usage.output_tokens","cacheTokens":"usage.cache_read_tokens","model":"model"}'
+                WHERE field_mapping IS NULL OR LENGTH(TRIM(field_mapping)) = 0
+                """)
+            }
         }
         return migrator
     }

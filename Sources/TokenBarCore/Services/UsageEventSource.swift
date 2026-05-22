@@ -12,6 +12,22 @@ public struct UsageSourceWarning: Sendable, Hashable {
         self.lineNumber = lineNumber
         self.message = message
     }
+
+    public var isUserActionable: Bool {
+        let normalized = message.lowercased()
+        let operationalMarkers = [
+            "forced full reparse",
+            "mtime regress",
+            "inode changed",
+            "size shrink",
+            "watermark",
+            "partial trailing jsonl line",
+            "token_count record missing info",
+            "token_count record missing usage",
+            "token_count usage fields are incomplete",
+        ]
+        return !operationalMarkers.contains { normalized.contains($0) }
+    }
 }
 
 public struct UsageSourceLoadResult: Sendable, Hashable {

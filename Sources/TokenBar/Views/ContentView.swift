@@ -5,6 +5,7 @@ import TokenBarCore
 struct ContentView: View {
     @EnvironmentObject private var runtimeModel: TokenBarRuntimeModel
     @State private var selectedRange = "30d"
+    @AppStorage("tokenbar.pricingOverrides") private var pricingOverridesJSON = "{}"
 
     var body: some View {
         HStack(spacing: 0) {
@@ -26,23 +27,27 @@ struct ContentView: View {
 
             ZStack {
                 TokenBarGlassBackground()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: TokenBarStyle.sectionSpacing) {
-                        switch runtimeModel.mainRoute {
-                        case .today:
-                            OverviewPage(selectedRange: $selectedRange)
-                                .environmentObject(runtimeModel)
-                        case .diagnostics:
-                            DiagnosticsView()
-                                .environmentObject(runtimeModel)
-                        case .settings:
-                            SettingsView()
-                                .environmentObject(runtimeModel)
-                        case .project(let projectName):
-                            projectPage(projectName)
+                if runtimeModel.mainRoute == .settings {
+                    SettingsView()
+                        .environmentObject(runtimeModel)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: TokenBarStyle.sectionSpacing) {
+                            switch runtimeModel.mainRoute {
+                            case .today:
+                                OverviewPage(selectedRange: $selectedRange)
+                                    .environmentObject(runtimeModel)
+                            case .diagnostics:
+                                DiagnosticsView()
+                                    .environmentObject(runtimeModel)
+                            case .settings:
+                                EmptyView()
+                            case .project(let projectName):
+                                projectPage(projectName)
+                            }
                         }
+                        .padding(TokenBarStyle.pagePadding)
                     }
-                    .padding(TokenBarStyle.pagePadding)
                 }
             }
         }
@@ -58,36 +63,168 @@ struct ContentView: View {
 
     @ViewBuilder
     private func projectPage(_ projectName: String) -> some View {
-        if let detail = runtimeModel.projectDetail, detail.projectName == projectName {
-            ProjectDetailView(
-                detail: detail,
-                projectPath: runtimeModel.projectPath(for: projectName),
-                allTimeSummary: runtimeModel.allTimeSummary(for: projectName),
-                allTimeCost: runtimeModel.allTimeCost(for: projectName),
-                prompts: runtimeModel.promptHistory(for: projectName),
-                events: runtimeModel.events,
-                refreshState: runtimeModel.refreshState,
-                todayCost: runtimeModel.snapshot.estimatedCostToday.totalCost,
-                rangeCost: runtimeModel.snapshot.estimatedCostLast30.totalCost,
-                todayTokens: runtimeModel.snapshot.today.totalTokens,
-                totalTokens: runtimeModel.snapshot.last30Summary.totalTokens,
-                todaySessions: tokenbarSessionCount(runtimeModel.events),
-                onRefresh: { Task { await runtimeModel.refresh() } },
-                onBack: { runtimeModel.mainRoute = .today }
-            )
-        } else {
-            TokenBarCard {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(projectName)
-                        .font(.system(size: 24, weight: .semibold, design: .rounded))
-                    Text("Loading project detail from the local index.")
-                        .font(.caption)
-                        .foregroundStyle(TokenBarStyle.muted)
+        ZStack(alignment: .top) {
+            if let detail = runtimeModel.projectDetail, detail.projectName == projectName {
+                ZStack(alignment: .bottomTrailing) {
+                    ProjectDetailView(
+                        detail: detail,
+                        projectPath: runtimeModel.projectPath(for: projectName),
+                        allTimeSummary: runtimeModel.allTimeSummary(for: projectName),
+                        allTimeCost: tokenbarCostProjection(events: runtimeModel.events.filter { $0.projectName == projectName }),
+                        prompts: runtimeModel.promptHistory(for: projectName),
+                        events: runtimeModel.events,
+                        refreshState: runtimeModel.refreshState,
+                        switchState: runtimeModel.projectSwitchState?.projectName == projectName ? runtimeModel.projectSwitchState : nil,
+                        todayCost: tokenbarEstimatedCost(events: runtimeModel.events, days: 1),
+                        rangeCost: tokenbarEstimatedCost(events: runtimeModel.events, days: 30),
+                        todayTokens: runtimeModel.snapshot.today.totalTokens,
+                        totalTokens: runtimeModel.snapshot.last30Summary.totalTokens,
+                        todaySessions: tokenbarSessionCount(runtimeModel.events),
+                        onRefresh: { Task { await runtimeModel.refresh() } },
+                        onBack: { runtimeModel.mainRoute = .today }
+                    )
+                    if let state = runtimeModel.projectSwitchState, state.projectName == projectName {
+                        ProjectSwitchBadge(state: state)
+                            .padding(.trailing, 8)
+                            .padding(.bottom, 8)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
                 }
+            } else {
+                ProjectDetailPendingView(projectName: projectName)
+                    .task(id: projectName) {
+                        if runtimeModel.projectSwitchState?.projectName != projectName {
+                            runtimeModel.openProject(named: projectName)
+                        }
+                    }
             }
-            .task {
-                runtimeModel.openProject(named: projectName)
+
+            if let state = runtimeModel.projectSwitchState, state.projectName == projectName {
+                ProjectSwitchRail(progress: state.progress)
+                    .opacity(state.phase == .done ? 0 : 1)
             }
+        }
+    }
+
+}
+
+private struct ProjectDetailPendingView: View {
+    let projectName: String
+
+    var body: some View {
+        TokenBarCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("~/code/\(projectName)")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(TokenBarStyle.faint)
+                    .lineLimit(1)
+                Text(projectName)
+                    .font(.system(size: 32, weight: .semibold, design: .rounded))
+                    .lineLimit(1)
+                Text("Loading project detail from the local index")
+                    .font(.caption)
+                    .foregroundStyle(TokenBarStyle.muted)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(minHeight: 220, alignment: .top)
+    }
+}
+
+struct ProjectSwitchRail: View {
+    let progress: Double
+    @State private var sweep = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = max(120, proxy.size.width * CGFloat(min(max(progress, 0.05), 1.0)))
+            let sweepWidth = min(width, 180)
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(TokenBarStyle.accent.opacity(0.14))
+                    .frame(height: 1)
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                TokenBarStyle.accent.opacity(0.0),
+                                TokenBarStyle.accent.opacity(0.95),
+                                TokenBarStyle.lime.opacity(0.95),
+                                TokenBarStyle.accent.opacity(0.0)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: width, height: 2.5)
+                    .overlay(alignment: .leading) {
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.0),
+                                        Color.white.opacity(0.86),
+                                        TokenBarStyle.lime.opacity(0.0)
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: sweepWidth, height: 2.5)
+                            .offset(x: sweep ? max(0, width - sweepWidth) : -sweepWidth * 0.65)
+                            .opacity(progress < 1 ? 0.9 : 0)
+                    }
+                    .shadow(color: TokenBarStyle.accent.opacity(0.6), radius: 8, y: 1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(height: 3)
+        .animation(.easeInOut(duration: 0.16), value: progress)
+        .onAppear {
+            sweep = false
+            withAnimation(.linear(duration: 0.55).repeatForever(autoreverses: false)) {
+                sweep = true
+            }
+        }
+    }
+}
+
+private struct ProjectSwitchBadge: View {
+    let state: ProjectSwitchState
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(state.phase == .done ? TokenBarStyle.cache : TokenBarStyle.accent)
+                .frame(width: 6, height: 6)
+            Text(label)
+                .font(.system(size: 11.5, design: .monospaced))
+                .foregroundStyle(TokenBarStyle.muted)
+            Text(state.projectName)
+                .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                .foregroundStyle(TokenBarStyle.foreground)
+                .lineLimit(1)
+            if state.phase == .stream {
+                Text("\(Int((state.progress * 100).rounded()))%")
+                    .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(TokenBarStyle.lime)
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 30)
+        .background(TokenBarStyle.surfaceRaised, in: Capsule())
+        .overlay(Capsule().stroke(TokenBarStyle.line, lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.15), radius: 8, y: 4)
+    }
+
+    private var label: String {
+        switch state.phase {
+        case .snap:
+            "switching to"
+        case .stream:
+            "streaming"
+        case .done:
+            "live ·"
         }
     }
 }
@@ -253,6 +390,7 @@ private struct TokenBarSidebar: View {
 private struct OverviewPage: View {
     @EnvironmentObject private var runtimeModel: TokenBarRuntimeModel
     @Binding var selectedRange: String
+    @AppStorage("tokenbar.pricingOverrides") private var pricingOverridesJSON = "{}"
     /// CL-P0-012: which KPI (Total / Input / Output / Cache) is currently
     /// expanded into a detail drawer. `nil` = collapsed.
     @State private var expandedKPI: String?
@@ -273,7 +411,7 @@ private struct OverviewPage: View {
                         today: kpiToday(expandedKPI),
                         yesterday: kpiYesterday(expandedKPI),
                         sevenDayAverage: kpiSevenDayAverage(expandedKPI),
-                        cost: expandedKPI == "Total" ? runtimeModel.snapshot.estimatedCostToday.totalCost : nil,
+                        cost: expandedKPI == "Total" ? todayCost : nil,
                         onClose: { withAnimation(.easeOut(duration: 0.18)) { self.expandedKPI = nil } }
                     )
                 }
@@ -286,7 +424,7 @@ private struct OverviewPage: View {
                 HStack(alignment: .top, spacing: TokenBarStyle.sectionSpacing) {
                     RankingCard(
                         title: "Top projects",
-                        footnote: "\(runtimeModel.snapshot.topProjects.count) tracked",
+                        footnote: "\(min(runtimeModel.snapshot.topProjects.count, 5)) of \(runtimeModel.snapshot.topProjects.count)",
                         rows: tokenbarRankingRows(
                             rows: runtimeModel.snapshot.topProjects,
                             events: runtimeModel.events,
@@ -309,8 +447,8 @@ private struct OverviewPage: View {
                 }
                 ModelBreakdownTable(
                     title: "Model",
-                    subtitle: "Cost and token attribution from the current local index.",
-                    totalCost: tokenbarCurrency(runtimeModel.snapshot.estimatedCostLast30.totalCost),
+                    subtitle: "Share of tokens · \(tokenbarRangeTitle(selectedRange).lowercased())",
+                    totalCost: tokenbarCompactCurrency(rangeCost),
                     rows: tokenbarModelBreakdowns(
                         events: runtimeModel.events,
                         days: tokenbarDaysForRange(selectedRange)
@@ -335,8 +473,8 @@ private struct OverviewPage: View {
             }
             Spacer()
             TopRightCluster(
-                todayCost: runtimeModel.snapshot.estimatedCostToday.totalCost,
-                rangeCost: runtimeModel.snapshot.estimatedCostLast30.totalCost,
+                todayCost: todayCost,
+                rangeCost: rangeCost,
                 todayTokens: runtimeModel.snapshot.today.totalTokens,
                 totalTokens: runtimeModel.snapshot.last30Summary.totalTokens,
                 todaySessions: tokenbarSessionCount(runtimeModel.events),
@@ -347,6 +485,14 @@ private struct OverviewPage: View {
             DateRangeControl(selection: $selectedRange)
                 .fixedSize(horizontal: true, vertical: false)
         }
+    }
+
+    private var todayCost: Double {
+        tokenbarEstimatedCost(events: runtimeModel.events, days: 1)
+    }
+
+    private var rangeCost: Double {
+        tokenbarEstimatedCost(events: runtimeModel.events, days: tokenbarDaysForRange(selectedRange))
     }
 
     private var kpiRow: some View {
@@ -480,7 +626,7 @@ struct TopRightCluster: View {
     @State private var showFlyout = false
 
     private func copyCostSummary() {
-        let line = "Today ~ \(tokenbarCurrency(todayCost, maximumFractionDigits: 3)) · 30d ~ \(tokenbarCurrency(rangeCost)) · \(tokenbarTokens(totalTokens)) tokens"
+        let line = "Today ~ \(tokenbarCompactCurrency(todayCost)) · 30d ~ \(tokenbarCompactCurrency(rangeCost)) · \(tokenbarCompactTokens(totalTokens)) tokens"
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(line, forType: .string)
     }
@@ -491,7 +637,7 @@ struct TopRightCluster: View {
                 HStack(spacing: 4) {
                     Text("Today ~")
                         .foregroundStyle(TokenBarStyle.muted)
-                    Text(tokenbarCurrency(todayCost, maximumFractionDigits: 3))
+                    Text(tokenbarCompactCurrency(todayCost))
                         .fontWeight(.semibold)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
@@ -503,13 +649,13 @@ struct TopRightCluster: View {
                         .foregroundStyle(TokenBarStyle.cache)
                     Text("30d ~")
                         .foregroundStyle(TokenBarStyle.muted)
-                    Text(tokenbarCurrency(rangeCost))
+                    Text(tokenbarCompactCurrency(rangeCost))
                         .fontWeight(.semibold)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                     Text("·")
                         .foregroundStyle(TokenBarStyle.faint)
-                    Text(tokenbarTokens(totalTokens))
+                    Text(tokenbarCompactTokens(totalTokens))
                         .fontWeight(.semibold)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
@@ -519,7 +665,7 @@ struct TopRightCluster: View {
             .monospacedDigit()
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
+            .background(TokenBarStyle.surfaceRaised, in: Capsule())
             .overlay(Capsule().stroke(TokenBarStyle.line, lineWidth: 1))
             .fixedSize(horizontal: true, vertical: false)
             // CL-P2-006: clicking the cost capsule copies a human-readable
@@ -548,7 +694,7 @@ struct TopRightCluster: View {
             .buttonStyle(.plain)
             .padding(.horizontal, 11)
             .padding(.vertical, 8)
-            .background(Color.white.opacity(0.04), in: Capsule())
+            .background(TokenBarStyle.surfaceRaised, in: Capsule())
             .overlay(Capsule().stroke(TokenBarStyle.line, lineWidth: 1))
             .help("Menu bar mirrors \(mirrorMode.title.lowercased()).")
             .fixedSize(horizontal: true, vertical: false)
@@ -592,7 +738,7 @@ struct TopRightCluster: View {
                     .foregroundStyle(TokenBarStyle.faint)
             }
             .padding(9)
-            .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             flyoutButton("Force refresh", systemImage: "arrow.clockwise", trailing: "⌘R") {
                 onRefresh?()
@@ -620,12 +766,12 @@ struct TopRightCluster: View {
                                 .font(.system(size: 10.5, weight: .medium))
                             Text(tokenbarMirrorValue(mode: mode, todayTokens: todayTokens, todayCost: todayCost, todaySessions: todaySessions).isEmpty ? "—" : tokenbarMirrorValue(mode: mode, todayTokens: todayTokens, todayCost: todayCost, todaySessions: todaySessions))
                                 .font(.system(size: 9.5, design: .monospaced))
-                                .foregroundStyle(mirrorMode == mode ? Color.white.opacity(0.75) : TokenBarStyle.faint)
+                                .foregroundStyle(mirrorMode == mode ? TokenBarStyle.foreground.opacity(0.75) : TokenBarStyle.faint)
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 6)
                         .frame(maxWidth: .infinity)
-                        .background(mirrorMode == mode ? TokenBarStyle.input.opacity(0.22) : Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        .background(mirrorMode == mode ? TokenBarStyle.input.opacity(0.22) : TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }
@@ -693,9 +839,10 @@ struct RankingCard: View {
                         Button {
                             onSelect?(row.name)
                         } label: {
-                            HStack(spacing: 12) {
+                            HStack(spacing: 10) {
                                 Text("\(index + 1)")
                                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(rankColor(index))
                                     .frame(width: 22, height: 22)
                                     .background(rankColor(index).opacity(0.18), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                                 VStack(alignment: .leading, spacing: 2) {
@@ -711,21 +858,29 @@ struct RankingCard: View {
                                         .foregroundStyle(TokenBarStyle.faint)
                                         .lineLimit(1)
                                 }
-                                Spacer()
-                                Text(tokenbarTokens(row.totalTokens))
-                                    .font(.system(size: 13, design: .monospaced))
-                                    .foregroundStyle(TokenBarStyle.foreground)
-                                // CL-P0-016: cost column on the right, aligned
-                                // with the token column baseline.
-                                Text(tokenbarCurrency(row.cost))
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .foregroundStyle(TokenBarStyle.cost)
-                                    .frame(minWidth: 56, alignment: .trailing)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                VStack(alignment: .trailing, spacing: 3) {
+                                    Text(tokenbarCompactTokens(row.totalTokens))
+                                        .font(.system(size: 13.5, design: .monospaced))
+                                        .monospacedDigit()
+                                        .foregroundStyle(TokenBarStyle.foreground)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.82)
+                                        .tbNumberTooltip(precise: row.totalTokens, window: row.name)
+                                    Text(tokenbarCompactCurrency(row.cost))
+                                        .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                                        .monospacedDigit()
+                                        .foregroundStyle(TokenBarStyle.cost)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.82)
+                                        .tbNumberTooltip(precise: row.cost, window: row.name)
+                                }
+                                .frame(width: 92, alignment: .trailing)
                             }
                             .padding(.vertical, 8)
                         }
                         .buttonStyle(.plain)
-                        .disabled(onSelect == nil)
+                        .allowsHitTesting(onSelect != nil)
                         .overlay(Divider().overlay(TokenBarStyle.line.opacity(0.6)), alignment: .bottom)
                     }
                     if rows.isEmpty {
@@ -747,8 +902,9 @@ struct RankingCard: View {
     private func rankColor(_ index: Int) -> Color {
         switch index {
         case 0: TokenBarStyle.accent
-        case 1: TokenBarStyle.cache
-        case 2: Color(nsColor: .systemOrange)
+        case 1: TokenBarStyle.output
+        case 2: TokenBarStyle.cache
+        case 3: Color(nsColor: .systemPurple)
         default: Color(nsColor: .quaternaryLabelColor)
         }
     }

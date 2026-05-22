@@ -86,14 +86,30 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
                     UsageSourceWarning(sourceName: sourceName, sourcePath: $0.sourcePath, lineNumber: $0.lineNumber, message: $0.message)
                 })
             case .auto, .unknown:
-                warnings.append(
-                    UsageSourceWarning(
-                        sourceName: sourceName,
-                        sourcePath: file.path,
-                        lineNumber: nil,
-                        message: "custom source format could not be detected"
-                    )
+                let incremental = try JSONLIncrementalReader.read(
+                    fileURL: file,
+                    sourceName: sourceName,
+                    agent: .custom,
+                    watermark: watermarks[file.path],
+                    now: referenceDate
                 )
+                let mappedResult = parseMappedJSONL(lines: incremental.lines, fileURL: file)
+                events.append(contentsOf: mappedResult.events.map { customEvent($0) })
+                warnings.append(contentsOf: incremental.warnings)
+                warnings.append(contentsOf: mappedResult.warnings.map {
+                    UsageSourceWarning(sourceName: sourceName, sourcePath: $0.sourcePath, lineNumber: $0.lineNumber, message: $0.message)
+                })
+                nextWatermarks.append(customWatermark(from: incremental.nextWatermark, lastEventId: mappedResult.events.last?.id))
+                if mappedResult.events.isEmpty && mappedResult.warnings.isEmpty {
+                    warnings.append(
+                        UsageSourceWarning(
+                            sourceName: sourceName,
+                            sourcePath: file.path,
+                            lineNumber: nil,
+                            message: "custom source format could not be detected"
+                        )
+                    )
+                }
             }
         }
 
@@ -191,6 +207,122 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
             lastInode: watermark.lastInode,
             updatedAt: watermark.updatedAt
         )
+    }
+
+    private func parseMappedJSONL(
+        lines: [JSONLLineRecord],
+        fileURL: URL
+    ) -> UsageSourceLoadResult {
+        var events: [UsageEvent] = []
+        var warnings: [UsageSourceWarning] = []
+
+        for line in lines {
+            let lineNumber = line.lineNumber
+            let lineText = line.text
+            guard let data = lineText.data(using: .utf8) else {
+                warnings.append(UsageSourceWarning(sourceName: sourceName, sourcePath: fileURL.path, lineNumber: lineNumber, message: "line is not valid UTF-8"))
+                continue
+            }
+
+            let object: [String: Any]
+            do {
+                object = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            } catch {
+                warnings.append(UsageSourceWarning(sourceName: sourceName, sourcePath: fileURL.path, lineNumber: lineNumber, message: "malformed JSON"))
+                continue
+            }
+
+            let input = mappedIntValue(from: object, path: record.fieldMapping.inputTokens)
+            let output = mappedIntValue(from: object, path: record.fieldMapping.outputTokens)
+            let cache = mappedIntValue(from: object, path: record.fieldMapping.cacheTokens)
+            guard let input, let output, let cache else {
+                warnings.append(UsageSourceWarning(sourceName: sourceName, sourcePath: fileURL.path, lineNumber: lineNumber, message: "usage fields are incomplete for custom mapping"))
+                continue
+            }
+
+            let inputClamp = TokenBarNumberFormatting.clampNonNegative(input)
+            let outputClamp = TokenBarNumberFormatting.clampNonNegative(output)
+            let cacheClamp = TokenBarNumberFormatting.clampNonNegative(cache)
+            if inputClamp.wasNegative || outputClamp.wasNegative || cacheClamp.wasNegative {
+                warnings.append(UsageSourceWarning(sourceName: sourceName, sourcePath: fileURL.path, lineNumber: lineNumber, message: "negative token count clamped to 0"))
+            }
+
+            let projectPath = (object["projectPath"] as? String) ?? (object["cwd"] as? String)
+            let projectName = URL(fileURLWithPath: projectPath ?? fileURL.deletingPathExtension().path).lastPathComponent
+            let sessionId = (object["sessionId"] as? String) ?? (object["session_id"] as? String) ?? fileURL.deletingPathExtension().lastPathComponent
+            let timestamp = parseTimestamp(object["timestamp"] as? String) ?? .distantPast
+            let modelName = mappedStringValue(from: object, path: record.fieldMapping.model)
+
+            events.append(
+                UsageEvent(
+                    id: "\(fileURL.path)#mapped#\(lineNumber)",
+                    agent: .custom,
+                    projectPath: projectPath,
+                    projectName: projectName,
+                    sessionId: sessionId,
+                    timestamp: timestamp,
+                    inputTokens: inputClamp.value,
+                    outputTokens: outputClamp.value,
+                    cacheTokens: cacheClamp.value,
+                    reasoningTokens: nil,
+                    modelName: modelName,
+                    sourcePath: fileURL.path,
+                    parser: .custom,
+                    confidence: 1.0
+                )
+            )
+        }
+
+        return UsageSourceLoadResult(events: events, prompts: [], warnings: warnings)
+    }
+
+    private func parseTimestamp(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: value) {
+            return date
+        }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value)
+    }
+
+    private func mappedStringValue(from object: [String: Any], path: String) -> String? {
+        mappedValue(from: object, path: path).flatMap { $0 as? String }
+    }
+
+    private func mappedIntValue(from object: [String: Any], path: String) -> Int? {
+        let value = mappedValue(from: object, path: path)
+        switch value {
+        case let intValue as Int:
+            return intValue
+        case let intValue as Int64:
+            return Int(intValue)
+        case let doubleValue as Double:
+            return Int(doubleValue)
+        case let num as NSNumber:
+            return num.intValue
+        case let stringValue as String:
+            return Int(stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
+        default:
+            return nil
+        }
+    }
+
+    private func mappedValue(from object: [String: Any], path: String) -> Any? {
+        let parts = path.split(separator: ".").map(String.init)
+        var current: Any = object
+        for part in parts {
+            if let index = Int(part), let array = current as? [Any], array.indices.contains(index) {
+                current = array[index]
+                continue
+            }
+            guard let dictionary = current as? [String: Any], let next = dictionary[part] else {
+                return nil
+            }
+            current = next
+        }
+        return current
     }
 }
 

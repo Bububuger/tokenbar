@@ -6,7 +6,7 @@ import TokenBarCore
 struct TokenBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var runtimeModel = TokenBarRuntimeModel.live()
-    @AppStorage("tokenbar.theme") private var theme = "System"
+    @AppStorage("tokenbar.theme") private var theme = "Dark"
 
     var body: some Scene {
         MenuBarExtra {
@@ -40,28 +40,29 @@ struct TokenBarApp: App {
         .windowResizability(.contentMinSize)
     }
 
-    // CL-P0-020 / DESIGN§2.5: Settings.theme drives `preferredColorScheme`.
-    // System → nil (follow OS), Light → .light, Dark → .dark. Now that the
-    // entire style layer uses semantic colors (CL-P0-007), all three themes
-    // render correctly.
+    // Settings.theme drives `preferredColorScheme`. Dark is the default and
+    // catch-all for legacy "System" values stored in AppStorage.
     private var preferredColorScheme: ColorScheme? {
         switch theme {
         case "Light":
             return .light
-        case "Dark":
-            return .dark
         default:
-            return nil
+            return .dark
         }
     }
 }
 
 private struct TokenBarAppAppearanceModifier: ViewModifier {
-    @AppStorage("tokenbar.theme") private var theme = "System"
+    @AppStorage("tokenbar.theme") private var theme = "Dark"
 
     func body(content: Content) -> some View {
         content
-            .onAppear { apply(theme) }
+            .onAppear {
+                if theme != "Light" && theme != "Dark" {
+                    theme = "Dark"
+                }
+                apply(theme)
+            }
             .onChange(of: theme) { _, newValue in
                 apply(newValue)
             }
@@ -71,10 +72,8 @@ private struct TokenBarAppAppearanceModifier: ViewModifier {
         switch value {
         case "Light":
             NSApp.appearance = NSAppearance(named: .aqua)
-        case "Dark":
-            NSApp.appearance = NSAppearance(named: .darkAqua)
         default:
-            NSApp.appearance = nil
+            NSApp.appearance = NSAppearance(named: .darkAqua)
         }
     }
 }
@@ -100,10 +99,10 @@ private struct TokenBarStatusItem: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            // CL-P0-001: template image gets auto-tinted by macOS for any
-            // menubar appearance (wallpaper-tint / dark / Reduce Transparency
-            // / Increase Contrast), so the base glyph stays template-correct.
-            Image(nsImage: TokenBarMenuBarGlyphImage.template())
+            // CL-P0-001: bars cascade-fill bottom → middle → top as today's
+            // tokens grow relative to the 30-day peak day. Template image
+            // gets auto-tinted by macOS for the active menubar appearance.
+            Image(nsImage: TokenBarMenuBarGlyphImage.template(progress: todayFillProgress))
                 .renderingMode(.template)
                 .overlay(alignment: .topTrailing) {
                     if runtimeModel.refreshState == .failed || runtimeModel.refreshState == .stale {
@@ -111,7 +110,7 @@ private struct TokenBarStatusItem: View {
                             .fill(runtimeModel.refreshState == .failed ? TokenBarStyle.error : TokenBarStyle.warn)
                             .frame(width: 4, height: 4)
                             .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
-                            .offset(x: 2, y: -1)
+                            .offset(x: 1, y: -1)
                     }
                 }
                 .overlay(alignment: .bottomTrailing) {
@@ -120,10 +119,10 @@ private struct TokenBarStatusItem: View {
                             Capsule().fill(TokenBarStyle.warn).frame(width: 1.5, height: 5)
                             Capsule().fill(TokenBarStyle.warn).frame(width: 1.5, height: 5)
                         }
-                        .offset(x: 2, y: 1)
+                        .offset(x: 1, y: 1)
                     }
                 }
-                .frame(width: 16, height: 16)
+                .frame(width: TokenBarMenuBarGlyphImage.canvasSize.width, height: TokenBarMenuBarGlyphImage.canvasSize.height)
                 .accessibilityLabel(accessibilityStatus)
             // CL-P1-034: when the mirrored value would exceed the menubar
             // budget (~14 mono chars), collapse to glyph-only rather than let
@@ -156,6 +155,18 @@ private struct TokenBarStatusItem: View {
 
     private var mirrorMode: MenuBarMirrorMode {
         MenuBarMirrorMode(rawValue: mirrorModeRaw) ?? .off
+    }
+
+    /// Today's tokens ÷ the user's 30-day peak day, clamped 0…1. Peak (not
+    /// average) keeps the icon expressive for heavy users — full only on a
+    /// record day. Today is excluded so a busy "today so far" can't shrink
+    /// its own reference. 50K floor prevents instant-full for fresh installs.
+    private var todayFillProgress: Double {
+        let today = Double(runtimeModel.snapshot.today.totalTokens)
+        let prior = runtimeModel.snapshot.last30Days.dropLast()
+        let peak = prior.map(\.summary.totalTokens).max() ?? 0
+        let baseline = max(Double(peak), 50_000)
+        return min(1.0, today / baseline)
     }
 
     private var displayedMirror: String {

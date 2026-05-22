@@ -1565,43 +1565,71 @@ struct TokenBarStatusGlyph: View {
     }
 }
 
-/// CL-P0-001: programmatic NSStatusBar template image. Pure-black 3-bar glyph
-/// flagged `isTemplate = true` so macOS auto-tints it for the active menubar
-/// appearance (works under wallpaper-tinted, dark, Reduce Transparency, and
-/// Increase Contrast environments without per-state PDFs from design).
+/// CL-P0-001: programmatic NSStatusBar template image. Three brand bars on an
+/// 18×16 canvas, each rendered as a 40%-alpha "container" with a 100%-alpha
+/// fill clipped to that shape. `progress` (0…1) cascades the fill from
+/// bottom → middle → top so the glyph visibly accumulates as today's tokens
+/// grow. `isTemplate = true` lets macOS tint everything for the active menubar
+/// appearance; alpha is preserved so the empty containers remain readable on
+/// wallpaper-tinted, dark, Reduce Transparency, and Increase Contrast menubars.
 enum TokenBarMenuBarGlyphImage {
-    static func template(size: CGFloat = 16) -> NSImage {
-        let pixelSize = NSSize(width: size, height: size)
-        let image = NSImage(size: pixelSize, flipped: false) { rect in
-            NSColor.black.setFill()
-            // viewBox 16 → top 5.5, mid 9, bot 7 (menubar.jsx). Ordering
-            // (top shortest, mid longest, bot medium) matches the app icon.
-            // Bars are left-aligned with a 2.5/16 inset, matching the design.
-            let widths: [CGFloat] = [5.5, 9, 7]
-            let barHeight: CGFloat = 1.9
-            let spacing: CGFloat = 1.55
-            let unit = rect.width / 16
-            let total = barHeight * unit * 3 + spacing * unit * 2
-            let startY = (rect.height - total) / 2
-            let leftInset = 2.5 * unit
-            for (idx, w) in widths.enumerated() {
-                let y = startY + CGFloat(2 - idx) * (barHeight + spacing) * unit
-                let path = NSBezierPath(
-                    roundedRect: NSRect(
-                        x: leftInset,
-                        y: y,
-                        width: w * unit,
-                        height: barHeight * unit
-                    ),
-                    xRadius: 0.5 * unit,
-                    yRadius: 0.5 * unit
+    static let canvasSize = NSSize(width: 18, height: 16)
+
+    static func template(progress: Double = 0) -> NSImage {
+        let clamped = max(0.0, min(1.0, progress))
+        // Brand ratio preserved (top short / mid long / bot medium) but bars
+        // chunkier than the legacy 5.5-9-7 mark so the icon fills the menubar
+        // generously.
+        let widths: [CGFloat] = [9.0, 16.0, 12.0]
+        let barHeight: CGFloat = 3.0
+        let gap: CGFloat = 1.6
+        let cornerRadius: CGFloat = 0.7
+        let leftInset: CGFloat = 1.0
+        let totalHeight = barHeight * 3 + gap * 2
+        let containerAlpha: CGFloat = 0.40
+
+        let image = NSImage(size: canvasSize, flipped: false) { rect in
+            let startY = (rect.height - totalHeight) / 2
+            for (idx, width) in widths.enumerated() {
+                let y = startY + CGFloat(2 - idx) * (barHeight + gap)
+                let container = NSBezierPath(
+                    roundedRect: NSRect(x: leftInset, y: y, width: width, height: barHeight),
+                    xRadius: cornerRadius,
+                    yRadius: cornerRadius
                 )
-                path.fill()
+
+                NSColor.black.withAlphaComponent(containerAlpha).setFill()
+                container.fill()
+
+                let fillRatio = cascadeFill(progress: clamped, barIndex: idx)
+                guard fillRatio > 0 else { continue }
+
+                NSGraphicsContext.saveGraphicsState()
+                container.addClip()
+                NSColor.black.setFill()
+                NSBezierPath(rect: NSRect(
+                    x: leftInset,
+                    y: y,
+                    width: width * fillRatio,
+                    height: barHeight
+                )).fill()
+                NSGraphicsContext.restoreGraphicsState()
             }
             return true
         }
         image.isTemplate = true
         return image
+    }
+
+    /// Each bar owns 1/3 of progress; bottom (idx 2) carries a 0.22 floor so
+    /// the icon always has a solid anchor even on a 0-token day.
+    private static func cascadeFill(progress: Double, barIndex: Int) -> CGFloat {
+        let segment = 1.0 / 3.0
+        let segmentStart = Double(2 - barIndex) * segment
+        let local = (progress - segmentStart) / segment
+        let raw = CGFloat(max(0.0, min(1.0, local)))
+        let floor: CGFloat = barIndex == 2 ? 0.22 : 0.0
+        return max(raw, floor)
     }
 }
 

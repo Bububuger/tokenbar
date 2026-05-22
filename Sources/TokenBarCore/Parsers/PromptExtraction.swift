@@ -10,10 +10,10 @@ enum PromptExtraction {
     static func isSystemReminder(_ content: String) -> Bool {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return true }
-        let lowered = trimmed.lowercased()
-        return lowered.contains("<system-reminder>")
-            || lowered.contains("system reminder")
-            || lowered.contains("important instruction reminders")
+        let header = trimmed.prefix(512)
+        return header.range(of: "<system-reminder>", options: .caseInsensitive) != nil
+            || header.range(of: "system reminder", options: .caseInsensitive) != nil
+            || header.range(of: "important instruction reminders", options: .caseInsensitive) != nil
     }
 
     static func strings(fromContent value: Any?) -> [String] {

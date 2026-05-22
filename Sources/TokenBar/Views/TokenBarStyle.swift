@@ -216,7 +216,7 @@ enum MenuBarMirrorMode: String, CaseIterable, Identifiable {
     }
 }
 
-struct TokenBarModelBreakdown: Identifiable, Hashable {
+struct TokenBarModelBreakdown: Identifiable, Hashable, Sendable {
     let name: String
     let agentName: String
     let summary: UsageSummary
@@ -295,7 +295,19 @@ func tokenbarRelativeTime(_ date: Date?) -> String {
     return date.formatted(.dateTime.month(.abbreviated).day())
 }
 
-func tokenbarDaysForRange(_ selection: String) -> Int {
+struct TokenBarRangeWindow: Sendable, Hashable {
+    let selection: String
+    let start: Date
+    let end: Date
+    let requestedDays: Int?
+    let isAllTime: Bool
+
+    var dayCount: Int {
+        max(1, Calendar(identifier: .gregorian).dateComponents([.day], from: start, to: end).day ?? 1)
+    }
+}
+
+func tokenbarDaysForRange(_ selection: String) -> Int? {
     switch selection {
     case "7d":
         7
@@ -303,8 +315,10 @@ func tokenbarDaysForRange(_ selection: String) -> Int {
         90
     case "1y":
         365
+    case "All":
+        nil
     case "Custom":
-        30
+        tokenbarCustomRangeDays()
     default:
         30
     }
@@ -318,6 +332,8 @@ func tokenbarRangeTitle(_ selection: String) -> String {
         "Last 90 days"
     case "1y":
         "Last 1 year"
+    case "All":
+        "All history"
     case "Custom":
         "Custom range"
     default:
@@ -325,23 +341,329 @@ func tokenbarRangeTitle(_ selection: String) -> String {
     }
 }
 
-func tokenbarRangeDays(_ days: [UsageDay], selection: String) -> [UsageDay] {
-    let requested = tokenbarDaysForRange(selection)
-    guard !days.isEmpty else {
-        return UsageDay.placeholder(count: min(requested, 30))
+func tokenbarRangeShortLabel(_ selection: String) -> String {
+    switch selection {
+    case "7d", "30d", "90d", "1y":
+        selection
+    case "All":
+        "all"
+    case "Custom":
+        "custom"
+    default:
+        "30d"
     }
-    return Array(days.suffix(min(days.count, requested)))
 }
 
-func tokenbarRangeAvailabilityNote(selection: String, availableDays: Int) -> String {
-    let requested = tokenbarDaysForRange(selection)
-    if selection == "Custom" {
-        return "Custom uses the available local-index window until persisted custom windows are added."
+func tokenbarRangeWindow(
+    selection: String,
+    events: [UsageEvent],
+    referenceDate: Date = Date(),
+    calendar: Calendar = Calendar(identifier: .gregorian)
+) -> TokenBarRangeWindow {
+    let todayStart = calendar.startOfDay(for: referenceDate)
+    let tomorrowStart = calendar.date(byAdding: .day, value: 1, to: todayStart) ?? referenceDate
+
+    if selection == "All" {
+        let earliest = events.map(\.timestamp).min().map { calendar.startOfDay(for: $0) }
+            ?? calendar.date(byAdding: .day, value: -29, to: todayStart)
+            ?? todayStart
+        return TokenBarRangeWindow(selection: selection, start: earliest, end: tomorrowStart, requestedDays: nil, isAllTime: true)
     }
-    if requested > availableDays {
-        return "Requested \(tokenbarRangeTitle(selection).lowercased()); showing \(availableDays)d available in the local index."
+
+    if selection == "Custom", let custom = tokenbarCustomRangeWindow(calendar: calendar) {
+        return TokenBarRangeWindow(selection: selection, start: custom.start, end: custom.end, requestedDays: custom.days, isAllTime: false)
     }
-    return "Input / output / cache stacked bars from indexed local events."
+
+    let days = tokenbarDaysForRange(selection) ?? 30
+    let requestedStart = calendar.date(byAdding: .day, value: -(days - 1), to: todayStart) ?? todayStart
+    let earliestIndexedDay = events.map(\.timestamp).min().map { calendar.startOfDay(for: $0) }
+    let start = earliestIndexedDay.map { max(requestedStart, $0) } ?? requestedStart
+    return TokenBarRangeWindow(selection: selection, start: start, end: tomorrowStart, requestedDays: days, isAllTime: false)
+}
+
+func tokenbarRangeEvents(
+    events: [UsageEvent],
+    selection: String,
+    referenceDate: Date = Date(),
+    calendar: Calendar = Calendar(identifier: .gregorian),
+    where include: ((UsageEvent) -> Bool)? = nil
+) -> [UsageEvent] {
+    let window = tokenbarRangeWindow(selection: selection, events: events, referenceDate: referenceDate, calendar: calendar)
+    return events.filter { event in
+        event.timestamp >= window.start
+            && event.timestamp < window.end
+            && (include?(event) ?? true)
+    }
+}
+
+func tokenbarUsageDays(
+    events: [UsageEvent],
+    selection: String,
+    referenceDate: Date = Date(),
+    calendar: Calendar = Calendar(identifier: .gregorian),
+    where include: ((UsageEvent) -> Bool)? = nil
+) -> [UsageDay] {
+    let window = tokenbarRangeWindow(selection: selection, events: events, referenceDate: referenceDate, calendar: calendar)
+    let filtered = tokenbarRangeEvents(events: events, selection: selection, referenceDate: referenceDate, calendar: calendar, where: include)
+    let buckets = Dictionary(grouping: filtered) { calendar.startOfDay(for: $0.timestamp) }
+
+    var days: [UsageDay] = []
+    var cursor = window.start
+    while cursor < window.end {
+        let summary = tokenbarSummary(buckets[cursor] ?? [])
+        days.append(UsageDay(date: cursor, summary: summary, intensity: 0))
+        guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+        cursor = next
+    }
+
+    let maxTotal = Double(days.map(\.summary.totalTokens).max() ?? 0)
+    return days.map { day in
+        UsageDay(
+            date: day.date,
+            summary: day.summary,
+            intensity: maxTotal > 0 ? Double(day.summary.totalTokens) / maxTotal : 0
+        )
+    }
+}
+
+func tokenbarSummary(_ events: [UsageEvent]) -> UsageSummary {
+    UsageSummary(
+        inputTokens: events.reduce(0) { $0 + $1.inputTokens },
+        outputTokens: events.reduce(0) { $0 + $1.outputTokens },
+        cacheTokens: events.reduce(0) { $0 + $1.cacheTokens }
+    )
+}
+
+func tokenbarEventsInLastDays(
+    events: [UsageEvent],
+    days: Int = 1,
+    referenceDate: Date = Date(),
+    calendar: Calendar = Calendar(identifier: .gregorian)
+) -> [UsageEvent] {
+    let todayStart = calendar.startOfDay(for: referenceDate)
+    let start = calendar.date(byAdding: .day, value: -(days - 1), to: todayStart) ?? todayStart
+    let end = calendar.date(byAdding: .day, value: 1, to: todayStart) ?? referenceDate
+    return events.filter { $0.timestamp >= start && $0.timestamp < end }
+}
+
+func tokenbarBreakdowns(
+    events: [UsageEvent],
+    selection: String,
+    kind: TokenBarRankingKind,
+    topCount: Int? = 5,
+    referenceDate: Date = Date(),
+    calendar: Calendar = Calendar(identifier: .gregorian)
+) -> [UsageBreakdown] {
+    let filtered = tokenbarRangeEvents(events: events, selection: selection, referenceDate: referenceDate, calendar: calendar)
+    return tokenbarBreakdownsFromEvents(events: filtered, kind: kind, topCount: topCount)
+}
+
+func tokenbarBreakdownsFromEvents(
+    events: [UsageEvent],
+    kind: TokenBarRankingKind,
+    topCount: Int? = 5
+) -> [UsageBreakdown] {
+    let grouped: [String: [UsageEvent]]
+    switch kind {
+    case .project:
+        grouped = Dictionary(grouping: events, by: \.projectName)
+    case .agent:
+        grouped = Dictionary(grouping: events) { $0.agent.displayName }
+    }
+
+    let sorted = grouped
+        .map { UsageBreakdown(name: $0.key, summary: tokenbarSummary($0.value)) }
+        .filter { $0.summary.totalTokens > 0 }
+        .sorted { lhs, rhs in
+            if lhs.summary.totalTokens == rhs.summary.totalTokens {
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
+            return lhs.summary.totalTokens > rhs.summary.totalTokens
+        }
+    guard let topCount else {
+        return sorted
+    }
+    return Array(sorted.prefix(topCount))
+}
+
+func tokenbarAgentShare(events: [UsageEvent], topCount: Int = 5) -> [AgentShareSlice] {
+    let total = tokenbarSummary(events).totalTokens
+    guard total > 0 else { return [] }
+
+    return Dictionary(grouping: events) { $0.agent.displayName }
+        .map { name, events in
+            let tokens = tokenbarSummary(events).totalTokens
+            return AgentShareSlice(
+                name: name,
+                totalTokens: tokens,
+                percentage: Double(tokens) / Double(total)
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.totalTokens == rhs.totalTokens {
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
+            return lhs.totalTokens > rhs.totalTokens
+        }
+        .prefix(topCount)
+        .map { $0 }
+}
+
+func tokenbarRecentSessions(events: [UsageEvent], limit: Int = 6) -> [ProjectSessionSummary] {
+    Dictionary(grouping: events, by: \.sessionId)
+        .compactMap { sessionId, events -> ProjectSessionSummary? in
+            guard let latestEvent = events.max(by: { $0.timestamp < $1.timestamp }) else {
+                return nil
+            }
+            return ProjectSessionSummary(
+                sessionId: sessionId,
+                agentName: latestEvent.agent.displayName,
+                timestamp: latestEvent.timestamp,
+                summary: tokenbarSummary(events)
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.timestamp == rhs.timestamp {
+                return lhs.summary.totalTokens > rhs.summary.totalTokens
+            }
+            return lhs.timestamp > rhs.timestamp
+        }
+        .prefix(limit)
+        .map { $0 }
+}
+
+func tokenbarRangeAvailabilityNote(
+    selection: String,
+    days: [UsageDay],
+    events: [UsageEvent],
+    referenceDate: Date = Date(),
+    calendar: Calendar = Calendar(identifier: .gregorian)
+) -> String {
+    let window = tokenbarRangeWindow(selection: selection, events: events, referenceDate: referenceDate, calendar: calendar)
+    let activeDays = days.filter { $0.summary.totalTokens > 0 }.count
+    let start = window.start.formatted(.dateTime.month(.abbreviated).day().year())
+    let endDate = calendar.date(byAdding: .day, value: -1, to: window.end) ?? window.end
+    let end = endDate.formatted(.dateTime.month(.abbreviated).day().year())
+    if window.isAllTime || (window.requestedDays.map { days.count < $0 } ?? false) {
+        return "\(days.count)d indexed · \(activeDays)d active · \(start) to \(end)"
+    }
+    return "\(days.count)d window · \(activeDays)d active · \(start) to \(end)"
+}
+
+func tokenbarPromptCountsByDay(
+    days: [UsageDay],
+    prompts: [PromptRecord],
+    calendar: Calendar = Calendar(identifier: .gregorian)
+) -> [Date: Int] {
+    guard !days.isEmpty, !prompts.isEmpty else { return [:] }
+    let dayKeys = Set(days.map { calendar.startOfDay(for: $0.date) })
+    var counts: [Date: Int] = [:]
+    counts.reserveCapacity(dayKeys.count)
+    for prompt in prompts {
+        let day = calendar.startOfDay(for: prompt.timestamp)
+        guard dayKeys.contains(day) else { continue }
+        counts[day, default: 0] += 1
+    }
+    return counts
+}
+
+struct TokenBarOverviewRangeMetrics: Sendable, Hashable {
+    let selection: String
+    let days: [UsageDay]
+    let summary: UsageSummary
+    let cost: Double
+    let projectRows: [TokenBarRankingRow]
+    let agentRows: [TokenBarRankingRow]
+    let modelRows: [TokenBarModelBreakdown]
+    let projectCount: Int
+    let agentCount: Int
+    let availabilityNote: String
+
+    static let empty = TokenBarOverviewRangeMetrics(
+        selection: "",
+        days: [],
+        summary: UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0),
+        cost: 0,
+        projectRows: [],
+        agentRows: [],
+        modelRows: [],
+        projectCount: 0,
+        agentCount: 0,
+        availabilityNote: "Preparing range"
+    )
+
+    static func make(
+        events: [UsageEvent],
+        selection: String,
+        referenceDate: Date = Date(),
+        calendar: Calendar = Calendar(identifier: .gregorian)
+    ) -> TokenBarOverviewRangeMetrics {
+        let rangeEvents = tokenbarRangeEvents(
+            events: events,
+            selection: selection,
+            referenceDate: referenceDate,
+            calendar: calendar
+        )
+        let days = tokenbarUsageDays(
+            events: events,
+            selection: selection,
+            referenceDate: referenceDate,
+            calendar: calendar
+        )
+        let projectBreakdowns = tokenbarBreakdownsFromEvents(events: rangeEvents, kind: .project, topCount: 5)
+        let agentBreakdowns = tokenbarBreakdownsFromEvents(events: rangeEvents, kind: .agent, topCount: 5)
+
+        return TokenBarOverviewRangeMetrics(
+            selection: selection,
+            days: days,
+            summary: tokenbarSummary(rangeEvents),
+            cost: tokenbarEstimatedCost(events: rangeEvents),
+            projectRows: tokenbarRankingRowsForFilteredEvents(
+                rows: projectBreakdowns,
+                events: rangeEvents,
+                kind: .project
+            ),
+            agentRows: tokenbarRankingRowsForFilteredEvents(
+                rows: agentBreakdowns,
+                events: rangeEvents,
+                kind: .agent
+            ),
+            modelRows: tokenbarModelBreakdowns(events: rangeEvents, days: nil),
+            projectCount: Set(rangeEvents.map(\.projectName)).count,
+            agentCount: Set(rangeEvents.map { $0.agent.displayName }).count,
+            availabilityNote: tokenbarRangeAvailabilityNote(
+                selection: selection,
+                days: days,
+                events: events,
+                referenceDate: referenceDate,
+                calendar: calendar
+            )
+        )
+    }
+}
+
+private func tokenbarCustomRangeDays(defaults: UserDefaults = .standard) -> Int {
+    tokenbarCustomRangeWindow(defaults: defaults)?.days ?? 30
+}
+
+private func tokenbarCustomRangeWindow(
+    defaults: UserDefaults = .standard,
+    calendar: Calendar = Calendar(identifier: .gregorian)
+) -> (start: Date, end: Date, days: Int)? {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd"
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    guard let startRaw = defaults.string(forKey: "tokenbar.customRange.from"),
+          let endRaw = defaults.string(forKey: "tokenbar.customRange.to"),
+          let start = formatter.date(from: startRaw),
+          let end = formatter.date(from: endRaw),
+          start <= end else {
+        return nil
+    }
+    let startDay = calendar.startOfDay(for: start)
+    let endExclusive = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: end)) ?? end
+    let days = max(1, calendar.dateComponents([.day], from: startDay, to: endExclusive).day ?? 1)
+    return (startDay, endExclusive, days)
 }
 
 func tokenbarSessionCount(_ events: [UsageEvent], days: Int = 1, referenceDate: Date = Date()) -> Int {
@@ -507,16 +829,19 @@ func tokenbarCostProjection(events: [UsageEvent]) -> UsageCostProjection {
 func tokenbarModelBreakdowns(
     events: [UsageEvent],
     projectName: String? = nil,
-    days: Int = 30,
+    days: Int? = 30,
     referenceDate: Date = Date(),
     calendar: Calendar = Calendar(identifier: .gregorian)
 ) -> [TokenBarModelBreakdown] {
     let todayStart = calendar.startOfDay(for: referenceDate)
-    let windowStart = calendar.date(byAdding: .day, value: -(days - 1), to: todayStart) ?? todayStart
+    let windowStart = days.flatMap { calendar.date(byAdding: .day, value: -($0 - 1), to: todayStart) }
     let windowEnd = calendar.date(byAdding: .day, value: 1, to: todayStart) ?? referenceDate
 
     let filtered = events.filter { event in
-        if event.timestamp < windowStart || event.timestamp >= windowEnd {
+        if let windowStart, event.timestamp < windowStart {
+            return false
+        }
+        if event.timestamp >= windowEnd {
             return false
         }
         if let projectName, event.projectName != projectName {
@@ -597,7 +922,7 @@ extension View {
     }
 }
 
-enum TokenBarRankingKind {
+enum TokenBarRankingKind: Sendable {
     case project
     case agent
 }
@@ -606,7 +931,7 @@ enum TokenBarRankingKind {
 /// agent or project breakdown) and CL-P0-016 introduces `cost`. Both fill
 /// gaps that previously rendered as the hard-coded "local indexed usage"
 /// string with no cost column.
-struct TokenBarRankingRow: Identifiable, Hashable {
+struct TokenBarRankingRow: Identifiable, Hashable, Sendable {
     let name: String
     let summary: UsageSummary
     let totalTokens: Int
@@ -625,34 +950,50 @@ func tokenbarRankingRows(
     rows: [UsageBreakdown],
     events: [UsageEvent],
     kind: TokenBarRankingKind,
-    days: Int = 30,
+    days: Int? = 30,
     referenceDate: Date = Date(),
     calendar: Calendar = Calendar(identifier: .gregorian),
     maxSubtitle: Int = 3
 ) -> [TokenBarRankingRow] {
     let todayStart = calendar.startOfDay(for: referenceDate)
-    let windowStart = calendar.date(byAdding: .day, value: -(days - 1), to: todayStart) ?? todayStart
+    let windowStart = days.flatMap { calendar.date(byAdding: .day, value: -($0 - 1), to: todayStart) }
     let windowEnd = calendar.date(byAdding: .day, value: 1, to: todayStart) ?? referenceDate
-    let filtered = events.filter { $0.timestamp >= windowStart && $0.timestamp < windowEnd }
+    let filtered = events.filter { event in
+        if let windowStart, event.timestamp < windowStart {
+            return false
+        }
+        return event.timestamp < windowEnd
+    }
 
+    return tokenbarRankingRowsForFilteredEvents(rows: rows, events: filtered, kind: kind, maxSubtitle: maxSubtitle)
+}
+
+func tokenbarRankingRowsForFilteredEvents(
+    rows: [UsageBreakdown],
+    events: [UsageEvent],
+    kind: TokenBarRankingKind,
+    maxSubtitle: Int = 3
+) -> [TokenBarRankingRow] {
     let pricing = TokenBarPricingLookup()
+    let eventsByName = Dictionary(grouping: events) { event in
+        switch kind {
+        case .project:
+            event.projectName
+        case .agent:
+            event.agent.displayName
+        }
+    }
+
     return rows.map { row in
-        let rowEvents = filtered.filter { event in
-            switch kind {
-            case .project: return event.projectName == row.name
-            case .agent:   return event.agent.displayName == row.name
-            }
-        }
-        let cost = rowEvents.reduce(0.0) { partial, event in
-            partial + pricing.estimatedCost(for: event)
-        }
-        let subtitle = rankingSubtitle(events: rowEvents, kind: kind, max: maxSubtitle)
+        let rowEvents = eventsByName[row.name] ?? []
         return TokenBarRankingRow(
             name: row.name,
             summary: row.summary,
             totalTokens: row.summary.totalTokens,
-            subtitle: subtitle,
-            cost: cost
+            subtitle: rankingSubtitle(events: rowEvents, kind: kind, max: maxSubtitle),
+            cost: rowEvents.reduce(0.0) { partial, event in
+                partial + pricing.estimatedCost(for: event)
+            }
         )
     }
 }
@@ -760,9 +1101,9 @@ struct TokenBarGlassBackground: View {
     }
 }
 
-/// Menubar popover background. Keep light mode close to a native menu card:
-/// opaque white paper with a neutral edge, so data colors do not tint the
-/// whole popover green/cyan.
+/// Menubar popover background. In light mode this is deliberately translucent:
+/// system material does the frosted macOS surface, while the neutral white wash
+/// keeps TokenBar's data colors from tinting the whole popover green/cyan.
 struct TokenBarPopoverBackground: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var colorScheme
@@ -770,14 +1111,17 @@ struct TokenBarPopoverBackground: View {
     var body: some View {
         if colorScheme == .light {
             ZStack {
-                Color.white
-                Color(red: 0.992, green: 0.992, blue: 0.992)
-                if !reduceTransparency {
+                if reduceTransparency {
+                    Color(nsColor: .windowBackgroundColor)
+                } else {
+                    Rectangle()
+                        .fill(.regularMaterial)
+                    Color.white.opacity(0.58)
                     LinearGradient(
                         colors: [
-                            Color.white.opacity(0.92),
-                            Color(red: 0.985, green: 0.986, blue: 0.988).opacity(0.12),
-                            Color(red: 1.0, green: 0.992, blue: 0.996).opacity(0.05),
+                            Color.white.opacity(0.46),
+                            Color(red: 0.985, green: 0.986, blue: 0.988).opacity(0.16),
+                            Color(red: 1.0, green: 0.990, blue: 0.995).opacity(0.12),
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -870,19 +1214,12 @@ struct TokenBarBrandGlyph: View {
 struct TokenBarStatusGlyph: View {
     let state: RefreshState
     var paused = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var liveOpacity: Double = 1.0
 
     var body: some View {
         VStack(spacing: 1.6) {
             bar(width: 10.5, color: TokenBarStyle.muted)
-            // CL-P0-002: middle bar breathes 0.6↔1.0 over 1.05s while idle
-            // (Reduce Motion holds it at full opacity).
             bar(width: 14, color: middleColor)
-                .opacity(state == .idle && !reduceMotion ? liveOpacity : 1.0)
-                .onAppear { startLiveAnimationIfNeeded() }
-                .onChange(of: state) { _, _ in startLiveAnimationIfNeeded() }
-        bar(width: 9, color: TokenBarStyle.accent.opacity(0.95))
+            bar(width: 9, color: TokenBarStyle.accent.opacity(0.95))
         }
         .frame(width: 16, height: 16)
         .overlay(alignment: .topTrailing) {
@@ -930,17 +1267,6 @@ struct TokenBarStatusGlyph: View {
         RoundedRectangle(cornerRadius: 1.1, style: .continuous)
             .fill(color)
             .frame(width: width, height: 2.1)
-    }
-
-    private func startLiveAnimationIfNeeded() {
-        guard state == .idle, !reduceMotion else {
-            liveOpacity = 1.0
-            return
-        }
-        liveOpacity = 1.0
-        withAnimation(.easeInOut(duration: 1.05).repeatForever(autoreverses: true)) {
-            liveOpacity = 0.6
-        }
     }
 }
 
@@ -1204,39 +1530,61 @@ struct InputOutputCacheBar: View {
 struct UsageStackedBarChart: View {
     let days: [UsageDay]
     var height: CGFloat = 118
+    var promptCounts: [Date: Int] = [:]
     /// CL-P1-008: optional click handler. When non-nil, every bar becomes
     /// clickable and a hover tooltip shows MM-DD · tokens · cost.
     var onSelect: ((UsageDay) -> Void)? = nil
     @State private var hoveredDay: UsageDay?
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 5) {
-            ForEach(displayDays) { day in
-                let total = max(day.summary.totalTokens, 1)
-                VStack(spacing: 0) {
-                    Rectangle()
-                        .fill(TokenBarStyle.output.opacity(0.85))
-                        .frame(height: segmentHeight(day.summary.outputTokens, total: total))
-                    Rectangle()
-                        .fill(TokenBarStyle.input.opacity(0.85))
-                        .frame(height: segmentHeight(day.summary.inputTokens, total: total))
-                    Rectangle()
-                        .fill(TokenBarStyle.cache.opacity(0.90))
-                        .frame(height: segmentHeight(day.summary.cacheTokens, total: total))
+        Group {
+            if displayDays.count > 75 {
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        ZStack(alignment: .bottom) {
+                            HStack(alignment: .bottom, spacing: 4) {
+                                ForEach(displayDays) { day in
+                                    dayBar(day)
+                                        .frame(width: 9)
+                                        .id(day.id)
+                                }
+                            }
+                            .frame(minWidth: CGFloat(displayDays.count) * 13, minHeight: height, alignment: .bottom)
+
+                            PromptCountSparklineOverlay(days: displayDays, promptCounts: promptCounts)
+                                .frame(minWidth: CGFloat(displayDays.count) * 13, minHeight: height)
+                                .allowsHitTesting(false)
+                        }
+                        .padding(.bottom, 2)
+                    }
+                    .onAppear {
+                        if let last = displayDays.last {
+                            proxy.scrollTo(last.id, anchor: .trailing)
+                        }
+                    }
+                    .onChange(of: displayDays.last?.id) { _, last in
+                        if let last {
+                            proxy.scrollTo(last, anchor: .trailing)
+                        }
+                    }
                 }
-                .frame(maxWidth: .infinity)
-                .frame(height: max(6, height * max(0.06, day.intensity)))
-                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                .opacity(day.summary.totalTokens > 0 ? 1 : 0.30)
-                .contentShape(Rectangle())
-                .onHover { hoveredDay = $0 ? day : nil }
-                .onTapGesture { onSelect?(day) }
+            } else {
+                ZStack(alignment: .bottom) {
+                    HStack(alignment: .bottom, spacing: 5) {
+                        ForEach(displayDays) { day in
+                            dayBar(day)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    PromptCountSparklineOverlay(days: displayDays, promptCounts: promptCounts)
+                        .allowsHitTesting(false)
+                }
             }
         }
         .frame(height: height, alignment: .bottom)
         .overlay(alignment: .top) {
             if let hoveredDay {
-                TokenBarHoverBadge(text: dayTooltip(hoveredDay), width: 330)
+                TokenBarHoverBadge(text: dayTooltip(hoveredDay), width: 210)
                     .offset(y: -22)
             }
         }
@@ -1247,12 +1595,76 @@ struct UsageStackedBarChart: View {
         return days
     }
 
+    private func dayBar(_ day: UsageDay) -> some View {
+        let total = max(day.summary.totalTokens, 1)
+        return VStack(spacing: 0) {
+            Rectangle()
+                .fill(TokenBarStyle.output.opacity(0.85))
+                .frame(height: segmentHeight(day.summary.outputTokens, total: total))
+            Rectangle()
+                .fill(TokenBarStyle.input.opacity(0.85))
+                .frame(height: segmentHeight(day.summary.inputTokens, total: total))
+            Rectangle()
+                .fill(TokenBarStyle.cache.opacity(0.90))
+                .frame(height: segmentHeight(day.summary.cacheTokens, total: total))
+        }
+        .frame(height: max(6, height * max(0.06, day.intensity)))
+        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+        .opacity(day.summary.totalTokens > 0 ? 1 : 0.30)
+        .contentShape(Rectangle())
+        .onHover { hoveredDay = $0 ? day : nil }
+        .onTapGesture { onSelect?(day) }
+    }
+
     private func segmentHeight(_ tokens: Int, total: Int) -> CGFloat {
         max(1, CGFloat(tokens) / CGFloat(total) * height)
     }
 
     private func dayTooltip(_ day: UsageDay) -> String {
-        "\(day.date.formatted(.dateTime.month(.abbreviated).day())) · Total \(tokenbarCompactTokens(day.summary.totalTokens)) · In \(tokenbarCompactTokens(day.summary.inputTokens)) · Out \(tokenbarCompactTokens(day.summary.outputTokens)) · Cache \(tokenbarCompactTokens(day.summary.cacheTokens))"
+        let promptCount = promptCounts[day.date, default: 0]
+        if promptCount > 0 {
+            return "\(day.date.formatted(.dateTime.month(.abbreviated).day())) · \(tokenbarCompactTokens(day.summary.totalTokens)) total · \(promptCount) prompts"
+        }
+        return "\(day.date.formatted(.dateTime.month(.abbreviated).day())) · \(tokenbarCompactTokens(day.summary.totalTokens)) total"
+    }
+}
+
+private struct PromptCountSparklineOverlay: View {
+    let days: [UsageDay]
+    let promptCounts: [Date: Int]
+
+    var body: some View {
+        if maxPromptCount > 0, days.count > 1 {
+            Canvas { context, size in
+                var path = Path()
+                let count = max(days.count - 1, 1)
+                for (index, day) in days.enumerated() {
+                    let value = promptCounts[day.date, default: 0]
+                    let x = size.width * CGFloat(index) / CGFloat(count)
+                    let normalized = CGFloat(value) / CGFloat(maxPromptCount)
+                    let y = size.height * (0.82 - normalized * 0.64)
+                    if index == 0 {
+                        path.move(to: CGPoint(x: x, y: y))
+                    } else {
+                        path.addLine(to: CGPoint(x: x, y: y))
+                    }
+                }
+                context.stroke(
+                    path,
+                    with: .linearGradient(
+                        Gradient(colors: [TokenBarStyle.accent.opacity(0.25), TokenBarStyle.lime.opacity(0.95)]),
+                        startPoint: CGPoint(x: 0, y: size.height * 0.5),
+                        endPoint: CGPoint(x: size.width, y: size.height * 0.5)
+                    ),
+                    style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round)
+                )
+            }
+            .opacity(0.92)
+        }
+    }
+
+    private var maxPromptCount: Int {
+        days.map { promptCounts[$0.date, default: 0] }.max() ?? 0
     }
 }
 
@@ -1274,16 +1686,35 @@ struct UsageHeatmapStripView: View {
             .font(.caption2)
             .foregroundStyle(TokenBarStyle.muted)
 
-            HStack(spacing: 4) {
-                ForEach(displayDays) { day in
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(heatColor(day.intensity))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 16)
-                        .contentShape(Rectangle())
-                        .onHover { isHovering in
-                            hoveredDay = isHovering ? day : nil
+            if displayDays.count > 75 {
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        HStack(spacing: 4) {
+                            ForEach(displayDays) { day in
+                                heatCell(day)
+                                    .frame(width: 12)
+                                    .id(day.id)
+                            }
                         }
+                        .padding(.bottom, 2)
+                    }
+                    .onAppear {
+                        if let last = displayDays.last {
+                            proxy.scrollTo(last.id, anchor: .trailing)
+                        }
+                    }
+                    .onChange(of: displayDays.last?.id) { _, last in
+                        if let last {
+                            proxy.scrollTo(last, anchor: .trailing)
+                        }
+                    }
+                }
+            } else {
+                HStack(spacing: 4) {
+                    ForEach(displayDays) { day in
+                        heatCell(day)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
             }
         }
@@ -1298,6 +1729,16 @@ struct UsageHeatmapStripView: View {
         guard let hoveredDay else { return "low · high" }
         return "\(hoveredDay.date.formatted(.dateTime.month(.abbreviated).day())) · \(tokenbarTokens(hoveredDay.summary.totalTokens))"
     }
+
+    private func heatCell(_ day: UsageDay) -> some View {
+        RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .fill(heatColor(day.intensity))
+            .frame(height: 16)
+            .contentShape(Rectangle())
+            .onHover { isHovering in
+                hoveredDay = isHovering ? day : nil
+            }
+    }
 }
 
 struct HourlyHeatmapView: View {
@@ -1311,7 +1752,7 @@ struct HourlyHeatmapView: View {
                 Spacer()
                 TokenBarHoverBadge(
                     text: hoveredHour.map(hourTooltip) ?? "Hover an hour",
-                    width: 330,
+                    width: 180,
                     isPlaceholder: hoveredHour == nil
                 )
             }
@@ -1356,7 +1797,7 @@ struct HourlyHeatmapView: View {
 
     private func hourTooltip(_ hour: Int) -> String {
         let summary = normalizedHour(hour)?.summary ?? UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0)
-        return "\(String(format: "%02d:00", hour)) · Total \(tokenbarCompactTokens(summary.totalTokens)) · In \(tokenbarCompactTokens(summary.inputTokens)) · Out \(tokenbarCompactTokens(summary.outputTokens)) · Cache \(tokenbarCompactTokens(summary.cacheTokens))"
+        return "\(String(format: "%02d:00", hour)) · \(tokenbarCompactTokens(summary.totalTokens)) total"
     }
 }
 
@@ -1380,7 +1821,7 @@ struct TokenBarHoverBadge: View {
 }
 
 struct DateRangeControl: View {
-    let options: [String] = ["7d", "30d", "90d", "1y", "Custom"]
+    let options: [String] = ["7d", "30d", "90d", "1y", "All", "Custom"]
     @Binding var selection: String
     @State private var showCustomMenu = false
     // CL-P1-011: persist the user's last custom window so reopening the menu
@@ -1401,7 +1842,7 @@ struct DateRangeControl: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(option == "Custom" ? TokenBarStyle.faint : (selection == option ? TokenBarStyle.foreground : TokenBarStyle.muted))
+                .foregroundStyle(selection == option ? TokenBarStyle.foreground : TokenBarStyle.muted)
                 .padding(.horizontal, option == "Custom" ? 9 : 11)
                 .padding(.vertical, 6)
                 .background(
@@ -1423,7 +1864,7 @@ struct DateRangeControl: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Custom Range")
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
-                Text("Enter ISO dates (yyyy-MM-dd). The aggregator currently honors the implied day count.")
+                Text("Enter ISO dates (yyyy-MM-dd). Charts and tables use the exact inclusive window.")
                     .font(.caption2)
                     .foregroundStyle(TokenBarStyle.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1480,26 +1921,39 @@ struct RangeBarsCard: View {
     let days: [UsageDay]
     let title: String
     let subtitle: String
+    let summary: UsageSummary
+    var promptCounts: [Date: Int] = [:]
 
     var body: some View {
         TokenBarCard {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(title)
-                            .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        Text(subtitle)
-                            .font(.caption2)
-                            .foregroundStyle(TokenBarStyle.muted)
-                    }
+                HStack(alignment: .firstTextBaseline) {
+                    Text(title)
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
                     Spacer()
                     HeatLegend()
+                        .fixedSize(horizontal: true, vertical: false)
                 }
-                UsageStackedBarChart(days: days)
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(TokenBarStyle.muted)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.88)
+                        .layoutPriority(2)
+                    Spacer(minLength: 8)
+                    RangeSummaryInline(summary: summary, promptCount: totalPromptCount)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(TokenBarStyle.surfaceRaised, in: Capsule())
+                        .overlay(Capsule().stroke(TokenBarStyle.line.opacity(0.85), lineWidth: 1))
+                        .layoutPriority(1)
+                }
+                UsageStackedBarChart(days: days, promptCounts: promptCounts)
                 HStack {
                     Text(displayDays.first?.date.formatted(.dateTime.month(.twoDigits).day(.twoDigits)) ?? "")
                     Spacer()
-                    Text("available local buckets")
+                    Text(displayDays.count > 75 ? "scroll horizontally · newest on right" : "available local buckets")
                     Spacer()
                     Text(displayDays.last?.date.formatted(.dateTime.month(.twoDigits).day(.twoDigits)) ?? "")
                 }
@@ -1513,6 +1967,93 @@ struct RangeBarsCard: View {
     private var displayDays: [UsageDay] {
         if days.isEmpty { return UsageDay.placeholder(count: 30) }
         return days
+    }
+
+    private var totalPromptCount: Int {
+        displayDays.reduce(0) { $0 + promptCounts[$1.date, default: 0] }
+    }
+}
+
+private struct RangeSummaryInline: View {
+    let summary: UsageSummary
+    let promptCount: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            metric("Total", tokenbarCompactTokens(summary.totalTokens), TokenBarStyle.foreground)
+            metric("In", tokenbarCompactTokens(summary.inputTokens), TokenBarStyle.input)
+            metric("Out", tokenbarCompactTokens(summary.outputTokens), TokenBarStyle.output)
+            metric("Cache", tokenbarCompactTokens(summary.cacheTokens), TokenBarStyle.cache)
+            metric("Prompt", tokenbarCompactTokens(promptCount), TokenBarStyle.lime)
+        }
+        .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+        .lineLimit(1)
+        .minimumScaleFactor(0.82)
+    }
+
+    private func metric(_ label: String, _ value: String, _ color: Color) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .foregroundStyle(TokenBarStyle.faint)
+            Text(value)
+                .foregroundStyle(color)
+                .monospacedDigit()
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+struct TokenBarPageUpdatingOverlay: View {
+    let label: String
+    @State private var sweep = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .topTrailing) {
+                Rectangle()
+                    .fill(TokenBarStyle.appBackground.opacity(0.18))
+                    .background(.ultraThinMaterial)
+
+                LinearGradient(
+                    colors: [
+                        TokenBarStyle.accent.opacity(0),
+                        TokenBarStyle.accent.opacity(0.85),
+                        TokenBarStyle.lime.opacity(0.85),
+                        TokenBarStyle.accent.opacity(0)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: max(180, proxy.size.width * 0.34), height: 2)
+                .offset(x: sweep ? proxy.size.width : -proxy.size.width * 0.45)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+                HStack(spacing: 7) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.55)
+                        .frame(width: 11, height: 11)
+                    Text(label)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(TokenBarStyle.foreground)
+                }
+                .padding(.horizontal, 11)
+                .padding(.vertical, 6)
+                .background(TokenBarStyle.surfaceRaised, in: Capsule())
+                .overlay(Capsule().stroke(TokenBarStyle.line, lineWidth: 1))
+                .padding(.top, 6)
+                .padding(.trailing, 8)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: TokenBarStyle.cardCornerRadius, style: .continuous))
+        .allowsHitTesting(false)
+        .transition(.opacity)
+        .onAppear {
+            sweep = false
+            withAnimation(.linear(duration: 0.72).repeatForever(autoreverses: false)) {
+                sweep = true
+            }
+        }
     }
 }
 

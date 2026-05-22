@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import TokenBarCore
 
@@ -8,8 +9,8 @@ struct ProjectDetailView: View {
     let allTimeCost: UsageCostProjection
     let prompts: [PromptRecord]
     let events: [UsageEvent]
+    @Binding var selectedRange: String
     let refreshState: RefreshState
-    let switchState: ProjectSwitchState?
     let todayCost: Double
     let rangeCost: Double
     let todayTokens: Int
@@ -18,8 +19,15 @@ struct ProjectDetailView: View {
     let onRefresh: (() -> Void)?
     let onBack: () -> Void
 
-    @State private var selectedRange = "30d"
     @State private var revealPrompts = false
+    @State private var isRangeLoading = false
+    @State private var promptSearchText = ""
+    @State private var promptClusterFilter: PromptClusterFilter = .all
+    @State private var promptPage = 0
+    @State private var selectedPromptID: String?
+    @State private var projectMetrics = ProjectDetailRangeMetrics.empty
+    @State private var promptMetrics = PromptHistoryFilterMetrics.empty
+    @State private var hasPromptMetricsLoaded = false
     @AppStorage("tokenbar.pricingOverrides") private var pricingOverridesJSON = "{}"
     // CL-P1-016: which session row is expanded into the detail drawer.
     @State private var expandedSession: String?
@@ -28,46 +36,109 @@ struct ProjectDetailView: View {
     // hovering it explains where to enable Full capture.
     @EnvironmentObject private var runtimeModel: TokenBarRuntimeModel
 
+    init(
+        detail: ProjectDetailSnapshot,
+        projectPath: String?,
+        allTimeSummary: UsageSummary,
+        allTimeCost: UsageCostProjection,
+        prompts: [PromptRecord],
+        events: [UsageEvent],
+        selectedRange: Binding<String>,
+        refreshState: RefreshState,
+        todayCost: Double,
+        rangeCost: Double,
+        todayTokens: Int,
+        totalTokens: Int,
+        todaySessions: Int,
+        onRefresh: (() -> Void)?,
+        onBack: @escaping () -> Void
+    ) {
+        self.detail = detail
+        self.projectPath = projectPath
+        self.allTimeSummary = allTimeSummary
+        self.allTimeCost = allTimeCost
+        self.prompts = prompts
+        self.events = events
+        self._selectedRange = selectedRange
+        self.refreshState = refreshState
+        self.todayCost = todayCost
+        self.rangeCost = rangeCost
+        self.todayTokens = todayTokens
+        self.totalTokens = totalTokens
+        self.todaySessions = todaySessions
+        self.onRefresh = onRefresh
+        self.onBack = onBack
+        self._projectMetrics = State(
+            initialValue: ProjectDetailRangeMetrics.snapshot(
+                detail: detail,
+                rangeCost: rangeCost,
+                todayCost: todayCost,
+                todayTokens: todayTokens,
+                totalTokens: totalTokens,
+                todaySessions: todaySessions
+            )
+        )
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: TokenBarStyle.sectionSpacing) {
-            staged(header, start: 0.02, end: 0.18)
-            staged(kpiRow, start: 0.12, end: 0.34)
-            staged(RangeBarsCard(
-                days: rangeDays,
-                title: tokenbarRangeTitle(selectedRange),
-                subtitle: tokenbarRangeAvailabilityNote(selection: selectedRange, availableDays: detail.last30Days.count)
-            ), start: 0.30, end: 0.54)
-            HStack(alignment: .top, spacing: TokenBarStyle.sectionSpacing) {
-                staged(agentShareCard, start: 0.42, end: 0.68)
-                staged(recentSessionsCard, start: 0.48, end: 0.72)
+        ZStack(alignment: .topTrailing) {
+            LazyVStack(alignment: .leading, spacing: TokenBarStyle.sectionSpacing) {
+                header
+                projectTodayStrip
+                kpiRow
+                RangeBarsCard(
+                    days: rangeDays,
+                    title: tokenbarRangeTitle(selectedRange),
+                    subtitle: projectMetrics.availabilityNote,
+                    summary: projectRangeSummary,
+                    promptCounts: tokenbarPromptCountsByDay(days: rangeDays, prompts: prompts)
+                )
+                HStack(alignment: .top, spacing: TokenBarStyle.sectionSpacing) {
+                    agentShareCard
+                    recentSessionsCard
+                }
+                ModelBreakdownTable(
+                    title: "Model",
+                    subtitle: "Cost and token attribution used by \(detail.projectName).",
+                    totalCost: tokenbarCompactCurrency(projectRangeCost),
+                    rows: modelRows
+                )
+                promptHistoryCard
             }
-            staged(ModelBreakdownTable(
-                title: "Model",
-                subtitle: "Cost and token attribution used by \(detail.projectName).",
-                totalCost: tokenbarCompactCurrency(projectRangeCost),
-                rows: modelRows
-            ), start: 0.62, end: 0.84)
-            staged(promptHistoryCard, start: 0.76, end: 0.96)
+            if isRangeLoading {
+                TokenBarPageUpdatingOverlay(label: "updating \(tokenbarRangeShortLabel(selectedRange))")
+            }
         }
-        .animation(.easeInOut(duration: 0.16), value: switchProgress)
-        .animation(.easeOut(duration: 0.22), value: switchState?.phase)
-    }
-
-    private var switchProgress: Double {
-        switchState?.progress ?? 1.0
-    }
-
-    private func reveal(_ start: Double, _ end: Double) -> Double {
-        guard end > start else { return switchProgress >= end ? 1 : 0 }
-        return min(max((switchProgress - start) / (end - start), 0), 1)
-    }
-
-    private func staged<Content: View>(_ content: Content, start: Double, end: Double) -> some View {
-        let amount = reveal(start, end)
-        return content
-            .opacity(0.18 + 0.82 * amount)
-            .offset(y: 14 * (1 - amount))
-            .blur(radius: max(0, 1.6 * (1 - amount)))
+        .animation(.easeOut(duration: 0.14), value: isRangeLoading)
+        .task(id: projectMetricsTaskID) {
+            await rebuildProjectMetrics(reason: "range_or_events")
+        }
+        .onAppear {
+            let started = Date()
+            TokenBarTelemetry.event(
+                "project.detail.view.appear",
+                metadata: "project=\(detail.projectName) events=\(events.count) prompts=\(prompts.count)",
+                success: true
+            )
+            Task { @MainActor in
+                await Task.yield()
+                TokenBarTelemetry.timing(
+                    "project.detail.view.first_runloop",
+                    startedAt: started,
+                    metadata: "project=\(detail.projectName) events=\(events.count)"
+                )
+            }
+        }
+        .onChange(of: selectedRange) { oldValue, newValue in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isRangeLoading = true
+            }
+            TokenBarTelemetry.event(
+                "project.detail.range.select",
+                metadata: "project=\(detail.projectName) from=\(oldValue) to=\(newValue) events=\(projectEvents.count)",
+                success: true
+            )
+        }
     }
 
     private var header: some View {
@@ -93,13 +164,14 @@ struct ProjectDetailView: View {
                 Spacer()
                 VStack(alignment: .trailing, spacing: 10) {
                     TopRightCluster(
-                        todayCost: todayCost,
-                        rangeCost: rangeCost,
-                        todayTokens: todayTokens,
-                        totalTokens: totalTokens,
-                        todaySessions: todaySessions,
+                        todayCost: projectTodayCost,
+                        rangeCost: projectRangeCost,
+                        todayTokens: projectTodaySummary.totalTokens,
+                        totalTokens: projectRangeSummary.totalTokens,
+                        todaySessions: projectTodaySessionCount,
                         refreshState: refreshState,
-                        onRefresh: onRefresh
+                        onRefresh: onRefresh,
+                        rangeLabel: tokenbarRangeShortLabel(selectedRange)
                     )
                     DateRangeControl(selection: $selectedRange)
                     HStack(spacing: 34) {
@@ -113,30 +185,146 @@ struct ProjectDetailView: View {
 
     private var kpiRow: some View {
         HStack(spacing: TokenBarStyle.sectionSpacing) {
-            TokenBarKPI(title: "Total", value: tokenbarTokens(detail.summary.totalTokens), meta: "30d window", color: TokenBarStyle.muted)
-            TokenBarKPI(title: "Input", value: tokenbarTokens(detail.summary.inputTokens), meta: "project input", color: TokenBarStyle.input)
-            TokenBarKPI(title: "Output", value: tokenbarTokens(detail.summary.outputTokens), meta: "project output", color: TokenBarStyle.output)
-            TokenBarKPI(title: "Cache", value: tokenbarTokens(detail.summary.cacheTokens), meta: "project cache", color: TokenBarStyle.cache)
+            TokenBarKPI(title: "Total", value: tokenbarTokens(projectRangeSummary.totalTokens), meta: tokenbarRangeShortLabel(selectedRange), color: TokenBarStyle.muted)
+            TokenBarKPI(title: "Input", value: tokenbarTokens(projectRangeSummary.inputTokens), meta: "project input", color: TokenBarStyle.input)
+            TokenBarKPI(title: "Output", value: tokenbarTokens(projectRangeSummary.outputTokens), meta: "project output", color: TokenBarStyle.output)
+            TokenBarKPI(title: "Cache", value: tokenbarTokens(projectRangeSummary.cacheTokens), meta: "project cache", color: TokenBarStyle.cache)
         }
     }
 
+    private var projectTodayStrip: some View {
+        TokenBarCard {
+            HStack(alignment: .center, spacing: 18) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Today")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    Text("\(projectTodaySessionCount) sessions")
+                        .font(.caption)
+                        .foregroundStyle(TokenBarStyle.muted)
+                }
+                .frame(width: 116, alignment: .leading)
+
+                todayMetric("Total", value: projectTodaySummary.totalTokens, color: TokenBarStyle.foreground)
+                todayMetric("Input", value: projectTodaySummary.inputTokens, color: TokenBarStyle.input)
+                todayMetric("Output", value: projectTodaySummary.outputTokens, color: TokenBarStyle.output)
+                todayMetric("Cache", value: projectTodaySummary.cacheTokens, color: TokenBarStyle.cache)
+
+                Spacer(minLength: 12)
+
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(tokenbarCompactCurrency(projectTodayCost))
+                        .font(.system(size: 20, weight: .semibold, design: .rounded))
+                        .foregroundStyle(TokenBarStyle.cost)
+                        .monospacedDigit()
+                    Text("est. cost")
+                        .font(.caption2)
+                        .foregroundStyle(TokenBarStyle.faint)
+                }
+            }
+        }
+    }
+
+    private func todayMetric(_ label: String, value: Int, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.system(size: 10.5, weight: .semibold))
+                .tracking(0.8)
+                .foregroundStyle(TokenBarStyle.faint)
+                .textCase(.uppercase)
+            Text(tokenbarTokens(value))
+                .font(.system(size: 20, weight: .semibold, design: .rounded))
+                .foregroundStyle(color)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var projectEvents: [UsageEvent] {
+        events
+    }
+
+    private var projectMetricsTaskID: String {
+        "\(detail.projectName)|\(selectedRange)|\(events.count)|\(events.last?.id ?? "none")|\(pricingOverridesJSON)"
+    }
+
+    private var projectRangeSummary: UsageSummary {
+        projectMetrics.rangeSummary
+    }
+
+    private var projectTodaySummary: UsageSummary {
+        projectMetrics.todaySummary
+    }
+
+    private var projectTodayCost: Double {
+        projectMetrics.todayCost
+    }
+
+    private var projectTodaySessionCount: Int {
+        projectMetrics.todaySessionCount
+    }
+
     private var rangeDays: [UsageDay] {
-        tokenbarRangeDays(detail.last30Days, selection: selectedRange)
+        projectMetrics.days
     }
 
     private var modelRows: [TokenBarModelBreakdown] {
-        tokenbarModelBreakdowns(
-            events: events,
-            projectName: detail.projectName,
-            days: tokenbarDaysForRange(selectedRange)
-        )
+        projectMetrics.modelRows
     }
 
     private var projectRangeCost: Double {
-        tokenbarEstimatedCost(
-            events: events,
-            days: tokenbarDaysForRange(selectedRange)
-        ) { $0.projectName == detail.projectName }
+        projectMetrics.rangeCost
+    }
+
+    private var projectAgentShare: [AgentShareSlice] {
+        projectMetrics.agentShare
+    }
+
+    private var projectRecentSessions: [ProjectSessionSummary] {
+        projectMetrics.recentSessions
+    }
+
+    @MainActor
+    private func rebuildProjectMetrics(reason: String) async {
+        let projectName = detail.projectName
+        let selectedRange = selectedRange
+        let events = events
+        let started = Date()
+        guard !events.isEmpty else {
+            isRangeLoading = false
+            TokenBarTelemetry.event(
+                "project.detail.metrics.compute.skip",
+                metadata: "reason=\(reason) project=\(projectName) range=\(selectedRange) events=0",
+                success: true,
+                elapsed: Date().timeIntervalSince(started)
+            )
+            return
+        }
+        TokenBarTelemetry.event(
+            "project.detail.metrics.compute.begin",
+            metadata: "reason=\(reason) project=\(projectName) range=\(selectedRange) events=\(events.count)",
+            success: true
+        )
+        let metrics = await Task.detached(priority: .userInitiated) {
+            ProjectDetailRangeMetrics.make(
+                projectName: projectName,
+                events: events,
+                selection: selectedRange
+            )
+        }.value
+        guard !Task.isCancelled, self.selectedRange == selectedRange else { return }
+        projectMetrics = metrics
+        TokenBarTelemetry.timing(
+            "project.detail.metrics.compute",
+            startedAt: started,
+            metadata: "project=\(projectName) range=\(selectedRange) days=\(metrics.days.count) sessions=\(metrics.recentSessions.count) models=\(metrics.modelRows.count) tokens=\(metrics.rangeSummary.totalTokens)"
+        )
+        if self.selectedRange == selectedRange {
+            withAnimation(.easeOut(duration: 0.14)) {
+                isRangeLoading = false
+            }
+        }
     }
 
     private var agentShareCard: some View {
@@ -145,15 +333,16 @@ struct ProjectDetailView: View {
                 Text("Agent Share")
                     .font(.system(size: 16, weight: .semibold, design: .rounded))
                 HStack(spacing: 22) {
-                    TokenBarDonut(slices: detail.agentShare)
-                        .frame(width: 122, height: 122)
-                    VStack(spacing: 8) {
-                        if detail.agentShare.isEmpty {
+                    TokenBarDonut(slices: projectAgentShare)
+                        .frame(width: 150, height: 150)
+                    VStack(spacing: 9) {
+                        if projectAgentShare.isEmpty {
                             Text("No agent share available in this project window.")
                                 .font(.caption)
                                 .foregroundStyle(TokenBarStyle.muted)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         } else {
-                            ForEach(detail.agentShare.prefix(5)) { slice in
+                            ForEach(projectAgentShare.prefix(5)) { slice in
                                 HStack(spacing: 9) {
                                     Circle()
                                         .fill(TokenBarStyle.agentColor(slice.name))
@@ -168,12 +357,16 @@ struct ProjectDetailView: View {
                                         .foregroundStyle(TokenBarStyle.muted)
                                 }
                             }
+                            Spacer(minLength: 0)
                         }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
+            .frame(maxWidth: .infinity, minHeight: 246, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 286)
     }
 
     private var recentSessionsCard: some View {
@@ -181,17 +374,15 @@ struct ProjectDetailView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Recent Sessions")
                     .font(.system(size: 16, weight: .semibold, design: .rounded))
-                if detail.recentSessions.isEmpty {
+                if projectRecentSessions.isEmpty {
                     Text("No sessions in the current project window.")
                         .font(.caption)
                         .foregroundStyle(TokenBarStyle.muted)
                 } else {
-                    ForEach(detail.recentSessions.prefix(6)) { session in
+                    ForEach(projectRecentSessions.prefix(6)) { session in
                         VStack(alignment: .leading, spacing: 6) {
                             Button {
-                                withAnimation(.easeOut(duration: 0.18)) {
-                                    expandedSession = (expandedSession == session.sessionId) ? nil : session.sessionId
-                                }
+                                toggleExpandedSession(session.sessionId)
                             } label: {
                                 HStack(spacing: 8) {
                                     Circle()
@@ -262,14 +453,20 @@ struct ProjectDetailView: View {
         return "sid " + String(sessionId.prefix(8))
     }
 
+    private let promptPageSize = 12
+    private let promptPanelHeight: CGFloat = 430
+
     private var promptHistoryCard: some View {
-        TokenBarCard {
+        let pagePrompts = pagedPromptHistory
+        let currentSelectedPrompt = selectedPrompt(in: pagePrompts)
+
+        return TokenBarCard {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Prompt History")
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        Text("User-only prompts are local and masked by default.")
+                        Text(promptHistorySubtitle)
                             .font(.caption2)
                             .foregroundStyle(TokenBarStyle.muted)
                     }
@@ -292,38 +489,536 @@ struct ProjectDetailView: View {
                           : "Enable Prompt Capture in Settings → Prompts to allow Reveal")
                 }
 
+                promptHistoryControls
+
                 if prompts.isEmpty {
                     Text("No local prompt captures for this project.")
                         .font(.caption)
                         .foregroundStyle(TokenBarStyle.muted)
+                } else if !hasPromptMetricsLoaded {
+                    Text("Preparing prompt index.")
+                        .font(.caption)
+                        .foregroundStyle(TokenBarStyle.muted)
+                } else if filteredPromptHistory.isEmpty {
+                    Text("No prompts match the current search or cluster.")
+                        .font(.caption)
+                        .foregroundStyle(TokenBarStyle.muted)
                 } else {
-                    VStack(spacing: 8) {
-                        ForEach(prompts.prefix(10)) { prompt in
-                            VStack(alignment: .leading, spacing: 5) {
-                                HStack(spacing: 7) {
-                                    Text(prompt.timestamp.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
-                                    Text(prompt.agent.displayName)
-                                }
-                                .font(.caption2)
-                                .foregroundStyle(TokenBarStyle.faint)
-
-                                // CL-P0-033: even if the local State toggle
-                                // was set previously, treat the prompt as
-                                // masked unless the Settings switch is on.
-                                let allowReveal = revealPrompts && runtimeModel.storePromptTextInClearText
-                                Text(allowReveal ? prompt.content : maskedPrompt(prompt.content))
-                                    .font(.system(size: 12.5, design: .monospaced))
-                                    .foregroundStyle(allowReveal ? TokenBarStyle.foreground : TokenBarStyle.muted)
-                                    .lineLimit(allowReveal ? 3 : 1)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(11)
-                            .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(TokenBarStyle.line.opacity(0.7), lineWidth: 1))
+                    HStack(alignment: .top, spacing: 12) {
+                        promptListPane(
+                            pagePrompts: pagePrompts,
+                            currentSelectedPromptID: currentSelectedPrompt?.id
+                        )
+                        if let prompt = currentSelectedPrompt {
+                            promptDetailPane(prompt)
                         }
                     }
+                    .frame(height: promptPanelHeight, alignment: .top)
                 }
             }
+        }
+        .task(id: promptMetricsTaskID) {
+            await rebuildPromptMetrics()
+        }
+    }
+
+    private var promptHistorySubtitle: String {
+        "\(filteredPromptHistory.count) of \(prompts.count) prompts · human \(promptMetrics.humanCount) · subagent \(promptMetrics.subagentCount) · command \(promptMetrics.commandCount)"
+    }
+
+    private var promptHistoryControls: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            promptSearchField
+            HStack(spacing: 7) {
+                ForEach(PromptClusterFilter.allCases) { filter in
+                    Button {
+                        promptClusterFilter = filter
+                        promptPage = 0
+                        selectedPromptID = nil
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text(filter.displayName)
+                            Text("\(promptFilterCount(filter))")
+                                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(promptClusterFilter == filter ? TokenBarStyle.foreground : TokenBarStyle.faint)
+                        }
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(promptClusterFilter == filter ? TokenBarStyle.foreground : TokenBarStyle.muted)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            promptClusterFilter == filter ? TokenBarStyle.accent.opacity(0.18) : TokenBarStyle.surfaceRaised,
+                            in: Capsule()
+                        )
+                        .overlay(Capsule().stroke(TokenBarStyle.line, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+            }
+        }
+        .onChange(of: promptSearchText) { _, _ in
+            promptPage = 0
+            selectedPromptID = nil
+        }
+        .onChange(of: prompts.count) { _, _ in
+            promptPage = min(promptPage, max(promptPageCount - 1, 0))
+            selectedPromptID = nil
+        }
+    }
+
+    private var promptSearchField: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(TokenBarStyle.faint)
+            TextField("Search prompt text, session, agent", text: $promptSearchText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .monospaced))
+            if !promptSearchText.isEmpty {
+                Button {
+                    promptSearchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(TokenBarStyle.faint)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 9)
+        .frame(height: 30)
+        .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
+    }
+
+    private func promptListPane(
+        pagePrompts: [PromptRecord],
+        currentSelectedPromptID: String?
+    ) -> some View {
+        VStack(spacing: 8) {
+            ScrollView {
+                LazyVStack(spacing: 7) {
+                    ForEach(pagePrompts) { prompt in
+                        promptHistoryRow(prompt, currentSelectedPromptID: currentSelectedPromptID)
+                    }
+                }
+                .padding(.trailing, 4)
+            }
+            .scrollIndicators(.visible)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .padding(8)
+            .background(TokenBarStyle.surface.opacity(0.52), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(TokenBarStyle.line.opacity(0.75), lineWidth: 1))
+
+            promptPaginationControls
+        }
+        .frame(minWidth: 300, idealWidth: 360, maxWidth: 400, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var promptPaginationControls: some View {
+        HStack(spacing: 8) {
+            Text(promptPageLabel)
+                .font(.system(size: 11.5, design: .monospaced))
+                .foregroundStyle(TokenBarStyle.faint)
+            Spacer()
+            Button {
+                promptPage = max(promptPage - 1, 0)
+                selectedPromptID = nil
+            } label: {
+                Label("Prev", systemImage: "chevron.left")
+            }
+            .disabled(promptPage == 0)
+            Button {
+                promptPage = min(promptPage + 1, max(promptPageCount - 1, 0))
+                selectedPromptID = nil
+            } label: {
+                Label("Next", systemImage: "chevron.right")
+            }
+            .disabled(promptPage >= promptPageCount - 1)
+        }
+        .buttonStyle(.plain)
+        .font(.system(size: 11.5, weight: .medium))
+        .foregroundStyle(TokenBarStyle.muted)
+        .padding(.top, 2)
+    }
+
+    private var filteredPromptHistory: [PromptRecord] {
+        promptMetrics.filteredPrompts
+    }
+
+    private var pagedPromptHistory: [PromptRecord] {
+        guard !filteredPromptHistory.isEmpty else { return [] }
+        let safePage = min(promptPage, max(promptPageCount - 1, 0))
+        let start = safePage * promptPageSize
+        let end = min(start + promptPageSize, filteredPromptHistory.count)
+        guard start < end else { return [] }
+        return Array(filteredPromptHistory[start..<end])
+    }
+
+    private func selectedPrompt(in pagePrompts: [PromptRecord]) -> PromptRecord? {
+        if let selectedPromptID,
+           let prompt = pagePrompts.first(where: { $0.id == selectedPromptID }) {
+            return prompt
+        }
+        return pagePrompts.first
+    }
+
+    private func promptHistoryRow(_ prompt: PromptRecord, currentSelectedPromptID: String?) -> some View {
+        let cluster = promptCluster(for: prompt)
+        let selected = currentSelectedPromptID == prompt.id
+        let allowReveal = revealPrompts && runtimeModel.storePromptTextInClearText
+        let metadata = promptMetadata(prompt)
+
+        return Button {
+            self.selectedPromptID = prompt.id
+            TokenBarTelemetry.event(
+                "project.detail.prompt.select",
+                metadata: "project=\(detail.projectName) cluster=\(cluster.rawValue)",
+                success: true
+            )
+        } label: {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 7) {
+                    Image(systemName: cluster.iconName)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(cluster.color)
+                        .frame(width: 16, height: 16)
+                        .background(cluster.color.opacity(0.14), in: Circle())
+                    Text(cluster.displayName)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(cluster.color)
+                    Spacer(minLength: 8)
+                    Text(prompt.timestamp.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(TokenBarStyle.faint)
+                }
+
+                Text(allowReveal ? promptRowTitle(prompt) : maskedPrompt(prompt.content))
+                    .font(.system(size: 12.5, weight: .semibold, design: allowReveal && cluster == .command ? .monospaced : .default))
+                    .foregroundStyle(allowReveal ? TokenBarStyle.foreground : TokenBarStyle.muted)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: 8) {
+                    Text(prompt.agent.displayName)
+                    Text(shortSessionID(prompt.sessionId))
+                    Text("\(metadata.lineCount)l")
+                    Text("\(metadata.characterCount)c")
+                }
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundStyle(TokenBarStyle.faint)
+            }
+            .padding(11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                selected ? cluster.color.opacity(0.12) : TokenBarStyle.surfaceRaised,
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(selected ? cluster.color.opacity(0.55) : TokenBarStyle.line.opacity(0.7), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func promptDetailPane(_ prompt: PromptRecord) -> some View {
+        let cluster = promptCluster(for: prompt)
+        let allowReveal = revealPrompts && runtimeModel.storePromptTextInClearText
+        let metadata = promptMetadata(prompt)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
+                Text(cluster == .command ? "Command detail" : "Prompt detail")
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(0.7)
+                    .foregroundStyle(TokenBarStyle.faint)
+                    .textCase(.uppercase)
+                Spacer()
+                Button {
+                    copyPrompt(prompt.content)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(TokenBarStyle.muted)
+                .disabled(!allowReveal)
+                .opacity(allowReveal ? 1 : 0.35)
+                .help(allowReveal ? "Copy prompt text" : "Reveal prompt text before copying")
+            }
+
+            promptDetailContent(prompt: prompt, cluster: cluster, allowReveal: allowReveal, metadata: metadata)
+        }
+        .padding(13)
+        .frame(maxWidth: .infinity, minHeight: promptPanelHeight, maxHeight: promptPanelHeight, alignment: .topLeading)
+        .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(TokenBarStyle.line.opacity(0.75), lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private func promptDetailContent(
+        prompt: PromptRecord,
+        cluster: PromptCluster,
+        allowReveal: Bool,
+        metadata: PromptDisplayMetadata
+    ) -> some View {
+        if !allowReveal {
+            promptHiddenPane()
+        } else if cluster == .command, let command = promptCommandParts(prompt.content) {
+            promptCommandPane(command)
+        } else {
+            promptLongTextPane(prompt.content, metadata: metadata)
+        }
+    }
+
+    private func promptHiddenPane() -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(maskedPrompt(""))
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(TokenBarStyle.muted)
+                .lineLimit(1)
+            Text("Prompt Capture is protected. Use Reveal after enabling Full capture in Settings.")
+                .font(.caption)
+                .foregroundStyle(TokenBarStyle.muted)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(TokenBarStyle.surface.opacity(0.72), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+
+    private func promptCommandPane(_ command: PromptCommandParts) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 5) {
+                promptSectionLabel("Command")
+                Text(command.command)
+                    .font(.system(size: 20, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(TokenBarStyle.output)
+                    .textSelection(.enabled)
+            }
+
+            if !command.arguments.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    promptSectionLabel("Arguments")
+                    ScrollView {
+                        Text(command.arguments)
+                            .font(.system(size: 12.5, design: .monospaced))
+                            .foregroundStyle(TokenBarStyle.foreground)
+                            .lineSpacing(4)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .padding(11)
+                    }
+                    .frame(maxHeight: 220)
+                    .background(TokenBarStyle.surface.opacity(0.72), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(TokenBarStyle.line.opacity(0.75), lineWidth: 1))
+                }
+            }
+        }
+    }
+
+    private func promptLongTextPane(_ content: String, metadata: PromptDisplayMetadata) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                promptSectionLabel(metadata.lineCount > 8 || metadata.characterCount > 700 ? "Long Input" : "Input")
+                Spacer()
+                Text("\(metadata.lineCount) lines · \(metadata.characterCount) chars")
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(TokenBarStyle.faint)
+            }
+
+            ScrollView {
+                Text(content.trimmingCharacters(in: .whitespacesAndNewlines))
+                    .font(.system(size: 12.5, design: .monospaced))
+                    .foregroundStyle(TokenBarStyle.foreground)
+                    .lineSpacing(4)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .padding(12)
+            }
+            .frame(maxHeight: 310)
+            .background(TokenBarStyle.surface.opacity(0.72), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(TokenBarStyle.line.opacity(0.75), lineWidth: 1))
+        }
+    }
+
+    private func promptSectionLabel(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .semibold))
+            .tracking(0.7)
+            .foregroundStyle(TokenBarStyle.faint)
+            .textCase(.uppercase)
+    }
+
+    private func promptRowTitle(_ prompt: PromptRecord) -> String {
+        if let command = promptCommandParts(prompt.content) {
+            return command.arguments.isEmpty
+                ? command.command
+                : "\(command.command) \(firstReadableLine(command.arguments))"
+        }
+        return compactPromptText(prompt.content, limit: 160)
+    }
+
+    private func promptMetadata(_ prompt: PromptRecord) -> PromptDisplayMetadata {
+        promptMetrics.metadataByPromptID[prompt.id] ?? PromptDisplayMetadata.make(prompt.content)
+    }
+
+    private func promptCommandParts(_ content: String) -> PromptCommandParts? {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lines = trimmed.split(whereSeparator: \.isNewline).map(String.init)
+        guard let firstLine = lines.first?.trimmingCharacters(in: .whitespacesAndNewlines),
+              firstLine.hasPrefix("/") else {
+            return nil
+        }
+        let afterSlash = firstLine.dropFirst()
+        let commandBody = afterSlash.prefix { !$0.isWhitespace && $0 != "/" }
+        guard !commandBody.isEmpty else { return nil }
+        let command = "/" + String(commandBody)
+        let inlineArguments = afterSlash
+            .dropFirst(commandBody.count)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let restArguments = lines.dropFirst()
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let arguments: String
+        if inlineArguments.isEmpty {
+            arguments = restArguments
+        } else if restArguments.isEmpty {
+            arguments = inlineArguments
+        } else {
+            arguments = inlineArguments + "\n" + restArguments
+        }
+        return PromptCommandParts(command: command, arguments: arguments)
+    }
+
+    private func firstReadableLine(_ source: String) -> String {
+        let first = source
+            .split(whereSeparator: \.isNewline)
+            .first
+            .map(String.init) ?? source
+        return compactPromptText(first, limit: 96)
+    }
+
+    private func compactPromptText(_ source: String, limit: Int) -> String {
+        let compact = source
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        guard !compact.isEmpty else { return "Empty prompt" }
+        guard compact.count > limit else { return compact }
+        return String(compact.prefix(max(limit - 1, 1))) + "…"
+    }
+
+    private func copyPrompt(_ content: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(content, forType: .string)
+        TokenBarTelemetry.event(
+            "project.detail.prompt.copy",
+            metadata: "project=\(detail.projectName) chars=\(content.count)",
+            success: true
+        )
+    }
+
+    private var promptPageCount: Int {
+        max(1, Int(ceil(Double(filteredPromptHistory.count) / Double(promptPageSize))))
+    }
+
+    private var promptPageLabel: String {
+        guard !filteredPromptHistory.isEmpty else { return "0 of 0" }
+        let safePage = min(promptPage, max(promptPageCount - 1, 0))
+        let start = safePage * promptPageSize + 1
+        let end = min(start + promptPageSize - 1, filteredPromptHistory.count)
+        return "\(start)-\(end) of \(filteredPromptHistory.count) · page \(safePage + 1)/\(promptPageCount)"
+    }
+
+    private func promptClusterCount(_ cluster: PromptCluster) -> Int {
+        switch cluster {
+        case .human:
+            promptMetrics.humanCount
+        case .subagent:
+            promptMetrics.subagentCount
+        case .command:
+            promptMetrics.commandCount
+        }
+    }
+
+    private func promptFilterCount(_ filter: PromptClusterFilter) -> Int {
+        switch filter {
+        case .all:
+            prompts.count
+        case .human:
+            promptClusterCount(.human)
+        case .subagent:
+            promptClusterCount(.subagent)
+        case .command:
+            promptClusterCount(.command)
+        }
+    }
+
+    private func promptCluster(for prompt: PromptRecord) -> PromptCluster {
+        promptMetrics.clustersByPromptID[prompt.id] ?? PromptCluster.classify(prompt)
+    }
+
+    private var promptMetricsTaskID: String {
+        "\(prompts.count)|\(prompts.first?.id ?? "none")|\(prompts.last?.id ?? "none")|\(promptSearchText)|\(promptClusterFilter.rawValue)"
+    }
+
+    @MainActor
+    private func rebuildPromptMetrics() async {
+        let prompts = prompts
+        let query = promptSearchText
+        let filter = promptClusterFilter
+        let started = Date()
+        TokenBarTelemetry.event(
+            "project.detail.prompt.filter.begin",
+            metadata: "project=\(detail.projectName) prompts=\(prompts.count) filter=\(filter.rawValue) query_chars=\(query.count)",
+            success: true
+        )
+        let metrics = await Task.detached(priority: .utility) {
+            PromptHistoryFilterMetrics.make(
+                prompts: prompts,
+                query: query,
+                filter: filter
+            )
+        }.value
+        guard !Task.isCancelled,
+              self.promptSearchText == query,
+              self.promptClusterFilter == filter else { return }
+        promptMetrics = metrics
+        hasPromptMetricsLoaded = true
+        promptPage = min(promptPage, max(promptPageCount - 1, 0))
+        TokenBarTelemetry.timing(
+            "project.detail.prompt.filter",
+            startedAt: started,
+            metadata: "project=\(detail.projectName) prompts=\(prompts.count) filtered=\(metrics.filteredPrompts.count) filter=\(filter.rawValue)"
+        )
+    }
+
+    private func toggleExpandedSession(_ sessionId: String) {
+        let started = Date()
+        let nextSession = expandedSession == sessionId ? nil : sessionId
+        TokenBarTelemetry.event(
+            "project.detail.session.toggle.begin",
+            metadata: "project=\(detail.projectName) session=\(sessionId) expanding=\(nextSession != nil) cached_sessions=\(projectMetrics.recentSessions.count)",
+            success: true
+        )
+        withAnimation(.easeOut(duration: 0.18)) {
+            expandedSession = nextSession
+        }
+        Task { @MainActor in
+            await Task.yield()
+            TokenBarTelemetry.timing(
+                "project.detail.session.toggle.first_runloop",
+                startedAt: started,
+                metadata: "project=\(detail.projectName) expanded=\(nextSession != nil)"
+            )
+            try? await Task.sleep(for: .milliseconds(16))
+            TokenBarTelemetry.timing(
+                "project.detail.session.toggle.first_frame_16ms",
+                startedAt: started,
+                metadata: "project=\(detail.projectName) expanded=\(nextSession != nil)"
+            )
         }
     }
 
@@ -356,6 +1051,299 @@ struct ProjectDetailView: View {
         // spec) so all rows have a uniform "redacted" silhouette.
         guard !source.isEmpty else { return String(repeating: "•", count: 54) }
         return String(repeating: "•", count: 54)
+    }
+}
+
+private struct ProjectDetailRangeMetrics: Sendable, Hashable {
+    let days: [UsageDay]
+    let availabilityNote: String
+    let rangeSummary: UsageSummary
+    let todaySummary: UsageSummary
+    let rangeCost: Double
+    let todayCost: Double
+    let todaySessionCount: Int
+    let modelRows: [TokenBarModelBreakdown]
+    let agentShare: [AgentShareSlice]
+    let recentSessions: [ProjectSessionSummary]
+
+    static let empty = ProjectDetailRangeMetrics(
+        days: [],
+        availabilityNote: "Preparing range",
+        rangeSummary: UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0),
+        todaySummary: UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0),
+        rangeCost: 0,
+        todayCost: 0,
+        todaySessionCount: 0,
+        modelRows: [],
+        agentShare: [],
+        recentSessions: []
+    )
+
+    static func snapshot(
+        detail: ProjectDetailSnapshot,
+        rangeCost: Double,
+        todayCost: Double,
+        todayTokens: Int,
+        totalTokens: Int,
+        todaySessions: Int
+    ) -> ProjectDetailRangeMetrics {
+        let rangeSummary = totalTokens > 0
+            ? detail.summary
+            : UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0)
+        return ProjectDetailRangeMetrics(
+            days: detail.last30Days,
+            availabilityNote: "Preparing selected range",
+            rangeSummary: rangeSummary,
+            todaySummary: UsageSummary(inputTokens: todayTokens, outputTokens: 0, cacheTokens: 0),
+            rangeCost: rangeCost,
+            todayCost: todayCost,
+            todaySessionCount: todaySessions,
+            modelRows: [],
+            agentShare: detail.agentShare,
+            recentSessions: detail.recentSessions
+        )
+    }
+
+    static func make(
+        projectName: String,
+        events: [UsageEvent],
+        selection: String,
+        referenceDate: Date = Date(),
+        calendar: Calendar = Calendar(identifier: .gregorian)
+    ) -> ProjectDetailRangeMetrics {
+        let projectEvents = events.filter { $0.projectName == projectName }
+        let rangeEvents = tokenbarRangeEvents(
+            events: projectEvents,
+            selection: selection,
+            referenceDate: referenceDate,
+            calendar: calendar
+        )
+        let todayEvents = tokenbarEventsInLastDays(
+            events: projectEvents,
+            referenceDate: referenceDate,
+            calendar: calendar
+        )
+        let days = tokenbarUsageDays(
+            events: projectEvents,
+            selection: selection,
+            referenceDate: referenceDate,
+            calendar: calendar
+        )
+        return ProjectDetailRangeMetrics(
+            days: days,
+            availabilityNote: tokenbarRangeAvailabilityNote(
+                selection: selection,
+                days: days,
+                events: projectEvents,
+                referenceDate: referenceDate,
+                calendar: calendar
+            ),
+            rangeSummary: tokenbarSummary(rangeEvents),
+            todaySummary: tokenbarSummary(todayEvents),
+            rangeCost: tokenbarEstimatedCost(events: rangeEvents),
+            todayCost: tokenbarEstimatedCost(events: todayEvents),
+            todaySessionCount: tokenbarSessionCount(projectEvents, referenceDate: referenceDate),
+            modelRows: tokenbarModelBreakdowns(events: rangeEvents, days: nil, referenceDate: referenceDate, calendar: calendar),
+            agentShare: tokenbarAgentShare(events: rangeEvents),
+            recentSessions: tokenbarRecentSessions(events: rangeEvents, limit: 6)
+        )
+    }
+}
+
+private struct PromptHistoryFilterMetrics: Sendable, Hashable {
+    let filteredPrompts: [PromptRecord]
+    let clustersByPromptID: [String: PromptCluster]
+    let metadataByPromptID: [String: PromptDisplayMetadata]
+    let humanCount: Int
+    let subagentCount: Int
+    let commandCount: Int
+
+    static let empty = PromptHistoryFilterMetrics(
+        filteredPrompts: [],
+        clustersByPromptID: [:],
+        metadataByPromptID: [:],
+        humanCount: 0,
+        subagentCount: 0,
+        commandCount: 0
+    )
+
+    static func make(
+        prompts: [PromptRecord],
+        query: String,
+        filter: PromptClusterFilter
+    ) -> PromptHistoryFilterMetrics {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        var filtered: [PromptRecord] = []
+        filtered.reserveCapacity(min(prompts.count, 200))
+        var clustersByPromptID: [String: PromptCluster] = [:]
+        clustersByPromptID.reserveCapacity(prompts.count)
+        var metadataByPromptID: [String: PromptDisplayMetadata] = [:]
+        metadataByPromptID.reserveCapacity(prompts.count)
+        var humanCount = 0
+        var subagentCount = 0
+        var commandCount = 0
+
+        for prompt in prompts {
+            let cluster = PromptCluster.classify(prompt)
+            clustersByPromptID[prompt.id] = cluster
+            metadataByPromptID[prompt.id] = PromptDisplayMetadata.make(prompt.content)
+            switch cluster {
+            case .human:
+                humanCount += 1
+            case .subagent:
+                subagentCount += 1
+            case .command:
+                commandCount += 1
+            }
+
+            guard filter.includes(cluster) else {
+                continue
+            }
+            if normalizedQuery.isEmpty
+                || prompt.content.localizedCaseInsensitiveContains(normalizedQuery)
+                || prompt.sessionId.localizedCaseInsensitiveContains(normalizedQuery)
+                || prompt.agent.displayName.localizedCaseInsensitiveContains(normalizedQuery)
+                || cluster.displayName.localizedCaseInsensitiveContains(normalizedQuery) {
+                filtered.append(prompt)
+            }
+        }
+
+        return PromptHistoryFilterMetrics(
+            filteredPrompts: filtered,
+            clustersByPromptID: clustersByPromptID,
+            metadataByPromptID: metadataByPromptID,
+            humanCount: humanCount,
+            subagentCount: subagentCount,
+            commandCount: commandCount
+        )
+    }
+}
+
+private struct PromptDisplayMetadata: Sendable, Hashable {
+    let characterCount: Int
+    let lineCount: Int
+
+    static func make(_ content: String) -> PromptDisplayMetadata {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lineCount = max(1, trimmed.split(whereSeparator: \.isNewline).count)
+        return PromptDisplayMetadata(characterCount: trimmed.count, lineCount: lineCount)
+    }
+}
+
+private struct PromptCommandParts: Sendable, Hashable {
+    let command: String
+    let arguments: String
+}
+
+private enum PromptCluster: String, CaseIterable, Hashable, Sendable {
+    case human
+    case subagent
+    case command
+
+    var displayName: String {
+        switch self {
+        case .human:
+            "Human"
+        case .subagent:
+            "Subagent"
+        case .command:
+            "Command"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .human:
+            "person.text.rectangle"
+        case .subagent:
+            "point.3.connected.trianglepath.dotted"
+        case .command:
+            "terminal"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .human:
+            TokenBarStyle.input
+        case .subagent:
+            TokenBarStyle.cache
+        case .command:
+            TokenBarStyle.output
+        }
+    }
+
+    static func classify(_ prompt: PromptRecord) -> PromptCluster {
+        let content = prompt.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowercasedContent = content.lowercased()
+        let lowercasedPath = prompt.sourcePath.lowercased()
+
+        if looksLikeCommand(content) {
+            return .command
+        }
+
+        if lowercasedPath.contains("/subagents/")
+            || lowercasedContent.contains("subagent")
+            || lowercasedContent.contains("sub-agent")
+            || lowercasedContent.contains("mainagent")
+            || lowercasedContent.contains("main agent")
+            || lowercasedContent.contains("assigned task")
+            || lowercasedContent.contains("you are not alone in the codebase") {
+            return .subagent
+        }
+
+        return .human
+    }
+
+    private static func looksLikeCommand(_ content: String) -> Bool {
+        guard let firstLine = content
+            .split(whereSeparator: \.isNewline)
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            firstLine.hasPrefix("/") else {
+            return false
+        }
+        let command = firstLine
+            .dropFirst()
+            .prefix { !$0.isWhitespace && $0 != "/" }
+        return !command.isEmpty && command.allSatisfy { character in
+            character.isLetter || character.isNumber || character == "-" || character == "_"
+        }
+    }
+}
+
+private enum PromptClusterFilter: String, CaseIterable, Identifiable, Sendable {
+    case all
+    case human
+    case subagent
+    case command
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .all:
+            "All"
+        case .human:
+            "Human"
+        case .subagent:
+            "Subagent"
+        case .command:
+            "Command"
+        }
+    }
+
+    func includes(_ cluster: PromptCluster) -> Bool {
+        switch self {
+        case .all:
+            true
+        case .human:
+            cluster == .human
+        case .subagent:
+            cluster == .subagent
+        case .command:
+            cluster == .command
+        }
     }
 }
 

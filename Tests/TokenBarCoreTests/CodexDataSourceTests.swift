@@ -32,6 +32,33 @@ struct CodexDataSourceTests {
     }
 
     @Test
+    func discoveryFindsAllRolloutFilesWhenWindowIsNil() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let calendar = Calendar(identifier: .gregorian)
+        let referenceDate = calendar.date(from: DateComponents(year: 2026, month: 4, day: 27, hour: 12))!
+
+        let recent = try writeRollout(root: root, date: referenceDate, name: "rollout-recent.jsonl")
+        let historical = try writeRollout(root: root, date: calendar.date(byAdding: .day, value: -90, to: referenceDate)!, name: "rollout-history.jsonl")
+        _ = try writeNonRollout(root: root, date: referenceDate, name: "notes.txt")
+
+        let urls = try CodexDataSource.discoverRolloutFiles(
+            rootDirectory: root.path,
+            referenceDate: referenceDate,
+            daysBack: nil,
+            calendar: calendar
+        )
+
+        let actual = urls.map(\.standardizedFileURL)
+        let expected = [historical, recent]
+            .map(\.standardizedFileURL)
+            .sorted(by: { $0.path < $1.path })
+
+        #expect(actual == expected)
+    }
+
+    @Test
     func discoveryExpandsHomePrefix() throws {
         let expanded = CodexDataSource.expandHome(in: "~/.codex/sessions")
         #expect(expanded.hasPrefix(NSHomeDirectory()))

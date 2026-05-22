@@ -453,6 +453,151 @@ struct Sprint8StorageTests {
     }
 
     @Test
+    func projectScopedQueriesReturnNewestFirstAndSummary() throws {
+        let dbURL = temporaryDatabaseURL()
+        let repository = try UsageRepository(databaseURL: dbURL)
+        let calendar = Calendar(identifier: .gregorian)
+        let referenceDate = fixedDate()
+        let older = calendar.date(byAdding: .day, value: -2, to: referenceDate)!
+
+        _ = try repository.insertCheckpoint(
+            trigger: "sqlite-project-query-test",
+            startedAt: referenceDate,
+            endedAt: referenceDate,
+            events: [
+                dbEvent(
+                    id: "project-tokenbar-old",
+                    agent: .codex,
+                    projectName: "tokenbar",
+                    sessionId: "session-old",
+                    timestamp: older,
+                    inputTokens: 10,
+                    outputTokens: 5,
+                    cacheTokens: 2
+                ),
+                dbEvent(
+                    id: "project-tokenbar-new",
+                    agent: .hermes,
+                    projectName: "tokenbar",
+                    sessionId: "session-new",
+                    timestamp: referenceDate,
+                    inputTokens: 2,
+                    outputTokens: 3,
+                    cacheTokens: 1
+                ),
+                dbEvent(
+                    id: "project-other",
+                    agent: .codex,
+                    projectName: "other",
+                    sessionId: "session-other",
+                    timestamp: referenceDate,
+                    inputTokens: 50,
+                    outputTokens: 6,
+                    cacheTokens: 8
+                ),
+            ],
+            prompts: [
+                PromptRecord(
+                    id: "prompt-old",
+                    eventId: "project-tokenbar-old",
+                    agent: .codex,
+                    projectName: "tokenbar",
+                    sessionId: "session-old",
+                    timestamp: older,
+                    content: "old tokenbar prompt",
+                    contentHash: "old-hash",
+                    sourcePath: "/tmp/source.jsonl"
+                ),
+                PromptRecord(
+                    id: "prompt-new",
+                    eventId: "project-tokenbar-new",
+                    agent: .hermes,
+                    projectName: "tokenbar",
+                    sessionId: "session-new",
+                    timestamp: referenceDate,
+                    content: "new tokenbar prompt",
+                    contentHash: "new-hash",
+                    sourcePath: "/tmp/source.jsonl"
+                ),
+                PromptRecord(
+                    id: "prompt-other",
+                    eventId: "project-other",
+                    agent: .codex,
+                    projectName: "other",
+                    sessionId: "session-other",
+                    timestamp: referenceDate,
+                    content: "other prompt",
+                    contentHash: "other-hash",
+                    sourcePath: "/tmp/source.jsonl"
+                ),
+            ],
+            nextWatermarks: [],
+            warnings: [],
+            error: nil
+        )
+
+        let tokenbarEvents = try repository.projectEvents(projectName: "tokenbar")
+        #expect(tokenbarEvents.count == 2)
+        #expect(tokenbarEvents.map(\.id) == ["project-tokenbar-new", "project-tokenbar-old"])
+
+        let tokenbarPrompts = try repository.projectPromptHistory(projectName: "tokenbar")
+        #expect(tokenbarPrompts.map(\.id) == ["prompt-new", "prompt-old"])
+        #expect(tokenbarPrompts.allSatisfy { $0.projectName == "tokenbar" })
+        #expect(tokenbarPrompts.first?.content == "")
+
+        let summary = try repository.projectSummary(projectName: "tokenbar")
+        #expect(summary.totalTokens == 23)
+        #expect(summary.focus.dominantDimension == "Input")
+    }
+
+    @Test
+    func collectionSignaturesExposeCountsWithoutLoadingPromptContent() throws {
+        let dbURL = temporaryDatabaseURL()
+        let repository = try UsageRepository(databaseURL: dbURL)
+        let referenceDate = fixedDate()
+
+        _ = try repository.insertCheckpoint(
+            trigger: "sqlite-signature-test",
+            startedAt: referenceDate,
+            endedAt: referenceDate,
+            events: [
+                dbEvent(
+                    id: "sig-a",
+                    agent: .codex,
+                    projectName: "tokenbar",
+                    sessionId: "session-a",
+                    timestamp: referenceDate,
+                    inputTokens: 1,
+                    outputTokens: 2,
+                    cacheTokens: 3
+                )
+            ],
+            prompts: [
+                PromptRecord(
+                    id: "sig-prompt",
+                    eventId: "sig-a",
+                    agent: .codex,
+                    projectName: "tokenbar",
+                    sessionId: "session-a",
+                    timestamp: referenceDate,
+                    content: "signature prompt",
+                    contentHash: "signature-hash",
+                    sourcePath: "/tmp/source.jsonl"
+                )
+            ],
+            nextWatermarks: [],
+            warnings: [],
+            error: nil
+        )
+
+        let signatures = try repository.collectionSignatures()
+        #expect(signatures.eventCount == 1)
+        #expect(signatures.promptCount == 1)
+        #expect(signatures.eventSignature.hasPrefix("1|"))
+        #expect(signatures.promptSignature.hasPrefix("1|"))
+    }
+
+    @Test
     func checkpointInsertIsIdempotentAcrossRepeatRuns() async throws {
         let store = try UsageStore(databaseURL: temporaryDatabaseURL())
         let source = FakeCheckpointSource(events: [event(id: "same-event")], prompts: [prompt(id: "same-prompt")])
@@ -477,6 +622,7 @@ struct Sprint8StorageTests {
         let source = CustomSourceRecord(
             id: "wrapper",
             name: "Wrapper Agent",
+            engine: .claudeCode,
             directory: "/tmp/wrapper",
             globPattern: "**/*.jsonl",
             format: .claudeCodeJSONL,
@@ -488,6 +634,7 @@ struct Sprint8StorageTests {
 
         #expect(listed.count == 1)
         #expect(listed.first?.name == "Wrapper Agent")
+        #expect(listed.first?.engine == .claudeCode)
         #expect(listed.first?.format == .claudeCodeJSONL)
     }
 
@@ -520,6 +667,7 @@ struct Sprint8StorageTests {
 
         #expect(listed.count == 1)
         #expect(listed[0].id == "legacy")
+        #expect(listed[0].engine == .claudeCode)
         #expect(listed[0].fieldMapping == .default)
         #expect(listed[0].fieldMapping.inputTokens == "usage.input_tokens")
         #expect(listed[0].fieldMapping.outputTokens == "usage.output_tokens")
@@ -534,6 +682,7 @@ struct Sprint8StorageTests {
         let source = CustomSourceRecord(
             id: "mapping",
             name: "Mapping Source",
+            engine: .codex,
             directory: "/tmp/mapping",
             globPattern: "**/*.jsonl",
             format: .auto,
@@ -551,10 +700,12 @@ struct Sprint8StorageTests {
         let firstListed = try repository.listCustomSources()
         let first = try #require(firstListed.first)
         #expect(first.fieldMapping == source.fieldMapping)
+        #expect(first.engine == .codex)
 
         let updated = CustomSourceRecord(
             id: source.id,
             name: "Mapping Source Updated",
+            engine: .claudeCode,
             directory: "/tmp/mapping",
             globPattern: "**/*.jsonl",
             format: .auto,
@@ -575,9 +726,128 @@ struct Sprint8StorageTests {
 
         #expect(secondListed.count == 1)
         #expect(second.name == "Mapping Source Updated")
+        #expect(second.engine == .claudeCode)
         #expect(second.fieldMapping == updated.fieldMapping)
         #expect(second.enabled == false)
         #expect(second.createdAt.timeIntervalSince1970 == initialCreatedAt.timeIntervalSince1970)
+    }
+
+    @Test
+    func customSourceUpsertIsIdempotentByNormalizedPath() throws {
+        let repository = try UsageRepository(databaseURL: temporaryDatabaseURL())
+        let initialCreatedAt = fixedDate()
+        let first = CustomSourceRecord(
+            id: "first",
+            name: "Claude Me",
+            engine: .claudeCode,
+            directory: "/tmp/claude-me/projects/",
+            globPattern: "**/*.jsonl",
+            format: .claudeCodeJSONL,
+            displayAgent: "Claude",
+            createdAt: initialCreatedAt
+        )
+        let duplicate = CustomSourceRecord(
+            id: "second",
+            name: "Claude Me Updated",
+            engine: .claudeCode,
+            directory: "/tmp/claude-me/projects",
+            globPattern: "**/*.jsonl",
+            format: .claudeCodeJSONL,
+            displayAgent: "Claude Code",
+            createdAt: Date(timeIntervalSince1970: initialCreatedAt.timeIntervalSince1970 + 60)
+        )
+
+        try repository.upsertCustomSource(first)
+        try repository.upsertCustomSource(duplicate)
+
+        let listed = try repository.listCustomSources()
+        let saved = try #require(listed.first)
+        #expect(listed.count == 1)
+        #expect(saved.id == "first")
+        #expect(saved.name == "Claude Me Updated")
+        #expect(saved.directory == "/tmp/claude-me/projects")
+        #expect(saved.displayAgent == "Claude Code")
+        #expect(saved.createdAt.timeIntervalSince1970 == initialCreatedAt.timeIntervalSince1970)
+    }
+
+    @Test
+    func deletingCustomSourceRemovesItsIndexedRows() throws {
+        let repository = try UsageRepository(databaseURL: temporaryDatabaseURL())
+        let referenceDate = fixedDate()
+        let source = CustomSourceRecord(
+            id: "custom-source",
+            name: "Custom Source",
+            engine: .codex,
+            directory: "/tmp/custom-source",
+            globPattern: "**/rollout-*.jsonl",
+            format: .codexJSONL,
+            displayAgent: "Codex",
+            createdAt: referenceDate
+        )
+        try repository.upsertCustomSource(source)
+
+        _ = try repository.insertCheckpoint(
+            trigger: "custom-source-delete-test",
+            startedAt: referenceDate,
+            endedAt: referenceDate,
+            events: [
+                dbEvent(id: "custom:custom-source:event-1", agent: .codex, projectName: "custom-project", sessionId: "custom-session", timestamp: referenceDate, inputTokens: 20, outputTokens: 5, cacheTokens: 1),
+                dbEvent(id: "builtin-event", agent: .codex, projectName: "builtin-project", sessionId: "builtin-session", timestamp: referenceDate, inputTokens: 3, outputTokens: 2, cacheTokens: 1),
+            ],
+            prompts: [
+                PromptRecord(
+                    id: "custom:custom-source:prompt-1",
+                    eventId: "custom:custom-source:event-1",
+                    agent: .codex,
+                    projectName: "custom-project",
+                    sessionId: "custom-session",
+                    timestamp: referenceDate,
+                    content: "custom",
+                    contentHash: "custom-hash",
+                    sourcePath: "/tmp/custom-source/rollout.jsonl"
+                ),
+                PromptRecord(
+                    id: "builtin-prompt",
+                    eventId: "builtin-event",
+                    agent: .codex,
+                    projectName: "builtin-project",
+                    sessionId: "builtin-session",
+                    timestamp: referenceDate,
+                    content: "builtin",
+                    contentHash: "builtin-hash",
+                    sourcePath: "/tmp/codex/rollout.jsonl"
+                ),
+            ],
+            nextWatermarks: [
+                SourceWatermark(
+                    sourcePath: "/tmp/custom-source/rollout.jsonl",
+                    agent: .codex,
+                    lastMtime: referenceDate,
+                    lastByteOffset: 100,
+                    lastEventId: "custom:custom-source:event-1",
+                    lastInode: 1,
+                    updatedAt: referenceDate
+                ),
+                SourceWatermark(
+                    sourcePath: "/tmp/codex/rollout.jsonl",
+                    agent: .codex,
+                    lastMtime: referenceDate,
+                    lastByteOffset: 200,
+                    lastEventId: "builtin-event",
+                    lastInode: 2,
+                    updatedAt: referenceDate
+                ),
+            ],
+            warnings: [],
+            error: nil
+        )
+
+        try repository.deleteCustomSource(id: "custom-source")
+
+        #expect(try repository.listCustomSources().isEmpty)
+        #expect(try repository.allEvents().map(\.id) == ["builtin-event"])
+        #expect(try repository.allPrompts().map(\.id) == ["builtin-prompt"])
+        #expect(Set(try repository.watermarks().keys) == ["/tmp/codex/rollout.jsonl"])
     }
 
     @Test
@@ -597,26 +867,21 @@ struct Sprint8StorageTests {
     }
 
     @Test
-    func customSourceParsesUnknownJSONLWithFieldMapping() async throws {
+    func customSourceParsesClaudeEngineJSONL() async throws {
         let directory = temporaryDirectory()
-        let eventFile = directory.appendingPathComponent("mapped.jsonl")
+        let eventFile = directory.appendingPathComponent("claude.jsonl")
         try ([
-            #"{"timestamp":"2026-05-18T10:11:12.000Z","cwd":"/tmp/tokenbar","sessionId":"mapped-session","model":"mapped-model","stats":{"prompt":12,"completion":34,"cache":56}}"#,
+            #"{"sessionId":"claude-session","timestamp":"2026-05-18T10:11:12.000Z","cwd":"/tmp/tokenbar","message":{"model":"claude-model","usage":{"input_tokens":12,"output_tokens":34,"cache_creation_input_tokens":0,"cache_read_input_tokens":56}}}"#,
         ].joined(separator: "\n") + "\n").write(to: eventFile, atomically: true, encoding: .utf8)
 
         let record = CustomSourceRecord(
-            id: "mapped-source",
-            name: "Mapped Source",
+            id: "claude-source",
+            name: "Claude Source",
+            engine: .claudeCode,
             directory: directory.path,
             globPattern: "*.jsonl",
-            format: .auto,
-            displayAgent: "Mapped",
-            fieldMapping: CustomSourceFieldMapping(
-                inputTokens: "stats.prompt",
-                outputTokens: "stats.completion",
-                cacheTokens: "stats.cache",
-                model: "model"
-            ),
+            format: .claudeCodeJSONL,
+            displayAgent: "Claude Code",
             createdAt: fixedDate()
         )
         let source = CustomUsageEventSource(record: record)
@@ -630,13 +895,95 @@ struct Sprint8StorageTests {
         let event = try #require(result.events.first)
         #expect(result.events.count == 1)
         #expect(!result.warnings.contains { $0.message == "usage fields are incomplete for custom mapping" })
-        #expect(event.agent == .custom)
+        #expect(event.agent == .claudeCode)
+        #expect(event.parser == .claudeCode)
         #expect(event.projectName == "tokenbar")
-        #expect(event.sessionId == "mapped-session")
-        #expect(event.modelName == "mapped-model")
+        #expect(event.sessionId == "claude-session")
+        #expect(event.modelName == "claude-model")
         #expect(event.inputTokens == 12)
         #expect(event.outputTokens == 34)
         #expect(event.cacheTokens == 56)
+    }
+
+    @Test
+    func customSourceParsesCodexEngineRolloutJSONL() async throws {
+        let directory = temporaryDirectory()
+        let eventFile = directory.appendingPathComponent("rollout-custom.jsonl")
+        try ([
+            #"{"timestamp":"2026-03-14T07:54:51.802Z","type":"session_meta","payload":{"id":"codex-custom-session","timestamp":"2026-03-14T07:54:45.725Z","cwd":"/tmp/tokenbar","originator":"Codex Desktop","model_provider":"openai"}}"#,
+            #"{"timestamp":"2026-03-14T07:54:59.967Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":110,"cached_input_tokens":20,"output_tokens":7,"reasoning_output_tokens":3,"total_tokens":117},"last_token_usage":{"input_tokens":110,"cached_input_tokens":20,"output_tokens":7,"reasoning_output_tokens":3,"total_tokens":117},"model_context_window":258400},"rate_limits":null}}"#,
+        ].joined(separator: "\n") + "\n").write(to: eventFile, atomically: true, encoding: .utf8)
+
+        let record = CustomSourceRecord(
+            id: "codex-source",
+            name: "Codex Source",
+            engine: .codex,
+            directory: directory.path,
+            globPattern: "rollout-*.jsonl",
+            format: .codexJSONL,
+            displayAgent: "Codex",
+            createdAt: fixedDate()
+        )
+        let source = CustomUsageEventSource(record: record)
+
+        let result = try await source.loadEvents(
+            since: [:],
+            referenceDate: fixedDate(),
+            calendar: Calendar(identifier: .gregorian)
+        )
+
+        let event = try #require(result.events.first)
+        #expect(result.events.count == 1)
+        #expect(event.agent == .codex)
+        #expect(event.parser == .codex)
+        #expect(event.projectName == "tokenbar")
+        #expect(event.sessionId == "codex-custom-session")
+        #expect(event.inputTokens == 110)
+        #expect(event.outputTokens == 7)
+        #expect(event.cacheTokens == 20)
+        #expect(event.reasoningTokens == 3)
+    }
+
+    @Test
+    func customSourceParsesHermesEngineDatabase() async throws {
+        let directory = temporaryDirectory()
+        let dbURL = directory.appendingPathComponent("state.db")
+        let queue = try DatabaseQueue(path: dbURL.path)
+        try await queue.write { db in
+            try db.execute(sql: "CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT, started_at INTEGER, input_tokens INTEGER, output_tokens INTEGER, cache_read_tokens INTEGER, cache_write_tokens INTEGER, reasoning_tokens INTEGER)")
+            try db.execute(sql: "CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT, timestamp INTEGER, role TEXT, content TEXT)")
+            try db.execute(sql: """
+            INSERT INTO sessions (id, source, started_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens)
+            VALUES ('s1', 'hermes-custom', 1770000000000, 10, 20, 30, 40, 0)
+            """)
+        }
+
+        let record = CustomSourceRecord(
+            id: "hermes-source",
+            name: "Hermes Source",
+            engine: .hermes,
+            directory: directory.path,
+            globPattern: "state.db",
+            format: .auto,
+            displayAgent: "Hermes",
+            createdAt: fixedDate()
+        )
+        let source = CustomUsageEventSource(record: record)
+
+        let result = try await source.loadEvents(
+            since: [:],
+            referenceDate: fixedDate(),
+            calendar: Calendar(identifier: .gregorian)
+        )
+
+        let event = try #require(result.events.first)
+        #expect(result.events.count == 1)
+        #expect(event.agent == .hermes)
+        #expect(event.parser == .hermes)
+        #expect(event.projectName == "hermes-custom")
+        #expect(event.inputTokens == 10)
+        #expect(event.outputTokens == 20)
+        #expect(event.cacheTokens == 70)
     }
 
     @Test

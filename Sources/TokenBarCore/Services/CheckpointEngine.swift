@@ -21,11 +21,20 @@ public actor CheckpointEngine {
 
     public let sources: [any UsageEventSource]
     public let store: UsageStore
+    private let resourceThrottle: IndexingResourceThrottle?
+    private let stateIncludesPrompts: Bool
     private var runState: RunState = .idle
 
-    public init(sources: [any UsageEventSource], store: UsageStore) {
+    public init(
+        sources: [any UsageEventSource],
+        store: UsageStore,
+        resourceThrottle: IndexingResourceThrottle? = nil,
+        stateIncludesPrompts: Bool = true
+    ) {
         self.sources = sources
         self.store = store
+        self.resourceThrottle = resourceThrottle
+        self.stateIncludesPrompts = stateIncludesPrompts
     }
 
     public func trigger(
@@ -72,7 +81,7 @@ public actor CheckpointEngine {
         if let result = await self.trigger(trigger, startedAt: startedAt, referenceDate: referenceDate, calendar: calendar) {
             return result
         }
-        let state = await store.state(referenceDate: referenceDate, calendar: calendar)
+        let state = await store.state(referenceDate: referenceDate, calendar: calendar, includePrompts: stateIncludesPrompts)
         return CheckpointRunResult(state: state, failure: nil, checkpoint: state.lastCheckpoint)
     }
 
@@ -91,7 +100,21 @@ public actor CheckpointEngine {
 
         for source in sources {
             do {
-                let result = try await source.loadEvents(since: watermarks, referenceDate: referenceDate, calendar: calendar)
+                let sourceStartedAt = Date()
+                let result: UsageSourceLoadResult
+                if let budgetedSource = source as? any ResourceBudgetedUsageEventSource {
+                    result = try await budgetedSource.loadEvents(
+                        since: watermarks,
+                        referenceDate: referenceDate,
+                        calendar: calendar,
+                        resourceThrottle: resourceThrottle
+                    )
+                } else {
+                    result = try await source.loadEvents(since: watermarks, referenceDate: referenceDate, calendar: calendar)
+                    if let resourceThrottle {
+                        await resourceThrottle.rest(afterActive: Date().timeIntervalSince(sourceStartedAt))
+                    }
+                }
                 allEvents.append(contentsOf: result.events)
                 allPrompts.append(contentsOf: result.prompts)
                 allNextWatermarks.append(contentsOf: result.nextWatermarks)
@@ -120,7 +143,8 @@ public actor CheckpointEngine {
             warnings: allWarnings,
             referenceDate: referenceDate,
             calendar: calendar,
-            lastRebuildError: errorSummary
+            lastRebuildError: errorSummary,
+            stateIncludesPrompts: stateIncludesPrompts
         )
         return CheckpointRunResult(state: state, failure: failures.first, checkpoint: state.lastCheckpoint)
     }

@@ -102,15 +102,9 @@ private struct TokenBarStatusItem: View {
         HStack(spacing: 4) {
             // CL-P0-001: template image gets auto-tinted by macOS for any
             // menubar appearance (wallpaper-tint / dark / Reduce Transparency
-            // / Increase Contrast). The SwiftUI `TokenBarStatusGlyph` is then
-            // overlaid only for state decorations (failed dot, paused ❘❘,
-            // live blink) so the base glyph stays template-correct.
+            // / Increase Contrast), so the base glyph stays template-correct.
             Image(nsImage: TokenBarMenuBarGlyphImage.template())
                 .renderingMode(.template)
-                .overlay {
-                    TokenBarStatusGlyph(state: runtimeModel.refreshState, paused: isPaused)
-                        .opacity(0.0001) // keeps state animations alive without doubling pixels
-                }
                 .overlay(alignment: .topTrailing) {
                     if runtimeModel.refreshState == .failed || runtimeModel.refreshState == .stale {
                         Circle()
@@ -214,11 +208,19 @@ private struct TokenBarStatusItem: View {
 
         switch requestedWindowID {
         case "diagnostics":
-            runtimeModel.mainRoute = .diagnostics
+            runtimeModel.navigate(to: .diagnostics, source: "launch.environment")
         case "settings":
-            runtimeModel.mainRoute = .settings
+            runtimeModel.navigate(to: .settings, source: "launch.environment")
+        case let value where value.hasPrefix("project:"):
+            let projectName = String(value.dropFirst("project:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if projectName.isEmpty {
+                runtimeModel.navigate(to: .today, source: "launch.environment")
+            } else {
+                runtimeModel.openProject(named: projectName, source: "launch.environment")
+            }
         default:
-            runtimeModel.mainRoute = .today
+            runtimeModel.navigate(to: .today, source: "launch.environment")
         }
 
         try? await Task.sleep(for: .milliseconds(450))

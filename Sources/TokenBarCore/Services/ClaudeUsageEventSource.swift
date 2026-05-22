@@ -1,12 +1,12 @@
 import Foundation
 
-public struct ClaudeUsageEventSource: InspectableUsageEventSource, @unchecked Sendable {
+public struct ClaudeUsageEventSource: InspectableUsageEventSource, ResourceBudgetedUsageEventSource, @unchecked Sendable {
     public let sourceName = "Claude Code"
     public let rootPath: String
-    public let daysBack: Int
+    public let daysBack: Int?
     private let fileManager: FileManager
 
-    public init(rootPath: String = "~/.claude/projects", daysBack: Int = 30, fileManager: FileManager = .default) {
+    public init(rootPath: String = "~/.claude/projects", daysBack: Int? = nil, fileManager: FileManager = .default) {
         self.rootPath = rootPath
         self.daysBack = daysBack
         self.fileManager = fileManager
@@ -16,6 +16,20 @@ public struct ClaudeUsageEventSource: InspectableUsageEventSource, @unchecked Se
         since watermarks: [String: SourceWatermark],
         referenceDate: Date,
         calendar: Calendar
+    ) async throws -> UsageSourceLoadResult {
+        try await loadEvents(
+            since: watermarks,
+            referenceDate: referenceDate,
+            calendar: calendar,
+            resourceThrottle: nil
+        )
+    }
+
+    public func loadEvents(
+        since watermarks: [String: SourceWatermark],
+        referenceDate: Date,
+        calendar: Calendar,
+        resourceThrottle: IndexingResourceThrottle?
     ) async throws -> UsageSourceLoadResult {
         _ = calendar
         let files = try ClaudeDataSource.discoverSessionFiles(
@@ -31,15 +45,40 @@ public struct ClaudeUsageEventSource: InspectableUsageEventSource, @unchecked Se
         var warnings: [UsageSourceWarning] = []
 
         for file in files {
-            let slug = file.deletingLastPathComponent().lastPathComponent
-            let incremental = try JSONLIncrementalReader.read(
+            let slug = ClaudeDataSource.projectSlug(for: file, rootDirectory: rootPath)
+            let incremental = try await JSONLIncrementalReader.read(
                 fileURL: file,
                 sourceName: sourceName,
                 agent: .claudeCode,
                 watermark: watermarks[file.path],
-                now: referenceDate
+                now: referenceDate,
+                resourceThrottle: resourceThrottle
             )
-            let result = ClaudeUsageParser.parse(lines: incremental.lines, fileURL: file, fallbackProjectSlug: slug)
+            warnings.append(contentsOf: incremental.warnings)
+            if incremental.lines.isEmpty {
+                nextWatermarks.append(
+                    SourceWatermark(
+                        sourcePath: incremental.nextWatermark.sourcePath,
+                        agent: incremental.nextWatermark.agent,
+                        lastMtime: incremental.nextWatermark.lastMtime,
+                        lastByteOffset: incremental.nextWatermark.lastByteOffset,
+                        lastEventId: watermarks[file.path]?.lastEventId,
+                        lastInode: incremental.nextWatermark.lastInode,
+                        updatedAt: incremental.nextWatermark.updatedAt
+                    )
+                )
+                if let resourceThrottle {
+                    await resourceThrottle.rest(afterActive: 0.001)
+                }
+                continue
+            }
+
+            let result = await ClaudeUsageParser.parse(
+                lines: incremental.lines,
+                fileURL: file,
+                fallbackProjectSlug: slug,
+                resourceThrottle: resourceThrottle
+            )
             events.append(contentsOf: result.events)
             prompts.append(contentsOf: result.prompts)
             nextWatermarks.append(
@@ -53,7 +92,6 @@ public struct ClaudeUsageEventSource: InspectableUsageEventSource, @unchecked Se
                     updatedAt: incremental.nextWatermark.updatedAt
                 )
             )
-            warnings.append(contentsOf: incremental.warnings)
             warnings.append(contentsOf: result.warnings.map {
                 UsageSourceWarning(
                     sourceName: sourceName,
@@ -62,6 +100,10 @@ public struct ClaudeUsageEventSource: InspectableUsageEventSource, @unchecked Se
                     message: $0.message
                 )
             })
+
+            if let resourceThrottle {
+                await resourceThrottle.rest(afterActive: 0.002)
+            }
         }
 
         return UsageSourceLoadResult(events: events, prompts: prompts, nextWatermarks: nextWatermarks, warnings: warnings)

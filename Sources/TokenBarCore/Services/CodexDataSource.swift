@@ -4,7 +4,7 @@ public enum CodexDataSource {
     public static func discoverRolloutFiles(
         rootDirectory: String = "~/.codex/sessions",
         referenceDate: Date = Date(),
-        daysBack: Int = 30,
+        daysBack: Int? = nil,
         calendar: Calendar = Calendar(identifier: .gregorian),
         fileManager: FileManager = .default
     ) throws -> [URL] {
@@ -12,8 +12,27 @@ public enum CodexDataSource {
         let rootURL = URL(fileURLWithPath: rootPath, isDirectory: true)
 
         var urls: [URL] = []
-        let today = calendar.startOfDay(for: referenceDate)
 
+        guard let daysBack else {
+            guard let enumerator = fileManager.enumerator(
+                at: rootURL,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            ) else {
+                return []
+            }
+
+            for case let url as URL in enumerator {
+                if contentsOfRolloutFiles(in: [url]).isEmpty {
+                    continue
+                }
+                urls.append(url)
+            }
+
+            return urls.sorted { $0.path < $1.path }
+        }
+
+        let today = calendar.startOfDay(for: referenceDate)
         for offset in 0..<daysBack {
             guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else {
                 continue

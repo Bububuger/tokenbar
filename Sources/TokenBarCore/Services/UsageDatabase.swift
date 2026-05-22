@@ -105,6 +105,7 @@ public final class UsageDatabase: @unchecked Sendable {
             CREATE TABLE IF NOT EXISTS custom_sources (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
+                engine TEXT NOT NULL DEFAULT 'claudeCode',
                 directory TEXT NOT NULL,
                 glob_pattern TEXT NOT NULL,
                 format TEXT NOT NULL,
@@ -159,6 +160,45 @@ public final class UsageDatabase: @unchecked Sendable {
                 SET field_mapping = '{"inputTokens":"usage.input_tokens","outputTokens":"usage.output_tokens","cacheTokens":"usage.cache_read_tokens","model":"model"}'
                 WHERE field_mapping IS NULL OR LENGTH(TRIM(field_mapping)) = 0
                 """)
+            }
+        }
+        migrator.registerMigration("v6_add_custom_source_engine") { db in
+            let columns = try db.columns(in: "custom_sources")
+            if !columns.contains(where: { $0.name == "engine" }) {
+                try db.alter(table: "custom_sources") { table in
+                    table.add(column: "engine", .text)
+                }
+                try db.execute(sql: """
+                UPDATE custom_sources
+                SET engine = CASE
+                    WHEN format = 'codex_jsonl' THEN 'codex'
+                    WHEN format = 'claude_code_jsonl' THEN 'claudeCode'
+                    ELSE 'claudeCode'
+                END
+                WHERE engine IS NULL OR LENGTH(TRIM(engine)) = 0
+                """)
+            }
+        }
+        migrator.registerMigration("v7_deduplicate_custom_sources_by_path") { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                SELECT id, directory, glob_pattern
+                FROM custom_sources
+                ORDER BY created_at ASC, name ASC
+                """
+            )
+            var seenKeys = Set<String>()
+            for row in rows {
+                let id: String = row["id"]
+                let directory: String = row["directory"]
+                let globPattern: String = row["glob_pattern"]
+                let key = CustomSourceRecord.sourcePathKey(directory: directory, globPattern: globPattern)
+                if seenKeys.contains(key) {
+                    try db.execute(sql: "DELETE FROM custom_sources WHERE id = ?", arguments: [id])
+                } else {
+                    seenKeys.insert(key)
+                }
             }
         }
         return migrator

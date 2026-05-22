@@ -49,11 +49,25 @@ struct PopoverView: View {
                 }
                 hero
                 Divider().padding(.vertical, 10)
-                todayBreakdown
-                Divider().padding(.vertical, 10)
-                activity
-                Divider().padding(.vertical, 10)
-                rankings
+                if runtimeModel.indexingState.isVisible {
+                    TokenBarIndexingStatusCard(
+                        state: runtimeModel.indexingState,
+                        compact: true,
+                        onPause: { runtimeModel.pauseInitialIndexing() },
+                        onRetry: { runtimeModel.retryInitialIndexing() },
+                        onOpenDiagnostics: { openMain(route: .diagnostics) }
+                    )
+                    if showIndexedPopoverSections {
+                        Divider().padding(.vertical, 10)
+                    }
+                }
+                if showIndexedPopoverSections {
+                    todayBreakdown
+                    Divider().padding(.vertical, 10)
+                    activity
+                    Divider().padding(.vertical, 10)
+                    rankings
+                }
                 Divider().padding(.vertical, 8)
                 footer
             }
@@ -97,6 +111,10 @@ struct PopoverView: View {
         runtimeModel.popoverSnapshot
     }
 
+    private var showIndexedPopoverSections: Bool {
+        !runtimeModel.indexingState.isActive || popover.eventsCount > 0
+    }
+
     private var hero: some View {
         HStack(alignment: .center, spacing: 10) {
             TokenBarBrandGlyph(size: 22)
@@ -104,7 +122,7 @@ struct PopoverView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("TokenBar")
                     .font(.headline)
-                Text("Updated \(tokenbarRelativeTime(popover.lastIndexedAt))")
+                Text(heroSubtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -146,6 +164,13 @@ struct PopoverView: View {
                 .help(isPaused ? "Paused — resume from the menubar to refresh" : "Refresh now")
             }
         }
+    }
+
+    private var heroSubtitle: String {
+        if runtimeModel.indexingState.isPartial {
+            return "Building local index"
+        }
+        return "Updated \(tokenbarRelativeTime(popover.lastIndexedAt))"
     }
 
     private var todayBreakdown: some View {
@@ -297,7 +322,7 @@ struct PopoverView: View {
                             summary: row.summary,
                             color: TokenBarStyle.input
                         ) {
-                            runtimeModel.openProject(named: row.name)
+                            runtimeModel.openProject(named: row.name, source: "popover.ranking.project")
                             openMain(route: .project(row.name))
                         }
                     }
@@ -383,7 +408,7 @@ struct PopoverView: View {
 
     private func openMain(route: TokenBarMainRoute) {
         let started = Date()
-        runtimeModel.mainRoute = route
+        runtimeModel.navigate(to: route, source: "popover.open_main")
         dismissPopover()
         openWindowAction(id: "main")
         NSApp.activate(ignoringOtherApps: true)

@@ -2,17 +2,97 @@ import AppKit
 import Foundation
 import TokenBarCore
 
-enum ProjectSwitchPhase: String, Sendable {
-    case snap
-    case stream
-    case done
+enum TokenBarIndexingPhase: String, Sendable, Hashable {
+    case idle
+    case discovering
+    case indexing
+    case paused
+    case completed
+    case failed
 }
 
-struct ProjectSwitchState: Identifiable, Equatable, Sendable {
-    let id: UUID
-    let projectName: String
-    let phase: ProjectSwitchPhase
-    let progress: Double
+enum TokenBarIndexingSourcePhase: String, Sendable, Hashable {
+    case pending
+    case scanning
+    case indexed
+    case skipped
+    case failed
+}
+
+struct TokenBarIndexingSourceState: Identifiable, Sendable, Hashable {
+    let sourceName: String
+    let rootPath: String
+    var phase: TokenBarIndexingSourcePhase
+    var discoveredFileCount: Int
+    var eventsIndexed: Int
+    var promptsIndexed: Int
+    var message: String?
+
+    var id: String { sourceName }
+}
+
+struct TokenBarIndexingState: Sendable, Hashable {
+    var phase: TokenBarIndexingPhase
+    var sources: [TokenBarIndexingSourceState]
+    var startedAt: Date?
+    var endedAt: Date?
+    var checkedFiles: Int
+    var eventsIndexed: Int
+    var promptsIndexed: Int
+    var message: String?
+    var activeSourceName: String?
+    var cpuBudgetPercent: Double?
+
+    static let idle = TokenBarIndexingState(
+        phase: .idle,
+        sources: [],
+        startedAt: nil,
+        endedAt: nil,
+        checkedFiles: 0,
+        eventsIndexed: 0,
+        promptsIndexed: 0,
+        message: nil,
+        activeSourceName: nil,
+        cpuBudgetPercent: nil
+    )
+
+    var isActive: Bool {
+        phase == .discovering || phase == .indexing
+    }
+
+    var isVisible: Bool {
+        phase != .idle
+    }
+
+    var isPartial: Bool {
+        isActive || phase == .paused
+    }
+
+    var completedSourceCount: Int {
+        sources.filter { $0.phase == .indexed || $0.phase == .skipped }.count
+    }
+
+    var progress: Double {
+        guard !sources.isEmpty else { return phase == .completed ? 1 : 0 }
+        switch phase {
+        case .idle:
+            return 0
+        case .completed:
+            return 1
+        default:
+            return min(0.98, Double(completedSourceCount) / Double(sources.count))
+        }
+    }
+}
+
+enum CustomSourceSaveResult: Equatable {
+    case saved(name: String, deduplicated: Bool)
+    case failed(String)
+}
+
+private struct CachedProjectDetail {
+    let detail: ProjectDetailSnapshot
+    let eventsSignature: String
 }
 
 @MainActor
@@ -20,16 +100,30 @@ final class TokenBarRuntimeModel: ObservableObject {
     @Published private(set) var snapshot: UsageSnapshot
     @Published private(set) var diagnostics: DiagnosticsSnapshot
     @Published private(set) var prompts: [PromptRecord]
+    @Published private(set) var eventCount: Int
+    @Published private(set) var promptCount: Int
+    @Published private(set) var eventSignature: String
+    @Published private(set) var promptSignature: String
     @Published private(set) var lastCheckpoint: CheckpointSummary?
     @Published private(set) var refreshState: RefreshState
     @Published private(set) var selectedProjectName: String?
     @Published private(set) var projectDetail: ProjectDetailSnapshot?
-    @Published private(set) var projectSwitchState: ProjectSwitchState?
     @Published private(set) var customSources: [CustomSourceRecord]
     @Published private(set) var events: [UsageEvent]
     @Published private(set) var sourceWarnings: [UsageSourceWarning]
     @Published private(set) var popoverSnapshot: TokenBarPopoverSnapshot
-    @Published var mainRoute: TokenBarMainRoute = .today
+    @Published private(set) var indexingState: TokenBarIndexingState = .idle
+    @Published private(set) var isBootstrapping = true
+    @Published var mainRoute: TokenBarMainRoute = .today {
+        didSet {
+            guard oldValue != mainRoute else { return }
+            TokenBarTelemetry.event(
+                "main.route.change",
+                metadata: "from=\(oldValue.telemetryName) to=\(mainRoute.telemetryName)",
+                success: true
+            )
+        }
+    }
 
     @Published var refreshInterval: RefreshIntervalOption {
         didSet {
@@ -77,13 +171,17 @@ final class TokenBarRuntimeModel: ObservableObject {
     private var checkpointSourceSignature = ""
     private var hasBootstrapped = false
     private var lastAutomaticRefreshAt: Date?
+    private var activeRefreshTrigger: String?
+    private var suppressSourceChangesUntil: Date?
     private var intervalRefreshTask: Task<Void, Never>?
     // CL-P0-026: scheduled to fire just after local midnight so the Today KPI
     // resets, the 30d strip shifts, and the Popover briefly shows a "Day
     // changed — refreshing…" hint. `dayChangedAt` is published so views can
     // observe it and animate a transient banner.
     private var midnightTask: Task<Void, Never>?
-    private var projectSwitchTask: Task<Void, Never>?
+    private var projectDetailTask: Task<Void, Never>?
+    private var projectDetailCache: [String: CachedProjectDetail] = [:]
+    private var initialIndexTask: Task<Void, Never>?
     @Published private(set) var dayChangedAt: Date?
 
     init(
@@ -104,12 +202,17 @@ final class TokenBarRuntimeModel: ObservableObject {
         self.refreshState = .idle
         self.selectedProjectName = nil
         self.projectDetail = nil
-        self.projectSwitchState = nil
         self.prompts = []
+        self.eventCount = 0
+        self.promptCount = 0
+        self.eventSignature = "0|"
+        self.promptSignature = "0|"
         self.lastCheckpoint = nil
         self.events = []
         self.sourceWarnings = []
         self.popoverSnapshot = .empty
+        self.indexingState = .idle
+        self.isBootstrapping = true
         self.diagnostics = DiagnosticsSnapshot(
             dataSourceStatuses: [],
             lastIndexedAt: nil,
@@ -133,12 +236,14 @@ final class TokenBarRuntimeModel: ObservableObject {
             return
         }
         hasBootstrapped = true
+        isBootstrapping = true
+        defer { isBootstrapping = false }
         var stageStarted = Date()
         await loadPersistedSnapshot()
         TokenBarTelemetry.timing(
             "runtime.bootstrap.stage.load_persisted_snapshot",
             startedAt: stageStarted,
-            metadata: "events=\(events.count) prompts=\(prompts.count) warnings=\(sourceWarnings.count)"
+            metadata: "events=\(eventCount) prompts=\(promptCount) warnings=\(sourceWarnings.count)"
         )
         stageStarted = Date()
         await restartFileWatcher()
@@ -147,15 +252,29 @@ final class TokenBarRuntimeModel: ObservableObject {
         observeSystemPowerEvents()
         TokenBarTelemetry.event(
             "runtime.bootstrap",
-            metadata: "events=\(events.count) prompts=\(prompts.count) warnings=\(sourceWarnings.count)",
+            metadata: "events=\(eventCount) prompts=\(promptCount) warnings=\(sourceWarnings.count)",
             success: diagnostics.rebuildError == nil,
             elapsed: Date().timeIntervalSince(started),
             error: diagnostics.rebuildError
         )
-        Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(750))
-            await self?.refresh(trigger: "bootstrap-background")
+        if shouldRunInitialIndexing {
+            startInitialIndexing(reason: "cold-start")
+        } else if refreshState != .idle {
+            Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(750))
+                await self?.refresh(trigger: "bootstrap-background")
+            }
+        } else {
+            TokenBarTelemetry.event(
+                "runtime.bootstrap.background_refresh.skip_fresh",
+                metadata: "refresh_state=\(refreshState.rawValue) last_indexed=\(diagnostics.lastIndexedAt != nil)",
+                success: true
+            )
         }
+    }
+
+    private var shouldRunInitialIndexing: Bool {
+        events.isEmpty && lastCheckpoint == nil && diagnostics.lastIndexedAt == nil && !builtInSources.isEmpty
     }
 
     /// CL-P1-036: after a sleep/wake cycle, trigger a refresh so the menubar
@@ -211,29 +330,34 @@ final class TokenBarRuntimeModel: ObservableObject {
         await applyRetention(referenceDate: now)
         TokenBarTelemetry.timing("runtime.load_persisted.stage.apply_retention", startedAt: stageStarted)
         stageStarted = Date()
-        let state = await usageStore.state(referenceDate: now, calendar: calendar)
+        let state = await usageStore.state(referenceDate: now, calendar: calendar, includePrompts: false)
         TokenBarTelemetry.timing(
             "runtime.load_persisted.stage.usage_store_state",
             startedAt: stageStarted,
-            metadata: "events=\(state.events.count) prompts=\(state.prompts.count) warnings=\(state.warnings.count)"
+            metadata: "events=\(state.eventCount) prompts=\(state.promptCount) warnings=\(state.warnings.count)"
         )
         stageStarted = Date()
         events = state.events
-        prompts = state.prompts
+        prompts = []
+        publishCollectionMetadata(from: state)
         sourceWarnings = state.warnings
         snapshot = state.snapshot
         lastCheckpoint = state.lastCheckpoint
         if selectedProjectName == nil {
             selectedProjectName = state.snapshot.topProjects.first?.name
         }
-
-        projectDetail = selectedProjectName.flatMap {
-            UsageAggregator.makeProjectDetail(
-                projectName: $0,
-                from: state.events,
-                referenceDate: now,
-                calendar: calendar
-            )
+        let detailProjectName = selectedProjectName
+        let computedProjectDetail = await Self.computeProjectDetailSnapshot(
+            projectName: detailProjectName,
+            from: state.events,
+            referenceDate: now,
+            calendar: calendar
+        )
+        if selectedProjectName == detailProjectName {
+            projectDetail = computedProjectDetail
+            if let computedProjectDetail {
+                cacheProjectDetail(computedProjectDetail)
+            }
         }
         TokenBarTelemetry.timing(
             "runtime.load_persisted.stage.publish_snapshot",
@@ -272,7 +396,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         TokenBarTelemetry.timing(
             "runtime.load_persisted.stage.popover_snapshot",
             startedAt: stageStarted,
-            metadata: "events=\(events.count)"
+            metadata: "events=\(eventCount)"
         )
         TokenBarTelemetry.timing(
             "runtime.load_persisted.stage.publish_diagnostics",
@@ -282,12 +406,32 @@ final class TokenBarRuntimeModel: ObservableObject {
         TokenBarTelemetry.timing(
             "runtime.load_persisted.total",
             startedAt: started,
-            metadata: "events=\(events.count) prompts=\(prompts.count) warnings=\(sourceWarnings.count)"
+            metadata: "events=\(eventCount) prompts=\(promptCount) warnings=\(sourceWarnings.count)"
         )
     }
 
     func refresh(trigger: String = "manual") async {
         let started = Date()
+        guard !indexingState.isActive else {
+            TokenBarTelemetry.event(
+                "runtime.refresh.skip_initial_index",
+                metadata: "trigger=\(trigger) phase=\(indexingState.phase.rawValue)",
+                success: true,
+                elapsed: Date().timeIntervalSince(started)
+            )
+            return
+        }
+        if let activeRefreshTrigger {
+            TokenBarTelemetry.event(
+                "runtime.refresh.skip_active",
+                metadata: "trigger=\(trigger) active=\(activeRefreshTrigger)",
+                success: true,
+                elapsed: Date().timeIntervalSince(started)
+            )
+            return
+        }
+        activeRefreshTrigger = trigger
+        defer { activeRefreshTrigger = nil }
         TokenBarSignpost.event("refresh-start")
         defer { TokenBarSignpost.event("refresh-end") }
         refreshState = .refreshing
@@ -310,18 +454,26 @@ final class TokenBarRuntimeModel: ObservableObject {
             metadata: "trigger=\(trigger) count=\(sources.count)"
         )
         stageStarted = Date()
-        let engine = checkpointEngine(for: sources)
+        let backgroundThrottle = backgroundThrottle(for: trigger)
+        let engine = checkpointEngine(for: sources, resourceThrottle: backgroundThrottle)
         TokenBarTelemetry.timing(
             "runtime.refresh.stage.checkpoint_engine_prepare",
             startedAt: stageStarted,
-            metadata: "trigger=\(trigger)"
+            metadata: "trigger=\(trigger) background=\(backgroundThrottle != nil)"
         )
         stageStarted = Date()
         _ = await engine.run(trigger: trigger, startedAt: now, referenceDate: now, calendar: Calendar(identifier: .gregorian))
+        let throttleSnapshot = await backgroundThrottle?.snapshot()
+        let throttleMetadata: String
+        if let throttleSnapshot {
+            throttleMetadata = "trigger=\(trigger) cpu_budget=\(throttleSnapshot.cpuPercent) estimated_cpu=\(String(format: "%.1f", throttleSnapshot.estimatedCPUPercent)) active_ms=\(Int(throttleSnapshot.activeSeconds * 1000)) sleep_ms=\(Int(throttleSnapshot.sleepSeconds * 1000))"
+        } else {
+            throttleMetadata = "trigger=\(trigger)"
+        }
         TokenBarTelemetry.timing(
             "runtime.refresh.stage.checkpoint_engine_run",
             startedAt: stageStarted,
-            metadata: "trigger=\(trigger)"
+            metadata: throttleMetadata
         )
         stageStarted = Date()
         await applyRetention(referenceDate: now)
@@ -331,11 +483,11 @@ final class TokenBarRuntimeModel: ObservableObject {
             metadata: "trigger=\(trigger)"
         )
         stageStarted = Date()
-        let state = await usageStore.state(referenceDate: now, calendar: Calendar(identifier: .gregorian))
+        let state = await usageStore.state(referenceDate: now, calendar: Calendar(identifier: .gregorian), includePrompts: false)
         TokenBarTelemetry.timing(
             "runtime.refresh.stage.usage_store_state",
             startedAt: stageStarted,
-            metadata: "trigger=\(trigger) events=\(state.events.count) prompts=\(state.prompts.count) warnings=\(state.warnings.count)"
+            metadata: "trigger=\(trigger) events=\(state.eventCount) prompts=\(state.promptCount) warnings=\(state.warnings.count)"
         )
         stageStarted = Date()
         let statuses = await collectStatuses(sources: sources, referenceDate: now)
@@ -347,20 +499,26 @@ final class TokenBarRuntimeModel: ObservableObject {
         stageStarted = Date()
 
         events = state.events
-        prompts = state.prompts
+        prompts = []
+        publishCollectionMetadata(from: state)
         sourceWarnings = state.warnings
         snapshot = state.snapshot
         lastCheckpoint = state.lastCheckpoint
         if selectedProjectName == nil {
             selectedProjectName = state.snapshot.topProjects.first?.name
         }
-        projectDetail = selectedProjectName.flatMap {
-            UsageAggregator.makeProjectDetail(
-                projectName: $0,
-                from: state.events,
-                referenceDate: now,
-                calendar: Calendar(identifier: .gregorian)
-            )
+        let detailProjectName = selectedProjectName
+        let computedProjectDetail = await Self.computeProjectDetailSnapshot(
+            projectName: detailProjectName,
+            from: state.events,
+            referenceDate: now,
+            calendar: Calendar(identifier: .gregorian)
+        )
+        if selectedProjectName == detailProjectName {
+            projectDetail = computedProjectDetail
+            if let computedProjectDetail {
+                cacheProjectDetail(computedProjectDetail)
+            }
         }
         TokenBarTelemetry.timing(
             "runtime.refresh.stage.publish_snapshot",
@@ -396,7 +554,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         TokenBarTelemetry.timing(
             "runtime.refresh.stage.popover_snapshot",
             startedAt: stageStarted,
-            metadata: "trigger=\(trigger) events=\(events.count)"
+            metadata: "trigger=\(trigger) events=\(eventCount)"
         )
         TokenBarTelemetry.timing(
             "runtime.refresh.stage.publish_diagnostics",
@@ -405,127 +563,500 @@ final class TokenBarRuntimeModel: ObservableObject {
         )
         TokenBarTelemetry.event(
             "runtime.refresh",
-            metadata: "trigger=\(trigger) events=\(state.events.count) prompts=\(state.prompts.count) warnings=\(state.warnings.count)",
+            metadata: "trigger=\(trigger) events=\(state.eventCount) prompts=\(state.promptCount) warnings=\(state.warnings.count)",
             success: state.lastRebuildError == nil,
             elapsed: Date().timeIntervalSince(started),
             error: state.lastRebuildError
         )
     }
 
-    func openProject(named name: String) {
-        let started = Date()
-        if selectedProjectName == name, projectDetail?.projectName == name, projectSwitchState == nil {
-            mainRoute = .project(name)
-            TokenBarTelemetry.event("project.open.skip_current", metadata: "project=\(name)", success: true)
+    func startInitialIndexing(reason: String = "manual") {
+        guard !indexingState.isActive else {
+            TokenBarTelemetry.event(
+                "initial_index.start.skip",
+                metadata: "reason=\(reason) phase=\(indexingState.phase.rawValue)",
+                success: true
+            )
             return
         }
 
-        projectSwitchTask?.cancel()
-        let switchID = UUID()
-        TokenBarTelemetry.event("project.open", metadata: "project=\(name)", success: true)
-        selectedProjectName = name
-        mainRoute = .project(name)
-        let previewNow = Date()
-        projectDetail = UsageAggregator.makeProjectDetail(
-            projectName: name,
-            from: events,
-            referenceDate: previewNow,
-            calendar: Calendar(identifier: .gregorian)
+        initialIndexTask?.cancel()
+        let startedAt = Date()
+        let sources = builtInSources
+        indexingState = TokenBarIndexingState(
+            phase: .discovering,
+            sources: sources.map {
+                TokenBarIndexingSourceState(
+                    sourceName: $0.sourceName,
+                    rootPath: $0.rootPath,
+                    phase: .pending,
+                    discoveredFileCount: 0,
+                    eventsIndexed: 0,
+                    promptsIndexed: 0,
+                    message: nil
+                )
+            },
+            startedAt: startedAt,
+            endedAt: nil,
+            checkedFiles: 0,
+            eventsIndexed: 0,
+            promptsIndexed: 0,
+            message: "Background indexing with a \(Int(IndexingResourceBudget.backgroundCPUPercent))% CPU budget",
+            activeSourceName: nil,
+            cpuBudgetPercent: IndexingResourceBudget.backgroundCPUPercent
         )
-        projectSwitchState = ProjectSwitchState(id: switchID, projectName: name, phase: .snap, progress: 0.08)
+        refreshState = .refreshing
+        diagnostics = diagnosticsSnapshot(
+            from: diagnostics,
+            statuses: diagnostics.dataSourceStatuses,
+            refreshState: .refreshing,
+            rebuildError: nil
+        )
+        TokenBarTelemetry.event(
+            "initial_index.start",
+            metadata: "reason=\(reason) sources=\(sources.count) cpu_budget=\(IndexingResourceBudget.backgroundCPUPercent)",
+            success: true
+        )
 
-        projectSwitchTask = Task {
-            let now = Date()
-            async let stateTask = usageStore.state(referenceDate: now, calendar: Calendar(identifier: .gregorian))
+        initialIndexTask = Task(priority: .background) { [weak self] in
+            await self?.runInitialIndexing(sources: sources, startedAt: startedAt, reason: reason)
+        }
+    }
 
-            func publishSwitch(phase: ProjectSwitchPhase, progress: Double) async {
-                await MainActor.run {
-                    guard self.projectSwitchState?.id == switchID else { return }
-                    self.projectSwitchState = ProjectSwitchState(
-                        id: switchID,
-                        projectName: name,
-                        phase: phase,
-                        progress: progress
-                    )
-                }
+    func pauseInitialIndexing() {
+        guard indexingState.isActive else { return }
+        initialIndexTask?.cancel()
+        initialIndexTask = nil
+        var next = indexingState
+        next.phase = .paused
+        next.endedAt = Date()
+        next.message = "Indexing paused"
+        next.activeSourceName = nil
+        next.sources = next.sources.map { source in
+            var mutable = source
+            if mutable.phase == .scanning {
+                mutable.phase = .pending
+                mutable.message = "paused"
             }
+            return mutable
+        }
+        indexingState = next
+        refreshState = RefreshStateEvaluator.evaluate(
+            now: Date(),
+            lastIndexedAt: diagnostics.lastIndexedAt,
+            lastRebuildError: diagnostics.rebuildError,
+            refreshInterval: refreshInterval
+        )
+        TokenBarTelemetry.event(
+            "initial_index.pause",
+            metadata: "events=\(next.eventsIndexed) files=\(next.checkedFiles)",
+            success: true
+        )
+    }
 
-            func sleepUntil(_ targetElapsed: TimeInterval) async {
-                let remaining = targetElapsed - Date().timeIntervalSince(started)
-                guard remaining > 0 else { return }
-                try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
-            }
+    func retryInitialIndexing() {
+        TokenBarTelemetry.event("initial_index.retry", success: true)
+        startInitialIndexing(reason: "retry")
+    }
 
-            let steps: [(time: TimeInterval, phase: ProjectSwitchPhase, progress: Double)] = [
-                (0.08, .snap, 0.16),
-                (0.15, .stream, 0.26),
-                (0.25, .stream, 0.40),
-                (0.36, .stream, 0.56),
-                (0.50, .stream, 0.74),
-                (0.64, .stream, 0.90),
-            ]
+    private func runInitialIndexing(
+        sources: [any InspectableUsageEventSource],
+        startedAt: Date,
+        reason: String
+    ) async {
+        let calendar = Calendar(identifier: .gregorian)
+        let resourceThrottle = IndexingResourceThrottle(budget: .background)
+        var statuses: [UsageDataSourceStatus] = []
+        var totalFiles = 0
+        var totalEvents = 0
+        var totalPrompts = 0
+        var lastError: String?
+        var wroteCheckpoint = false
 
-            for step in steps {
-                await sleepUntil(step.time)
-                guard !Task.isCancelled else { return }
-                await publishSwitch(phase: step.phase, progress: step.progress)
-            }
-
-            let state = await stateTask
-            let detail = UsageAggregator.makeProjectDetail(
-                projectName: name,
-                from: state.events,
-                referenceDate: now,
-                calendar: Calendar(identifier: .gregorian)
+        for source in sources {
+            guard !Task.isCancelled else { return }
+            markIndexingSource(source.sourceName, phase: .scanning, message: "Discovering")
+            let sourceStarted = Date()
+            let referenceDate = Date()
+            let status = await Task.detached(priority: .utility) {
+                await source.status(referenceDate: referenceDate, calendar: calendar)
+            }.value
+            statuses.removeAll { $0.sourceName == status.sourceName }
+            statuses.append(status)
+            statuses.sort { $0.sourceName < $1.sourceName }
+            totalFiles += status.discoveredFileCount
+            updateIndexingSource(
+                status.sourceName,
+                phase: .scanning,
+                discoveredFileCount: status.discoveredFileCount,
+                message: sourceMessage(for: status)
             )
+            publishIndexingTotals(
+                phase: .indexing,
+                checkedFiles: totalFiles,
+                eventsIndexed: totalEvents,
+                promptsIndexed: totalPrompts,
+                activeSourceName: status.sourceName,
+                message: "Indexing \(status.sourceName)"
+            )
+            publishDiagnosticsDuringInitialIndex(statuses: statuses, rebuildError: nil)
 
-            await MainActor.run {
-                guard self.projectSwitchState?.id == switchID else { return }
-                prompts = state.prompts
-                events = state.events
-                sourceWarnings = state.warnings
-                projectDetail = detail
-                popoverSnapshot = TokenBarPopoverSnapshot.make(
-                    snapshot: snapshot,
-                    events: events,
-                    diagnostics: diagnostics,
-                    referenceDate: now,
-                    calendar: Calendar(identifier: .gregorian)
+            guard status.isReadable || status.discoveredFileCount > 0 else {
+                updateIndexingSource(
+                    status.sourceName,
+                    phase: .skipped,
+                    discoveredFileCount: status.discoveredFileCount,
+                    message: "Not found or no access"
                 )
-            }
-
-            await sleepUntil(0.72)
-            guard !Task.isCancelled else { return }
-
-            await MainActor.run {
-                guard self.projectSwitchState?.id == switchID else { return }
-                projectSwitchState = ProjectSwitchState(id: switchID, projectName: name, phase: .done, progress: 1.0)
                 TokenBarTelemetry.event(
-                    "project.detail.load",
-                    metadata: "project=\(name) events=\(detail?.summary.totalTokens ?? 0)",
-                    success: detail != nil,
-                    elapsed: Date().timeIntervalSince(started)
+                    "initial_index.source.skip",
+                    metadata: "reason=\(reason) source=\(status.sourceName) path=\(status.rootPath)",
+                    success: true,
+                    elapsed: Date().timeIntervalSince(sourceStarted)
+                )
+                continue
+            }
+
+            do {
+                let watermarks = (try? await usageStore.watermarks()) ?? [:]
+                let result = try await Task.detached(priority: .background) {
+                    if let budgetedSource = source as? any ResourceBudgetedUsageEventSource {
+                        return try await budgetedSource.loadEvents(
+                            since: watermarks,
+                            referenceDate: referenceDate,
+                            calendar: calendar,
+                            resourceThrottle: resourceThrottle
+                        )
+                    }
+                    let started = Date()
+                    let result = try await source.loadEvents(
+                        since: watermarks,
+                        referenceDate: referenceDate,
+                        calendar: calendar
+                    )
+                    await resourceThrottle.rest(afterActive: Date().timeIntervalSince(started))
+                    return result
+                }.value
+                guard !Task.isCancelled else { return }
+                let state = await usageStore.applyCheckpoint(
+                    trigger: "initial-index:\(status.sourceName)",
+                    startedAt: sourceStarted,
+                    endedAt: Date(),
+                    events: result.events,
+                    prompts: result.prompts,
+                    nextWatermarks: result.nextWatermarks,
+                    warnings: result.warnings,
+                    referenceDate: referenceDate,
+                    calendar: calendar,
+                    lastRebuildError: nil,
+                    stateIncludesPrompts: false
+                )
+                wroteCheckpoint = true
+                totalEvents += result.events.count
+                totalPrompts += result.prompts.count
+                updateIndexingSource(
+                    status.sourceName,
+                    phase: .indexed,
+                    discoveredFileCount: status.discoveredFileCount,
+                    eventsIndexed: result.events.count,
+                    promptsIndexed: result.prompts.count,
+                    message: result.events.isEmpty && result.prompts.isEmpty ? "No usage records found" : "Indexed"
+                )
+                publishStoreState(
+                    state,
+                    statuses: statuses,
+                    referenceDate: referenceDate,
+                    refreshState: .refreshing
+                )
+                publishIndexingTotals(
+                    phase: .indexing,
+                    checkedFiles: totalFiles,
+                    eventsIndexed: totalEvents,
+                    promptsIndexed: totalPrompts,
+                    activeSourceName: status.sourceName,
+                    message: "Indexed \(status.sourceName)"
+                )
+                TokenBarTelemetry.event(
+                    "initial_index.source",
+                    metadata: "reason=\(reason) source=\(status.sourceName) files=\(status.discoveredFileCount) events=\(result.events.count) prompts=\(result.prompts.count)",
+                    success: true,
+                    elapsed: Date().timeIntervalSince(sourceStarted)
+                )
+            } catch {
+                let message = describe(error)
+                lastError = [lastError, "\(status.sourceName): \(message)"].compactMap { $0 }.joined(separator: " | ")
+                updateIndexingSource(
+                    status.sourceName,
+                    phase: .failed,
+                    discoveredFileCount: status.discoveredFileCount,
+                    message: message
+                )
+                publishDiagnosticsDuringInitialIndex(statuses: statuses, rebuildError: lastError)
+                TokenBarTelemetry.event(
+                    "initial_index.source",
+                    metadata: "reason=\(reason) source=\(status.sourceName) files=\(status.discoveredFileCount)",
+                    success: false,
+                    elapsed: Date().timeIntervalSince(sourceStarted),
+                    error: message
                 )
             }
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                if self.projectSwitchState?.id == switchID {
-                    self.projectSwitchState = nil
+        }
+
+        guard !Task.isCancelled else { return }
+        let finishedAt = Date()
+        let finalState: UsageStoreState
+        if lastError != nil || !wroteCheckpoint {
+            finalState = await usageStore.applyCheckpoint(
+                trigger: "initial-index:summary",
+                startedAt: startedAt,
+                endedAt: finishedAt,
+                events: [],
+                prompts: [],
+                warnings: [],
+                referenceDate: finishedAt,
+                calendar: calendar,
+                lastRebuildError: lastError,
+                stateIncludesPrompts: false
+            )
+        } else {
+            finalState = await usageStore.state(referenceDate: finishedAt, calendar: calendar, includePrompts: false)
+        }
+        publishStoreState(
+            finalState,
+            statuses: statuses,
+            referenceDate: finishedAt,
+            refreshState: RefreshStateEvaluator.evaluate(
+                now: finishedAt,
+                lastIndexedAt: finalState.lastIndexedAt,
+                lastRebuildError: lastError ?? finalState.lastRebuildError,
+                refreshInterval: refreshInterval
+            ),
+            rebuildError: lastError ?? finalState.lastRebuildError
+        )
+        publishIndexingTotals(
+            phase: lastError == nil ? .completed : .failed,
+            checkedFiles: totalFiles,
+            eventsIndexed: totalEvents,
+            promptsIndexed: totalPrompts,
+            activeSourceName: nil,
+            message: lastError == nil ? "Local index ready" : "Indexing finished with source issues",
+            endedAt: finishedAt
+        )
+        TokenBarTelemetry.event(
+            "initial_index.complete",
+            metadata: "reason=\(reason) sources=\(sources.count) files=\(totalFiles) events=\(totalEvents) prompts=\(totalPrompts)",
+            success: lastError == nil,
+            elapsed: finishedAt.timeIntervalSince(startedAt),
+            error: lastError
+        )
+        if lastError == nil {
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(2))
+                await MainActor.run {
+                    guard let self, self.indexingState.phase == .completed else { return }
+                    self.indexingState = .idle
                 }
             }
         }
     }
 
+    func navigate(to route: TokenBarMainRoute, source: String) {
+        let started = Date()
+        if mainRoute == route {
+            TokenBarTelemetry.event(
+                "main.route.select.skip",
+                metadata: "source=\(source) route=\(route.telemetryName)",
+                success: true,
+                elapsed: Date().timeIntervalSince(started)
+            )
+            return
+        }
+
+        TokenBarTelemetry.event(
+            "main.route.select",
+            metadata: "source=\(source) from=\(mainRoute.telemetryName) to=\(route.telemetryName)",
+            success: true
+        )
+        mainRoute = route
+        TokenBarTelemetry.timing(
+            "main.route.select.publish",
+            startedAt: started,
+            metadata: "source=\(source) route=\(route.telemetryName)"
+        )
+    }
+
+    func openProject(named name: String, source: String = "project.list") {
+        let started = Date()
+        if selectedProjectName == name, projectDetail?.projectName == name {
+            navigate(to: .project(name), source: source)
+            TokenBarTelemetry.event(
+                "project.open.skip_current",
+                metadata: "source=\(source) project=\(name)",
+                success: true,
+                elapsed: Date().timeIntervalSince(started)
+            )
+            return
+        }
+
+        projectDetailTask?.cancel()
+        let signature = eventSignature
+        let cachedDetail = projectDetailCache[name].flatMap { cached -> ProjectDetailSnapshot? in
+            cached.eventsSignature == signature ? cached.detail : nil
+        }
+        TokenBarTelemetry.event(
+            "project.open",
+            metadata: "source=\(source) project=\(name) cached=\(cachedDetail != nil) events=\(eventCount)",
+            success: true
+        )
+        selectedProjectName = name
+        if let cachedDetail {
+            projectDetail = cachedDetail
+        } else if projectDetail?.projectName != name {
+            projectDetail = nil
+        }
+        navigate(to: .project(name), source: source)
+        TokenBarTelemetry.timing(
+            "project.open.route_ready",
+            startedAt: started,
+            metadata: "source=\(source) project=\(name) cached=\(cachedDetail != nil)"
+        )
+
+        projectDetailTask = Task {
+            let now = Date()
+            guard cachedDetail == nil else {
+                TokenBarTelemetry.event(
+                    "project.open.detail.skip",
+                    metadata: "source=\(source) project=\(name) reason=cache",
+                    success: true,
+                    elapsed: Date().timeIntervalSince(started)
+                )
+                return
+            }
+
+            let loadStarted = Date()
+            let projectEvents = (try? await usageStore.projectEvents(projectName: name)) ?? []
+            guard !Task.isCancelled else { return }
+            TokenBarTelemetry.timing(
+                "project.open.project_events",
+                startedAt: loadStarted,
+                metadata: "source=\(source) project=\(name) events=\(projectEvents.count)"
+            )
+
+            let detailStarted = Date()
+            let detail = await Task.detached(priority: .utility) {
+                Self.makeProjectDetailSnapshot(
+                    projectName: name,
+                    from: projectEvents,
+                    referenceDate: now,
+                    calendar: Calendar(identifier: .gregorian)
+                )
+            }.value
+            guard !Task.isCancelled else { return }
+            TokenBarTelemetry.timing(
+                "project.open.compute_detail",
+                startedAt: detailStarted,
+                metadata: "source=\(source) project=\(name) events=\(projectEvents.count)"
+            )
+
+            guard selectedProjectName == name else { return }
+            projectDetail = detail
+            if let detail {
+                cacheProjectDetail(detail)
+            }
+            TokenBarTelemetry.event(
+                "project.detail.load",
+                metadata: "source=\(source) project=\(name) events=\(projectEvents.count) tokens=\(detail?.summary.totalTokens ?? 0)",
+                success: detail != nil,
+                elapsed: Date().timeIntervalSince(started)
+            )
+        }
+    }
+
     func projectDetail(for name: String) async -> ProjectDetailSnapshot? {
         let now = Date()
-        let state = await usageStore.state(referenceDate: now, calendar: Calendar(identifier: .gregorian))
-        return UsageAggregator.makeProjectDetail(
+        let projectEvents = (try? await usageStore.projectEvents(projectName: name)) ?? []
+        return Self.makeProjectDetailSnapshot(
             projectName: name,
-            from: state.events,
+            from: projectEvents,
             referenceDate: now,
             calendar: Calendar(identifier: .gregorian)
         )
+    }
+
+    func projectEvents(for name: String) async -> [UsageEvent] {
+        (try? await usageStore.projectEvents(projectName: name)) ?? []
+    }
+
+    func projectPromptHistory(for name: String, includeContent: Bool = true) async -> [PromptRecord] {
+        (try? await usageStore.projectPromptHistory(projectName: name, includeContent: includeContent)) ?? []
+    }
+
+    private func cacheProjectDetail(_ detail: ProjectDetailSnapshot) {
+        projectDetailCache[detail.projectName] = CachedProjectDetail(
+            detail: detail,
+            eventsSignature: eventSignature
+        )
+    }
+
+    nonisolated private static func eventsSignature(_ events: [UsageEvent]) -> String {
+        "\(events.count)|\(events.last?.id ?? "none")"
+    }
+
+    nonisolated private static func computeProjectDetailSnapshot(
+        projectName: String?,
+        from events: [UsageEvent],
+        referenceDate: Date,
+        calendar: Calendar
+    ) async -> ProjectDetailSnapshot? {
+        guard let projectName else { return nil }
+        return await Task.detached(priority: .utility) {
+            Self.makeProjectDetailSnapshot(
+                projectName: projectName,
+                from: events,
+                referenceDate: referenceDate,
+                calendar: calendar
+            )
+        }.value
+    }
+
+    nonisolated private static func makeProjectDetailSnapshot(
+        projectName: String,
+        from events: [UsageEvent],
+        referenceDate: Date,
+        calendar: Calendar
+    ) -> ProjectDetailSnapshot? {
+        let started = Date()
+        let projectEvents = events.filter { $0.projectName == projectName }
+        let days = Self.projectDetailWindowDays(
+            projectEvents: projectEvents,
+            referenceDate: referenceDate,
+            calendar: calendar
+        )
+        let detail = UsageAggregator.makeProjectDetail(
+            projectName: projectName,
+            from: events,
+            referenceDate: referenceDate,
+            calendar: calendar,
+            days: days
+        )
+        TokenBarTelemetry.timing(
+            "project.detail.compute_snapshot",
+            startedAt: started,
+            metadata: "project=\(projectName) project_events=\(projectEvents.count) window_days=\(days) detail=\(detail != nil)"
+        )
+        return detail
+    }
+
+    nonisolated private static func projectDetailWindowDays(
+        projectEvents: [UsageEvent],
+        referenceDate: Date,
+        calendar: Calendar
+    ) -> Int {
+        guard let earliest = projectEvents.map(\.timestamp).min() else { return 30 }
+        let earliestDay = calendar.startOfDay(for: earliest)
+        let todayStart = calendar.startOfDay(for: referenceDate)
+        let rawDays = calendar.dateComponents([.day], from: earliestDay, to: todayStart).day ?? 29
+        return max(30, rawDays + 1)
     }
 
     func promptHistory(for projectName: String) -> [PromptRecord] {
@@ -637,66 +1168,140 @@ final class TokenBarRuntimeModel: ObservableObject {
 
     func addCustomSource(
         name: String,
+        engine: CustomSourceEngine,
         directory: String,
         globPattern: String,
         format: CustomSourceFormat,
         displayAgent: String,
         fieldMapping: CustomSourceFieldMapping = .default
-    ) async {
+    ) async -> CustomSourceSaveResult {
         let started = Date()
+        let effectiveGlobPattern = globPattern.isEmpty ? engine.defaultGlobPattern : globPattern
+        let existing = customSources.first {
+            CustomSourceRecord.sourcePathKey(directory: $0.directory, globPattern: $0.globPattern)
+            == CustomSourceRecord.sourcePathKey(directory: directory, globPattern: effectiveGlobPattern)
+        }
         let source = CustomSourceRecord(
+            id: existing?.id ?? UUID().uuidString,
             name: name.isEmpty ? "Custom Source" : name,
+            engine: engine,
             directory: directory,
-            globPattern: globPattern.isEmpty ? "**/*.jsonl" : globPattern,
+            globPattern: effectiveGlobPattern,
             format: format,
-            displayAgent: displayAgent.isEmpty ? "Custom" : displayAgent,
-            fieldMapping: fieldMapping
+            displayAgent: displayAgent.isEmpty ? engine.displayName : displayAgent,
+            enabled: existing?.enabled ?? true,
+            fieldMapping: fieldMapping,
+            createdAt: existing?.createdAt ?? Date()
         )
         do {
             try await usageStore.upsertCustomSource(source)
+            if let existing,
+               existing.engine != source.engine || existing.format != source.format || existing.fieldMapping != source.fieldMapping {
+                try await usageStore.deleteCustomSourceData(id: existing.id)
+                await publishCurrentStoreState(refreshState: .refreshing)
+            }
             customSources = await loadCustomSources()
-            await restartFileWatcher()
-            await refresh(trigger: "custom-source-add")
-            TokenBarTelemetry.event("custom_source.add", metadata: "name=\(source.name)", success: true, elapsed: Date().timeIntervalSince(started))
+            scheduleCustomSourceRefresh(trigger: existing == nil ? "custom-source-add" : "custom-source-deduplicate")
+            TokenBarTelemetry.event(
+                "custom_source.add",
+                metadata: "name=\(source.name) deduplicated=\(existing != nil)",
+                success: true,
+                elapsed: Date().timeIntervalSince(started)
+            )
+            return .saved(name: source.name, deduplicated: existing != nil)
         } catch {
             TokenBarTelemetry.event("custom_source.add", metadata: "name=\(source.name)", success: false, elapsed: Date().timeIntervalSince(started), error: String(describing: error))
+            return .failed(String(describing: error))
         }
     }
 
     func updateCustomSource(
         _ source: CustomSourceRecord,
         name: String,
+        engine: CustomSourceEngine,
         directory: String,
         globPattern: String,
         format: CustomSourceFormat,
         displayAgent: String,
         fieldMapping: CustomSourceFieldMapping
-    ) async {
+    ) async -> CustomSourceSaveResult {
         let started = Date()
         var updated = source
         updated.name = name
+        updated.engine = engine
         updated.directory = directory
-        updated.globPattern = globPattern.isEmpty ? "**/*.jsonl" : globPattern
+        updated.globPattern = globPattern.isEmpty ? engine.defaultGlobPattern : globPattern
         updated.format = format
-        updated.displayAgent = displayAgent
+        updated.displayAgent = displayAgent.isEmpty ? engine.displayName : displayAgent
         updated.fieldMapping = fieldMapping
+        let requiresReindex = source.engine != updated.engine
+            || source.sourcePathKey != updated.sourcePathKey
+            || source.format != updated.format
+            || source.fieldMapping != updated.fieldMapping
         do {
             try await usageStore.upsertCustomSource(updated)
+            if requiresReindex {
+                try await usageStore.deleteCustomSourceData(id: source.id)
+            }
             customSources = await loadCustomSources()
-            await restartFileWatcher()
-            await refresh(trigger: "custom-source-update")
-            TokenBarTelemetry.event("custom_source.update", metadata: "name=\(updated.name)", success: true, elapsed: Date().timeIntervalSince(started))
+            let deduplicated = !customSources.contains { $0.id == source.id }
+            if requiresReindex, deduplicated,
+               let retained = customSources.first(where: { $0.sourcePathKey == updated.sourcePathKey }) {
+                try await usageStore.deleteCustomSourceData(id: retained.id)
+            }
+            if requiresReindex {
+                await publishCurrentStoreState(refreshState: .refreshing)
+            }
+            scheduleCustomSourceRefresh(trigger: deduplicated ? "custom-source-deduplicate" : "custom-source-update")
+            TokenBarTelemetry.event(
+                "custom_source.update",
+                metadata: "name=\(updated.name) deduplicated=\(deduplicated) reindex=\(requiresReindex)",
+                success: true,
+                elapsed: Date().timeIntervalSince(started)
+            )
+            return .saved(name: updated.name, deduplicated: deduplicated)
         } catch {
             TokenBarTelemetry.event("custom_source.update", metadata: "name=\(updated.name)", success: false, elapsed: Date().timeIntervalSince(started), error: String(describing: error))
+            return .failed(String(describing: error))
+        }
+    }
+
+    private func scheduleCustomSourceRefresh(trigger: String) {
+        Task { [weak self] in
+            guard let self else { return }
+            await self.restartFileWatcher()
+            await self.refresh(trigger: trigger)
         }
     }
 
     func reparseAllSources() async {
         let started = Date()
+        guard !indexingState.isActive else {
+            TokenBarTelemetry.event(
+                "diagnostics.reparse_all.skip",
+                metadata: "reason=initial_index_active",
+                success: true,
+                elapsed: Date().timeIntervalSince(started)
+            )
+            return
+        }
         do {
             try await usageStore.reparseAll()
-            await refresh(trigger: "reparse-all")
-            TokenBarTelemetry.event("diagnostics.reparse_all", success: true, elapsed: Date().timeIntervalSince(started))
+            let referenceDate = Date()
+            let state = await usageStore.state(referenceDate: referenceDate, calendar: Calendar(identifier: .gregorian), includePrompts: false)
+            publishStoreState(
+                state,
+                statuses: diagnostics.dataSourceStatuses,
+                referenceDate: referenceDate,
+                refreshState: .refreshing
+            )
+            startInitialIndexing(reason: "reparse-all")
+            TokenBarTelemetry.event(
+                "diagnostics.reparse_all",
+                metadata: "mode=background cpu_budget=\(IndexingResourceBudget.backgroundCPUPercent)",
+                success: true,
+                elapsed: Date().timeIntervalSince(started)
+            )
         } catch {
             TokenBarTelemetry.event("diagnostics.reparse_all", success: false, elapsed: Date().timeIntervalSince(started), error: String(describing: error))
         }
@@ -729,18 +1334,25 @@ final class TokenBarRuntimeModel: ObservableObject {
 
     private func applyRetentionAndReload(referenceDate: Date) async {
         await applyRetention(referenceDate: referenceDate)
-        let state = await usageStore.state(referenceDate: referenceDate, calendar: Calendar(identifier: .gregorian))
+        let state = await usageStore.state(referenceDate: referenceDate, calendar: Calendar(identifier: .gregorian), includePrompts: false)
         events = state.events
-        prompts = state.prompts
+        prompts = []
+        publishCollectionMetadata(from: state)
         snapshot = state.snapshot
         lastCheckpoint = state.lastCheckpoint
         if let selectedProjectName {
-            projectDetail = UsageAggregator.makeProjectDetail(
+            let computedProjectDetail = await Self.computeProjectDetailSnapshot(
                 projectName: selectedProjectName,
                 from: state.events,
                 referenceDate: referenceDate,
                 calendar: Calendar(identifier: .gregorian)
             )
+            if self.selectedProjectName == selectedProjectName {
+                projectDetail = computedProjectDetail
+                if let computedProjectDetail {
+                    cacheProjectDetail(computedProjectDetail)
+                }
+            }
         }
         popoverSnapshot = TokenBarPopoverSnapshot.make(
             snapshot: snapshot,
@@ -782,6 +1394,10 @@ final class TokenBarRuntimeModel: ObservableObject {
         updated.enabled.toggle()
         do {
             try await usageStore.upsertCustomSource(updated)
+            if !updated.enabled {
+                try await usageStore.deleteCustomSourceData(id: updated.id)
+                await publishCurrentStoreState(refreshState: .refreshing)
+            }
             customSources = await loadCustomSources()
             await restartFileWatcher()
             await refresh(trigger: "custom-source-toggle")
@@ -796,12 +1412,187 @@ final class TokenBarRuntimeModel: ObservableObject {
         do {
             try await usageStore.deleteCustomSource(id: id)
             customSources = await loadCustomSources()
+            await publishCurrentStoreState(refreshState: .refreshing)
             await restartFileWatcher()
             await refresh(trigger: "custom-source-remove")
             TokenBarTelemetry.event("custom_source.remove", metadata: "id=\(id)", success: true, elapsed: Date().timeIntervalSince(started))
         } catch {
             TokenBarTelemetry.event("custom_source.remove", metadata: "id=\(id)", success: false, elapsed: Date().timeIntervalSince(started), error: String(describing: error))
         }
+    }
+
+    private func publishCurrentStoreState(refreshState nextRefreshState: RefreshState) async {
+        let referenceDate = Date()
+        let state = await usageStore.state(referenceDate: referenceDate, calendar: Calendar(identifier: .gregorian), includePrompts: false)
+        publishStoreState(
+            state,
+            statuses: diagnostics.dataSourceStatuses,
+            referenceDate: referenceDate,
+            refreshState: nextRefreshState
+        )
+    }
+
+    private func publishCollectionMetadata(from state: UsageStoreState) {
+        eventCount = state.eventCount
+        promptCount = state.promptCount
+        eventSignature = state.eventSignature
+        promptSignature = state.promptSignature
+    }
+
+    private func publishStoreState(
+        _ state: UsageStoreState,
+        statuses: [UsageDataSourceStatus],
+        referenceDate: Date,
+        refreshState nextRefreshState: RefreshState,
+        rebuildError: String? = nil
+    ) {
+        events = state.events
+        prompts = []
+        publishCollectionMetadata(from: state)
+        sourceWarnings = state.warnings
+        snapshot = state.snapshot
+        lastCheckpoint = state.lastCheckpoint
+        if selectedProjectName == nil {
+            selectedProjectName = state.snapshot.topProjects.first?.name
+        }
+        projectDetail = selectedProjectName.flatMap {
+            Self.makeProjectDetailSnapshot(
+                projectName: $0,
+                from: state.events,
+                referenceDate: referenceDate,
+                calendar: Calendar(identifier: .gregorian)
+            )
+        }
+        refreshState = nextRefreshState
+        diagnostics = DiagnosticsSnapshot(
+            dataSourceStatuses: statuses.sorted { $0.sourceName < $1.sourceName },
+            lastIndexedAt: state.lastIndexedAt,
+            lastUIRefreshAt: referenceDate,
+            lastCheckpointID: state.lastCheckpoint?.id,
+            lastCheckpointEventsAdded: state.lastCheckpoint?.eventsAdded ?? 0,
+            lastCheckpointPromptsAdded: state.lastCheckpoint?.promptsAdded ?? 0,
+            parserWarningCount: state.warnings.count,
+            refreshState: nextRefreshState,
+            rebuildError: rebuildError ?? state.lastRebuildError
+        )
+        popoverSnapshot = TokenBarPopoverSnapshot.make(
+            snapshot: snapshot,
+            events: events,
+            diagnostics: diagnostics,
+            referenceDate: referenceDate,
+            calendar: Calendar(identifier: .gregorian)
+        )
+    }
+
+    private func diagnosticsSnapshot(
+        from current: DiagnosticsSnapshot,
+        statuses: [UsageDataSourceStatus],
+        refreshState nextRefreshState: RefreshState,
+        rebuildError: String?
+    ) -> DiagnosticsSnapshot {
+        DiagnosticsSnapshot(
+            dataSourceStatuses: statuses.sorted { $0.sourceName < $1.sourceName },
+            lastIndexedAt: current.lastIndexedAt,
+            lastUIRefreshAt: Date(),
+            lastCheckpointID: current.lastCheckpointID,
+            lastCheckpointEventsAdded: current.lastCheckpointEventsAdded,
+            lastCheckpointPromptsAdded: current.lastCheckpointPromptsAdded,
+            parserWarningCount: current.parserWarningCount,
+            refreshState: nextRefreshState,
+            rebuildError: rebuildError
+        )
+    }
+
+    private func publishDiagnosticsDuringInitialIndex(statuses: [UsageDataSourceStatus], rebuildError: String?) {
+        refreshState = .refreshing
+        diagnostics = diagnosticsSnapshot(
+            from: diagnostics,
+            statuses: statuses,
+            refreshState: .refreshing,
+            rebuildError: rebuildError
+        )
+        popoverSnapshot = TokenBarPopoverSnapshot.make(
+            snapshot: snapshot,
+            events: events,
+            diagnostics: diagnostics
+        )
+    }
+
+    private func markIndexingSource(
+        _ sourceName: String,
+        phase: TokenBarIndexingSourcePhase,
+        message: String?
+    ) {
+        updateIndexingSource(sourceName, phase: phase, message: message)
+        publishIndexingTotals(
+            phase: .indexing,
+            checkedFiles: indexingState.checkedFiles,
+            eventsIndexed: indexingState.eventsIndexed,
+            promptsIndexed: indexingState.promptsIndexed,
+            activeSourceName: sourceName,
+            message: message
+        )
+    }
+
+    private func updateIndexingSource(
+        _ sourceName: String,
+        phase: TokenBarIndexingSourcePhase? = nil,
+        discoveredFileCount: Int? = nil,
+        eventsIndexed: Int? = nil,
+        promptsIndexed: Int? = nil,
+        message: String? = nil
+    ) {
+        var next = indexingState
+        next.sources = next.sources.map { source in
+            guard source.sourceName == sourceName else { return source }
+            var mutable = source
+            if let phase { mutable.phase = phase }
+            if let discoveredFileCount { mutable.discoveredFileCount = discoveredFileCount }
+            if let eventsIndexed { mutable.eventsIndexed = eventsIndexed }
+            if let promptsIndexed { mutable.promptsIndexed = promptsIndexed }
+            if let message { mutable.message = message }
+            return mutable
+        }
+        indexingState = next
+    }
+
+    private func publishIndexingTotals(
+        phase: TokenBarIndexingPhase,
+        checkedFiles: Int,
+        eventsIndexed: Int,
+        promptsIndexed: Int,
+        activeSourceName: String?,
+        message: String?,
+        endedAt: Date? = nil
+    ) {
+        var next = indexingState
+        next.phase = phase
+        next.checkedFiles = checkedFiles
+        next.eventsIndexed = eventsIndexed
+        next.promptsIndexed = promptsIndexed
+        next.activeSourceName = activeSourceName
+        next.message = message
+        if let endedAt {
+            next.endedAt = endedAt
+        }
+        indexingState = next
+    }
+
+    private func sourceMessage(for status: UsageDataSourceStatus) -> String {
+        if !status.isReadable && status.discoveredFileCount == 0 {
+            return "Not found or no access"
+        }
+        if status.discoveredFileCount == 0 {
+            return "No files discovered"
+        }
+        return "\(status.discoveredFileCount.formatted()) files discovered"
+    }
+
+    private func describe(_ error: Error) -> String {
+        if let localized = error as? LocalizedError, let description = localized.errorDescription {
+            return description
+        }
+        return String(describing: error)
     }
 
     private func collectStatuses(sources: [any InspectableUsageEventSource], referenceDate: Date) async -> [UsageDataSourceStatus] {
@@ -827,18 +1618,38 @@ final class TokenBarRuntimeModel: ObservableObject {
         return builtInSources + custom
     }
 
-    private func checkpointEngine(for sources: [any InspectableUsageEventSource]) -> CheckpointEngine {
+    private func checkpointEngine(
+        for sources: [any InspectableUsageEventSource],
+        resourceThrottle: IndexingResourceThrottle? = nil
+    ) -> CheckpointEngine {
+        if let resourceThrottle {
+            return CheckpointEngine(
+                sources: sources,
+                store: usageStore,
+                resourceThrottle: resourceThrottle,
+                stateIncludesPrompts: false
+            )
+        }
         let signature = sources.map { "\($0.sourceName):\($0.rootPath)" }.joined(separator: "|")
         if checkpointSourceSignature != signature {
             checkpointSourceSignature = signature
-            checkpointEngine = CheckpointEngine(sources: sources, store: usageStore)
+            checkpointEngine = CheckpointEngine(sources: sources, store: usageStore, stateIncludesPrompts: false)
         }
         if let checkpointEngine {
             return checkpointEngine
         }
-        let engine = CheckpointEngine(sources: sources, store: usageStore)
+        let engine = CheckpointEngine(sources: sources, store: usageStore, stateIncludesPrompts: false)
         checkpointEngine = engine
         return engine
+    }
+
+    private func backgroundThrottle(for trigger: String) -> IndexingResourceThrottle? {
+        switch trigger {
+        case "bootstrap-background", "reparse-all", "file-change":
+            IndexingResourceThrottle(budget: .background)
+        default:
+            nil
+        }
     }
 
     private func restartFileWatcher() async {
@@ -852,16 +1663,30 @@ final class TokenBarRuntimeModel: ObservableObject {
             await self?.handleSourceChange()
         }
         fileWatcher = watcher
+        let watcherStartedAt = Date()
+        lastAutomaticRefreshAt = watcherStartedAt
+        suppressSourceChangesUntil = watcherStartedAt.addingTimeInterval(15)
         try? await watcher.start()
     }
 
     private func handleSourceChange() async {
+        let now = Date()
+        if let suppressSourceChangesUntil, now < suppressSourceChangesUntil {
+            TokenBarTelemetry.event(
+                "runtime.source_change.skip_startup_grace",
+                metadata: "remaining_ms=\(Int(suppressSourceChangesUntil.timeIntervalSince(now) * 1000))",
+                success: true
+            )
+            updateRefreshState()
+            return
+        }
+        suppressSourceChangesUntil = nil
+
         guard let cadence = refreshInterval.refreshCadence else {
             updateRefreshState()
             return
         }
 
-        let now = Date()
         let elapsed = lastAutomaticRefreshAt.map { now.timeIntervalSince($0) } ?? cadence
         guard elapsed < cadence else {
             await refresh(trigger: "file-change")

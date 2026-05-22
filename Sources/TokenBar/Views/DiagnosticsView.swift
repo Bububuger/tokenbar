@@ -12,6 +12,15 @@ struct DiagnosticsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: TokenBarStyle.sectionSpacing) {
             header
+            if runtimeModel.indexingState.isVisible {
+                TokenBarIndexingStatusCard(
+                    state: runtimeModel.indexingState,
+                    showActions: true,
+                    onPause: { runtimeModel.pauseInitialIndexing() },
+                    onRetry: { runtimeModel.retryInitialIndexing() },
+                    onOpenDiagnostics: nil
+                )
+            }
             dataAuditCard
             sourcesCard
             warningsCard
@@ -54,6 +63,7 @@ struct DiagnosticsView: View {
                 }
                 .buttonStyle(DiagnosticsButtonStyle(kind: .primary))
                 .disabled(runtimeModel.refreshState == .refreshing)
+                .help("Incrementally checks known sources and imports only new records since the last watermark.")
 
                 Button {
                     TokenBarTelemetry.event("diagnostics.reparse_all.confirm.open", success: true)
@@ -63,6 +73,7 @@ struct DiagnosticsView: View {
                 }
                 .buttonStyle(DiagnosticsButtonStyle(kind: .ghost))
                 .disabled(runtimeModel.refreshState == .refreshing)
+                .help("Clears parser watermarks and rebuilds token totals from the raw local source files.")
                 .confirmationDialog("Reparse all sources?",
                                     isPresented: $showReparseConfirm) {
                     Button("Reparse", role: .destructive) {
@@ -81,6 +92,7 @@ struct DiagnosticsView: View {
                     Label("Wipe prompts", systemImage: "trash")
                 }
                 .buttonStyle(DiagnosticsButtonStyle(kind: .ghost))
+                .help("Deletes stored prompt text only. Token totals, sessions, and costs remain.")
                 .alert("Wipe all stored prompt text?", isPresented: $showWipeConfirm) {
                     TextField("Type WIPE to confirm", text: $wipeAck)
                     Button("Cancel", role: .cancel) {}
@@ -98,7 +110,7 @@ struct DiagnosticsView: View {
 
     private func estimatedReparseSeconds() -> Int {
         // 1 second per ~100 events, min 1s, capped at 60s for UI display
-        max(1, min(runtimeModel.events.count / 100, 60))
+        max(1, min(runtimeModel.eventCount / 100, 60))
     }
 
     private var dataAuditCard: some View {
@@ -113,7 +125,7 @@ struct DiagnosticsView: View {
                             .foregroundStyle(TokenBarStyle.muted)
                     }
                     Spacer()
-                    Text("\(runtimeModel.events.count.formatted()) events")
+                    Text("\(runtimeModel.eventCount.formatted()) events")
                         .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
                         .foregroundStyle(TokenBarStyle.faint)
                         .padding(.horizontal, 9)
@@ -352,6 +364,19 @@ struct DiagnosticsView: View {
     }
 
     private var sourceRows: [SourceRow] {
+        if !runtimeModel.indexingState.sources.isEmpty {
+            return runtimeModel.indexingState.sources.map { source in
+                SourceRow(
+                    name: source.sourceName,
+                    path: source.rootPath,
+                    state: sourceRowState(source.phase),
+                    events: source.eventsIndexed > 0 ? "\(source.eventsIndexed.formatted()) events" : "\(source.discoveredFileCount.formatted()) files",
+                    when: source.phase.rawValue,
+                    note: source.message
+                )
+            }
+        }
+
         if runtimeModel.diagnostics.dataSourceStatuses.isEmpty {
             return [
                 SourceRow(name: "Claude Code", path: "~/.claude/projects/", state: .pending, events: "pending", when: "after refresh", note: nil),
@@ -383,6 +408,21 @@ struct DiagnosticsView: View {
         }
     }
 
+    private func sourceRowState(_ phase: TokenBarIndexingSourcePhase) -> SourceRow.State {
+        switch phase {
+        case .pending:
+            .pending
+        case .scanning:
+            .pending
+        case .indexed:
+            .ok
+        case .skipped:
+            .off
+        case .failed:
+            .err
+        }
+    }
+
     private var checkpointRows: [CheckpointRow] {
         guard let checkpoint = runtimeModel.lastCheckpoint else {
             return [
@@ -401,8 +441,8 @@ struct DiagnosticsView: View {
         let uiRefresh = CheckpointRow(
             when: tokenbarRelativeTime(runtimeModel.diagnostics.lastUIRefreshAt),
             trigger: "ui-refresh",
-            events: "\(runtimeModel.events.count.formatted())",
-            prompts: "\(runtimeModel.prompts.count.formatted())",
+            events: "\(runtimeModel.eventCount.formatted())",
+            prompts: "\(runtimeModel.promptCount.formatted())",
             warnings: "\(runtimeModel.diagnostics.parserWarningCount)",
             duration: "derived"
         )

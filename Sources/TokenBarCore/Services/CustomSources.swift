@@ -46,21 +46,37 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
         var nextWatermarks: [SourceWatermark] = []
         var warnings: [UsageSourceWarning] = []
 
-        for file in files {
-            let format = record.format == .auto
-                ? SourceFormatDetector.detect(fileURL: file)
-                : record.format
-            switch format {
-            case .claudeCodeJSONL:
-                let slug = file.deletingLastPathComponent().lastPathComponent
+        switch record.engine {
+        case .claudeCode:
+            for file in files {
+                if shouldUseMappedJSONL(for: file) {
+                    let incremental = try JSONLIncrementalReader.read(
+                        fileURL: file,
+                        sourceName: sourceName,
+                        agent: .custom,
+                        watermark: watermarks[file.path],
+                        now: referenceDate
+                    )
+                    let result = parseMappedJSONL(lines: incremental.lines, fileURL: file)
+                    events.append(contentsOf: result.events.map { customMappedEvent($0) })
+                    nextWatermarks.append(customWatermark(
+                        from: incremental.nextWatermark,
+                        lastEventId: result.events.last?.id ?? watermarks[file.path]?.lastEventId,
+                        agent: .custom
+                    ))
+                    warnings.append(contentsOf: incremental.warnings)
+                    warnings.append(contentsOf: result.warnings)
+                    continue
+                }
+
                 let incremental = try JSONLIncrementalReader.read(
                     fileURL: file,
                     sourceName: sourceName,
-                    agent: .custom,
+                    agent: record.engine.agentKind,
                     watermark: watermarks[file.path],
                     now: referenceDate
                 )
-                let result = ClaudeUsageParser.parse(lines: incremental.lines, fileURL: file, fallbackProjectSlug: slug)
+                let result = ClaudeUsageParser.parse(lines: incremental.lines, fileURL: file, fallbackProjectSlug: claudeFallbackProjectSlug(for: file))
                 events.append(contentsOf: result.events.map { customEvent($0) })
                 prompts.append(contentsOf: result.prompts.map { customPrompt($0) })
                 nextWatermarks.append(customWatermark(from: incremental.nextWatermark, lastEventId: result.events.last?.id ?? watermarks[file.path]?.lastEventId))
@@ -68,11 +84,33 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
                 warnings.append(contentsOf: result.warnings.map {
                     UsageSourceWarning(sourceName: sourceName, sourcePath: $0.sourcePath, lineNumber: $0.lineNumber, message: $0.message)
                 })
-            case .codexJSONL:
+            }
+        case .codex:
+            for file in files {
+                if shouldUseMappedJSONL(for: file) {
+                    let incremental = try JSONLIncrementalReader.read(
+                        fileURL: file,
+                        sourceName: sourceName,
+                        agent: .custom,
+                        watermark: watermarks[file.path],
+                        now: referenceDate
+                    )
+                    let result = parseMappedJSONL(lines: incremental.lines, fileURL: file)
+                    events.append(contentsOf: result.events.map { customMappedEvent($0) })
+                    nextWatermarks.append(customWatermark(
+                        from: incremental.nextWatermark,
+                        lastEventId: result.events.last?.id ?? watermarks[file.path]?.lastEventId,
+                        agent: .custom
+                    ))
+                    warnings.append(contentsOf: incremental.warnings)
+                    warnings.append(contentsOf: result.warnings)
+                    continue
+                }
+
                 let incremental = try JSONLIncrementalReader.read(
                     fileURL: file,
                     sourceName: sourceName,
-                    agent: .custom,
+                    agent: record.engine.agentKind,
                     watermark: watermarks[file.path],
                     now: referenceDate
                 )
@@ -85,31 +123,18 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
                 warnings.append(contentsOf: result.warnings.map {
                     UsageSourceWarning(sourceName: sourceName, sourcePath: $0.sourcePath, lineNumber: $0.lineNumber, message: $0.message)
                 })
-            case .auto, .unknown:
-                let incremental = try JSONLIncrementalReader.read(
-                    fileURL: file,
-                    sourceName: sourceName,
-                    agent: .custom,
-                    watermark: watermarks[file.path],
-                    now: referenceDate
-                )
-                let mappedResult = parseMappedJSONL(lines: incremental.lines, fileURL: file)
-                events.append(contentsOf: mappedResult.events.map { customEvent($0) })
-                warnings.append(contentsOf: incremental.warnings)
-                warnings.append(contentsOf: mappedResult.warnings.map {
+            }
+        case .hermes:
+            for file in files {
+                let result = try HermesUsageParser.parse(databaseURL: file, watermark: watermarks[file.path])
+                events.append(contentsOf: result.events.map { customEvent($0) })
+                prompts.append(contentsOf: result.prompts.map { customPrompt($0) })
+                nextWatermarks.append(contentsOf: result.nextWatermarks.map {
+                    customWatermark(from: $0, lastEventId: $0.lastEventId)
+                })
+                warnings.append(contentsOf: result.warnings.map {
                     UsageSourceWarning(sourceName: sourceName, sourcePath: $0.sourcePath, lineNumber: $0.lineNumber, message: $0.message)
                 })
-                nextWatermarks.append(customWatermark(from: incremental.nextWatermark, lastEventId: mappedResult.events.last?.id))
-                if mappedResult.events.isEmpty && mappedResult.warnings.isEmpty {
-                    warnings.append(
-                        UsageSourceWarning(
-                            sourceName: sourceName,
-                            sourcePath: file.path,
-                            lineNumber: nil,
-                            message: "custom source format could not be detected"
-                        )
-                    )
-                }
             }
         }
 
@@ -133,6 +158,10 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
     }
 
     private func discoverFiles() throws -> [URL] {
+        if record.engine == .hermes {
+            return discoverHermesDatabases()
+        }
+
         let root = URL(fileURLWithPath: expandedDirectory, isDirectory: true)
         guard fileManager.fileExists(atPath: root.path) else {
             return []
@@ -150,7 +179,7 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
             }
             return enumerator.compactMap { item -> URL? in
                 guard let url = item as? URL else { return nil }
-                guard url.lastPathComponent.hasSuffix(suffix) else { return nil }
+                guard fileMatches(url, globPattern: record.globPattern, fallbackSuffix: suffix) else { return nil }
                 return url
             }.sorted { $0.path < $1.path }
         }
@@ -160,11 +189,69 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
         )
-        .filter { $0.lastPathComponent.hasSuffix(suffix) }
+        .filter { fileMatches($0, globPattern: record.globPattern, fallbackSuffix: suffix) }
         .sorted { $0.path < $1.path }
     }
 
+    private func discoverHermesDatabases() -> [URL] {
+        let root = URL(fileURLWithPath: expandedDirectory, isDirectory: true)
+        var isDirectory = ObjCBool(false)
+        guard fileManager.fileExists(atPath: root.path, isDirectory: &isDirectory) else {
+            return []
+        }
+        if !isDirectory.boolValue {
+            return fileManager.isReadableFile(atPath: root.path) ? [root] : []
+        }
+        let stateDB = root.appendingPathComponent("state.db")
+        return fileManager.isReadableFile(atPath: stateDB.path) ? [stateDB] : []
+    }
+
+    private func fileMatches(_ url: URL, globPattern: String, fallbackSuffix: String) -> Bool {
+        let name = url.lastPathComponent
+        if globPattern.contains("rollout-*.jsonl") {
+            return name.hasPrefix("rollout-") && name.hasSuffix(".jsonl")
+        }
+        if globPattern.contains("*.jsonl") || globPattern.contains("**") {
+            return name.hasSuffix(".jsonl")
+        }
+        if globPattern.contains("*") {
+            return name.hasSuffix(fallbackSuffix)
+        }
+        return name == globPattern
+    }
+
+    private func claudeFallbackProjectSlug(for file: URL) -> String {
+        let components = file.pathComponents
+        if let subagentsIndex = components.lastIndex(of: "subagents"),
+           subagentsIndex >= 2 {
+            return components[subagentsIndex - 2]
+        }
+        let parent = file.deletingLastPathComponent()
+        return parent.lastPathComponent == "subagents"
+            ? parent.deletingLastPathComponent().lastPathComponent
+            : parent.lastPathComponent
+    }
+
     private func customEvent(_ event: UsageEvent) -> UsageEvent {
+        UsageEvent(
+            id: "custom:\(record.id):\(event.id)",
+            agent: record.engine.agentKind,
+            projectPath: event.projectPath,
+            projectName: event.projectName,
+            sessionId: event.sessionId,
+            timestamp: event.timestamp,
+            inputTokens: event.inputTokens,
+            outputTokens: event.outputTokens,
+            cacheTokens: event.cacheTokens,
+            reasoningTokens: event.reasoningTokens,
+            modelName: event.modelName,
+            sourcePath: event.sourcePath,
+            parser: record.engine.parserKind,
+            confidence: event.confidence
+        )
+    }
+
+    private func customMappedEvent(_ event: UsageEvent) -> UsageEvent {
         UsageEvent(
             id: "custom:\(record.id):\(event.id)",
             agent: .custom,
@@ -187,7 +274,7 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
         PromptRecord(
             id: "custom:\(record.id):\(prompt.id)",
             eventId: prompt.eventId.map { "custom:\(record.id):\($0)" },
-            agent: .custom,
+            agent: record.engine.agentKind,
             projectName: prompt.projectName,
             sessionId: prompt.sessionId,
             timestamp: prompt.timestamp,
@@ -197,16 +284,32 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
         )
     }
 
-    private func customWatermark(from watermark: SourceWatermark, lastEventId: String?) -> SourceWatermark {
+    private func customWatermark(
+        from watermark: SourceWatermark,
+        lastEventId: String?,
+        agent: AgentKind? = nil
+    ) -> SourceWatermark {
         SourceWatermark(
             sourcePath: watermark.sourcePath,
-            agent: .custom,
+            agent: agent ?? record.engine.agentKind,
             lastMtime: watermark.lastMtime,
             lastByteOffset: watermark.lastByteOffset,
             lastEventId: lastEventId.map { "custom:\(record.id):\($0)" },
             lastInode: watermark.lastInode,
             updatedAt: watermark.updatedAt
         )
+    }
+
+    private func shouldUseMappedJSONL(for file: URL) -> Bool {
+        guard record.engine != .hermes else { return false }
+        switch record.format {
+        case .unknown:
+            return true
+        case .auto:
+            return SourceFormatDetector.detect(fileURL: file) == .unknown
+        case .claudeCodeJSONL, .codexJSONL:
+            return false
+        }
     }
 
     private func parseMappedJSONL(

@@ -5,20 +5,26 @@ import TokenBarCore
 struct ContentView: View {
     @EnvironmentObject private var runtimeModel: TokenBarRuntimeModel
     @State private var selectedRange = "30d"
+    @State private var sidebarProjectsCache: [UsageBreakdown] = []
+    @State private var isSidebarProjectsLoading = false
+    @State private var hasSidebarProjectsLoaded = false
+    @State private var overviewRangeMetrics = TokenBarOverviewRangeMetrics.empty
+    @State private var isOverviewRangeUpdating = false
+    @State private var projectPageData: ProjectPageData?
     @AppStorage("tokenbar.pricingOverrides") private var pricingOverridesJSON = "{}"
 
     var body: some View {
         HStack(spacing: 0) {
             TokenBarSidebar(
                 activeRoute: runtimeModel.mainRoute,
-                projects: runtimeModel.snapshot.topProjects,
+                projects: sidebarProjects,
                 warnings: warningCount,
                 refreshState: runtimeModel.refreshState,
                 lastIndexedAt: runtimeModel.diagnostics.lastIndexedAt,
-                onSelectOverview: { runtimeModel.mainRoute = .today },
-                onSelectDiagnostics: { runtimeModel.mainRoute = .diagnostics },
-                onSelectSettings: { runtimeModel.mainRoute = .settings },
-                onSelectProject: { runtimeModel.openProject(named: $0) }
+                onSelectOverview: { runtimeModel.navigate(to: .today, source: "sidebar.overview") },
+                onSelectDiagnostics: { runtimeModel.navigate(to: .diagnostics, source: "sidebar.diagnostics") },
+                onSelectSettings: { runtimeModel.navigate(to: .settings, source: "sidebar.settings") },
+                onSelectProject: { runtimeModel.openProject(named: $0, source: "sidebar.project") }
             )
             .frame(width: TokenBarStyle.sidebarWidth)
 
@@ -30,16 +36,23 @@ struct ContentView: View {
                 if runtimeModel.mainRoute == .settings {
                     SettingsView()
                         .environmentObject(runtimeModel)
+                        .onAppear { recordRouteViewAppear(.settings) }
                 } else {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: TokenBarStyle.sectionSpacing) {
+                        LazyVStack(alignment: .leading, spacing: TokenBarStyle.sectionSpacing) {
                             switch runtimeModel.mainRoute {
                             case .today:
-                                OverviewPage(selectedRange: $selectedRange)
+                                OverviewPage(
+                                    selectedRange: $selectedRange,
+                                    rangeMetrics: $overviewRangeMetrics,
+                                    isRangeLoading: $isOverviewRangeUpdating
+                                )
                                     .environmentObject(runtimeModel)
+                                    .onAppear { recordRouteViewAppear(.today) }
                             case .diagnostics:
                                 DiagnosticsView()
                                     .environmentObject(runtimeModel)
+                                    .onAppear { recordRouteViewAppear(.diagnostics) }
                             case .settings:
                                 EmptyView()
                             case .project(let projectName):
@@ -54,6 +67,21 @@ struct ContentView: View {
         .frame(minWidth: 1280, minHeight: 980)
         .foregroundStyle(TokenBarStyle.foreground)
         .task { await runtimeModel.bootstrapIfNeeded() }
+        .task(id: sidebarProjectsTaskID) {
+            await rebuildSidebarProjects(reason: "range_or_events")
+        }
+        .task(id: overviewRangeMetricsTaskID) {
+            await rebuildOverviewRangeMetrics(reason: "range_or_events")
+        }
+        .task(id: projectPageTaskID) {
+            await rebuildProjectPageData(reason: "route_range_events")
+        }
+        .onAppear {
+            recordRouteRender(runtimeModel.mainRoute, previous: nil, reason: "appear")
+        }
+        .onChange(of: runtimeModel.mainRoute) { oldValue, newValue in
+            recordRouteRender(newValue, previous: oldValue, reason: "change")
+        }
     }
 
     private var warningCount: Int {
@@ -61,51 +89,354 @@ struct ContentView: View {
         runtimeModel.snapshot.warningCount
     }
 
-    @ViewBuilder
-    private func projectPage(_ projectName: String) -> some View {
-        ZStack(alignment: .top) {
-            if let detail = runtimeModel.projectDetail, detail.projectName == projectName {
-                ZStack(alignment: .bottomTrailing) {
-                    ProjectDetailView(
-                        detail: detail,
-                        projectPath: runtimeModel.projectPath(for: projectName),
-                        allTimeSummary: runtimeModel.allTimeSummary(for: projectName),
-                        allTimeCost: tokenbarCostProjection(events: runtimeModel.events.filter { $0.projectName == projectName }),
-                        prompts: runtimeModel.promptHistory(for: projectName),
-                        events: runtimeModel.events,
-                        refreshState: runtimeModel.refreshState,
-                        switchState: runtimeModel.projectSwitchState?.projectName == projectName ? runtimeModel.projectSwitchState : nil,
-                        todayCost: tokenbarEstimatedCost(events: runtimeModel.events, days: 1),
-                        rangeCost: tokenbarEstimatedCost(events: runtimeModel.events, days: 30),
-                        todayTokens: runtimeModel.snapshot.today.totalTokens,
-                        totalTokens: runtimeModel.snapshot.last30Summary.totalTokens,
-                        todaySessions: tokenbarSessionCount(runtimeModel.events),
-                        onRefresh: { Task { await runtimeModel.refresh() } },
-                        onBack: { runtimeModel.mainRoute = .today }
-                    )
-                    if let state = runtimeModel.projectSwitchState, state.projectName == projectName {
-                        ProjectSwitchBadge(state: state)
-                            .padding(.trailing, 8)
-                            .padding(.bottom, 8)
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    }
-                }
-            } else {
-                ProjectDetailPendingView(projectName: projectName)
-                    .task(id: projectName) {
-                        if runtimeModel.projectSwitchState?.projectName != projectName {
-                            runtimeModel.openProject(named: projectName)
-                        }
-                    }
-            }
+    private var sidebarProjects: [UsageBreakdown] {
+        if !hasSidebarProjectsLoaded {
+            return runtimeModel.snapshot.topProjects
+        }
+        return sidebarProjectsCache
+    }
 
-            if let state = runtimeModel.projectSwitchState, state.projectName == projectName {
-                ProjectSwitchRail(progress: state.progress)
-                    .opacity(state.phase == .done ? 0 : 1)
-            }
+    private var sidebarProjectsTaskID: String {
+        "\(selectedRange)|\(runtimeModel.eventSignature)"
+    }
+
+    private var overviewRangeMetricsTaskID: String {
+        "\(selectedRange)|\(runtimeModel.eventSignature)"
+    }
+
+    private var projectPageTaskID: String {
+        guard case .project(let projectName) = runtimeModel.mainRoute else {
+            return "none|\(runtimeModel.mainRoute.telemetryName)"
+        }
+        return [
+            projectName,
+            selectedRange,
+            runtimeModel.eventSignature,
+            runtimeModel.promptSignature,
+            pricingOverridesJSON,
+        ].joined(separator: "|")
+    }
+
+    @MainActor
+    private func rebuildSidebarProjects(reason: String) async {
+        let events = runtimeModel.events
+        let selection = selectedRange
+        let started = Date()
+        isSidebarProjectsLoading = true
+        TokenBarTelemetry.event(
+            "main.sidebar.projects.compute.begin",
+            metadata: "reason=\(reason) range=\(selection) events=\(events.count)",
+            success: true
+        )
+        let rows = await Task.detached(priority: .utility) {
+            tokenbarBreakdowns(
+                events: events,
+                selection: selection,
+                kind: .project,
+                topCount: nil
+            )
+        }.value
+        guard selection == selectedRange else { return }
+        sidebarProjectsCache = rows
+        hasSidebarProjectsLoaded = true
+        isSidebarProjectsLoading = false
+        TokenBarTelemetry.timing(
+            "main.sidebar.projects.compute",
+            startedAt: started,
+            metadata: "range=\(selection) rows=\(rows.count) events=\(events.count)"
+        )
+    }
+
+    @MainActor
+    private func rebuildOverviewRangeMetrics(reason: String) async {
+        let events = runtimeModel.events
+        let selection = selectedRange
+        let started = Date()
+        TokenBarTelemetry.event(
+            "main.overview.range.compute.begin",
+            metadata: "reason=\(reason) range=\(selection) events=\(events.count)",
+            success: true
+        )
+        let metrics = await Task.detached(priority: .userInitiated) {
+            TokenBarOverviewRangeMetrics.make(events: events, selection: selection)
+        }.value
+        guard !Task.isCancelled, selection == selectedRange else { return }
+        overviewRangeMetrics = metrics
+        TokenBarTelemetry.timing(
+            "main.overview.range.compute",
+            startedAt: started,
+            metadata: "range=\(selection) days=\(metrics.days.count) projects=\(metrics.projectCount) agents=\(metrics.agentCount) models=\(metrics.modelRows.count) tokens=\(metrics.summary.totalTokens)"
+        )
+        withAnimation(.easeOut(duration: 0.14)) {
+            isOverviewRangeUpdating = false
         }
     }
 
+    @MainActor
+    private func rebuildProjectPageData(reason: String) async {
+        guard case .project(let projectName) = runtimeModel.mainRoute else {
+            return
+        }
+
+        let selection = selectedRange
+        let pricingOverrides = pricingOverridesJSON
+        let eventSignature = runtimeModel.eventSignature
+        let promptSignature = runtimeModel.promptSignature
+        if projectPageData?.isCurrent(
+            projectName: projectName,
+            selection: selection,
+            eventSignature: eventSignature,
+            promptSignature: promptSignature,
+            pricingOverridesJSON: pricingOverrides
+        ) == true {
+            return
+        }
+
+        let started = Date()
+        TokenBarTelemetry.event(
+            "main.project.page_data.compute.begin",
+            metadata: "reason=\(reason) project=\(projectName) range=\(selection) events=\(runtimeModel.eventCount) prompts=\(runtimeModel.promptCount)",
+            success: true
+        )
+        let projectEvents = await runtimeModel.projectEvents(for: projectName)
+        let projectPrompts = await runtimeModel.projectPromptHistory(for: projectName, includeContent: true)
+        guard !Task.isCancelled else { return }
+        let data = await Task.detached(priority: .userInitiated) {
+            ProjectPageData.make(
+                projectName: projectName,
+                selection: selection,
+                events: projectEvents,
+                prompts: projectPrompts,
+                pricingOverridesJSON: pricingOverrides
+            )
+        }.value
+        guard !Task.isCancelled,
+              case .project(let currentProjectName) = runtimeModel.mainRoute,
+              currentProjectName == projectName,
+              selectedRange == selection,
+              runtimeModel.eventSignature == eventSignature,
+              runtimeModel.promptSignature == promptSignature,
+              pricingOverridesJSON == pricingOverrides else {
+            return
+        }
+        projectPageData = data
+        TokenBarTelemetry.timing(
+            "main.project.page_data.compute",
+            startedAt: started,
+            metadata: "project=\(projectName) range=\(selection) project_events=\(data.events.count) prompts=\(data.prompts.count)"
+        )
+    }
+
+    @ViewBuilder
+    private func projectPage(_ projectName: String) -> some View {
+        if let detail = runtimeModel.projectDetail, detail.projectName == projectName {
+            let pageData = projectPageData?.isCurrent(
+                projectName: projectName,
+                selection: selectedRange,
+                eventSignature: runtimeModel.eventSignature,
+                promptSignature: runtimeModel.promptSignature,
+                pricingOverridesJSON: pricingOverridesJSON
+            ) == true
+                ? projectPageData
+                : ProjectPageData.placeholder(projectName: projectName, selection: selectedRange, detail: detail)
+            ProjectDetailView(
+                detail: detail,
+                projectPath: pageData?.projectPath,
+                allTimeSummary: pageData?.allTimeSummary ?? detail.summary,
+                allTimeCost: pageData?.allTimeCost ?? detail.estimatedCost,
+                prompts: pageData?.prompts ?? [],
+                events: pageData?.events ?? [],
+                selectedRange: $selectedRange,
+                refreshState: runtimeModel.refreshState,
+                todayCost: pageData?.todayCost ?? 0,
+                rangeCost: pageData?.rangeCost ?? detail.estimatedCost.totalCost,
+                todayTokens: pageData?.todayTokens ?? 0,
+                totalTokens: pageData?.totalTokens ?? detail.summary.totalTokens,
+                todaySessions: pageData?.todaySessions ?? detail.recentSessions.count,
+                onRefresh: { Task { await runtimeModel.refresh() } },
+                onBack: { runtimeModel.navigate(to: .today, source: "project.back") }
+            )
+            .id(projectName)
+            .onAppear { recordRouteViewAppear(.project(projectName)) }
+        } else {
+            ProjectDetailPendingView(projectName: projectName)
+                .onAppear {
+                    recordRouteViewAppear(.project(projectName))
+                    TokenBarTelemetry.event(
+                        "main.project.pending.appear",
+                        metadata: "project=\(projectName) events=\(runtimeModel.eventCount)",
+                        success: true
+                    )
+                }
+        }
+    }
+
+    private func recordRouteRender(_ route: TokenBarMainRoute, previous: TokenBarMainRoute?, reason: String) {
+        let started = Date()
+        let previousText = previous?.telemetryName ?? "none"
+        TokenBarTelemetry.event(
+            "main.route.render.begin",
+            metadata: "reason=\(reason) previous=\(previousText) route=\(route.telemetryName) range=\(selectedRange) events=\(runtimeModel.eventCount) sidebar_rows=\(sidebarProjects.count) sidebar_loading=\(isSidebarProjectsLoading)",
+            success: true
+        )
+        Task { @MainActor in
+            await Task.yield()
+            TokenBarTelemetry.timing(
+                "main.route.render.first_runloop",
+                startedAt: started,
+                metadata: "route=\(route.telemetryName)"
+            )
+            try? await Task.sleep(for: .milliseconds(16))
+            TokenBarTelemetry.timing(
+                "main.route.render.first_frame_16ms",
+                startedAt: started,
+                metadata: "route=\(route.telemetryName)"
+            )
+            try? await Task.sleep(for: .milliseconds(100))
+            TokenBarTelemetry.timing(
+                "main.route.render.settled_100ms",
+                startedAt: started,
+                metadata: "route=\(route.telemetryName)"
+            )
+        }
+    }
+
+    private func recordRouteViewAppear(_ route: TokenBarMainRoute) {
+        TokenBarTelemetry.event(
+            "main.route.view.appear",
+            metadata: "route=\(route.telemetryName) events=\(runtimeModel.eventCount) warnings=\(runtimeModel.snapshot.warningCount)",
+            success: true
+        )
+    }
+
+}
+
+private struct ProjectPageData: Sendable {
+    let projectName: String
+    let selection: String
+    let eventSignature: String
+    let promptSignature: String
+    let pricingOverridesJSON: String
+    let projectPath: String?
+    let allTimeSummary: UsageSummary
+    let allTimeCost: UsageCostProjection
+    let prompts: [PromptRecord]
+    let events: [UsageEvent]
+    let todayCost: Double
+    let rangeCost: Double
+    let todayTokens: Int
+    let totalTokens: Int
+    let todaySessions: Int
+
+    static func eventsSignature(_ events: [UsageEvent]) -> String {
+        "\(events.count)|\(events.last?.id ?? "none")"
+    }
+
+    static func promptsSignature(_ prompts: [PromptRecord]) -> String {
+        "\(prompts.count)|\(prompts.last?.id ?? "none")"
+    }
+
+    func isCurrent(
+        projectName: String,
+        selection: String,
+        eventSignature: String,
+        promptSignature: String,
+        pricingOverridesJSON: String
+    ) -> Bool {
+        self.projectName == projectName
+            && self.selection == selection
+            && self.eventSignature == eventSignature
+            && self.promptSignature == promptSignature
+            && self.pricingOverridesJSON == pricingOverridesJSON
+    }
+
+    static func placeholder(
+        projectName: String,
+        selection: String,
+        detail: ProjectDetailSnapshot
+    ) -> ProjectPageData {
+        ProjectPageData(
+            projectName: projectName,
+            selection: selection,
+            eventSignature: "placeholder",
+            promptSignature: "placeholder",
+            pricingOverridesJSON: "",
+            projectPath: nil,
+            allTimeSummary: detail.summary,
+            allTimeCost: detail.estimatedCost,
+            prompts: [],
+            events: [],
+            todayCost: 0,
+            rangeCost: detail.estimatedCost.totalCost,
+            todayTokens: 0,
+            totalTokens: detail.summary.totalTokens,
+            todaySessions: detail.recentSessions.count
+        )
+    }
+
+    static func make(
+        projectName: String,
+        selection: String,
+        events: [UsageEvent],
+        prompts: [PromptRecord],
+        pricingOverridesJSON: String
+    ) -> ProjectPageData {
+        var projectEvents: [UsageEvent] = []
+        projectEvents.reserveCapacity(min(events.count, 512))
+        var inputTokens = 0
+        var outputTokens = 0
+        var cacheTokens = 0
+        var latestPath: String?
+        var latestPathTimestamp = Date.distantPast
+
+        for event in events where event.projectName == projectName {
+            projectEvents.append(event)
+            inputTokens += event.inputTokens
+            outputTokens += event.outputTokens
+            cacheTokens += event.cacheTokens
+            if let projectPath = event.projectPath,
+               !projectPath.isEmpty,
+               event.timestamp > latestPathTimestamp {
+                latestPath = projectPath
+                latestPathTimestamp = event.timestamp
+            }
+        }
+
+        let projectPrompts = prompts
+            .filter { $0.projectName == projectName }
+            .sorted { lhs, rhs in
+                if lhs.timestamp == rhs.timestamp {
+                    return lhs.content.count > rhs.content.count
+                }
+                return lhs.timestamp > rhs.timestamp
+            }
+        let allTimeSummary = UsageSummary(
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+            cacheTokens: cacheTokens
+        )
+        let todayEvents = tokenbarEventsInLastDays(events: projectEvents)
+        let rangeEvents = tokenbarRangeEvents(events: projectEvents, selection: selection)
+        let rangeSummary = tokenbarSummary(rangeEvents)
+
+        return ProjectPageData(
+            projectName: projectName,
+            selection: selection,
+            eventSignature: eventsSignature(events),
+            promptSignature: promptsSignature(prompts),
+            pricingOverridesJSON: pricingOverridesJSON,
+            projectPath: latestPath,
+            allTimeSummary: allTimeSummary,
+            allTimeCost: tokenbarCostProjection(events: projectEvents),
+            prompts: projectPrompts,
+            events: projectEvents,
+            todayCost: tokenbarEstimatedCost(events: todayEvents),
+            rangeCost: tokenbarEstimatedCost(events: rangeEvents),
+            todayTokens: tokenbarSummary(todayEvents).totalTokens,
+            totalTokens: rangeSummary.totalTokens,
+            todaySessions: tokenbarSessionCount(projectEvents)
+        )
+    }
 }
 
 private struct ProjectDetailPendingView: View {
@@ -131,104 +462,6 @@ private struct ProjectDetailPendingView: View {
     }
 }
 
-struct ProjectSwitchRail: View {
-    let progress: Double
-    @State private var sweep = false
-
-    var body: some View {
-        GeometryReader { proxy in
-            let width = max(120, proxy.size.width * CGFloat(min(max(progress, 0.05), 1.0)))
-            let sweepWidth = min(width, 180)
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(TokenBarStyle.accent.opacity(0.14))
-                    .frame(height: 1)
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                TokenBarStyle.accent.opacity(0.0),
-                                TokenBarStyle.accent.opacity(0.95),
-                                TokenBarStyle.lime.opacity(0.95),
-                                TokenBarStyle.accent.opacity(0.0)
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(width: width, height: 2.5)
-                    .overlay(alignment: .leading) {
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.0),
-                                        Color.white.opacity(0.86),
-                                        TokenBarStyle.lime.opacity(0.0)
-                                    ],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .frame(width: sweepWidth, height: 2.5)
-                            .offset(x: sweep ? max(0, width - sweepWidth) : -sweepWidth * 0.65)
-                            .opacity(progress < 1 ? 0.9 : 0)
-                    }
-                    .shadow(color: TokenBarStyle.accent.opacity(0.6), radius: 8, y: 1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .frame(height: 3)
-        .animation(.easeInOut(duration: 0.16), value: progress)
-        .onAppear {
-            sweep = false
-            withAnimation(.linear(duration: 0.55).repeatForever(autoreverses: false)) {
-                sweep = true
-            }
-        }
-    }
-}
-
-private struct ProjectSwitchBadge: View {
-    let state: ProjectSwitchState
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Circle()
-                .fill(state.phase == .done ? TokenBarStyle.cache : TokenBarStyle.accent)
-                .frame(width: 6, height: 6)
-            Text(label)
-                .font(.system(size: 11.5, design: .monospaced))
-                .foregroundStyle(TokenBarStyle.muted)
-            Text(state.projectName)
-                .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
-                .foregroundStyle(TokenBarStyle.foreground)
-                .lineLimit(1)
-            if state.phase == .stream {
-                Text("\(Int((state.progress * 100).rounded()))%")
-                    .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(TokenBarStyle.lime)
-            }
-        }
-        .padding(.horizontal, 12)
-        .frame(height: 30)
-        .background(TokenBarStyle.surfaceRaised, in: Capsule())
-        .overlay(Capsule().stroke(TokenBarStyle.line, lineWidth: 1))
-        .shadow(color: Color.black.opacity(0.15), radius: 8, y: 4)
-    }
-
-    private var label: String {
-        switch state.phase {
-        case .snap:
-            "switching to"
-        case .stream:
-            "streaming"
-        case .done:
-            "live ·"
-        }
-    }
-}
-
 private struct TokenBarSidebar: View {
     let activeRoute: TokenBarMainRoute
     let projects: [UsageBreakdown]
@@ -239,6 +472,7 @@ private struct TokenBarSidebar: View {
     let onSelectDiagnostics: () -> Void
     let onSelectSettings: () -> Void
     let onSelectProject: (String) -> Void
+    @State private var projectSearchText = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -254,6 +488,7 @@ private struct TokenBarSidebar: View {
                     routeRow(icon: "waveform.path.ecg", title: "Diagnostics", value: warnings > 0 ? "\(warnings)" : "", selected: isDiagnostics, action: onSelectDiagnostics)
                     routeRow(icon: "gearshape", title: "Settings", value: "", selected: isSettings, action: onSelectSettings)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 16)
             .padding(.top, 18)
@@ -264,7 +499,7 @@ private struct TokenBarSidebar: View {
                     Image(systemName: "folder")
                     Text("Projects")
                     Spacer()
-                    Text("\(projects.count)")
+                    Text(projectCountLabel)
                         .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
                 }
                 .font(.system(size: 10.5, weight: .semibold))
@@ -272,43 +507,57 @@ private struct TokenBarSidebar: View {
                 .foregroundStyle(TokenBarStyle.faint)
                 .textCase(.uppercase)
 
+                sidebarSearchField
+
                 // CL-P1-012: scroll once project count exceeds the visible
                 // 12 slots so long workspaces stay reachable.
                 ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 1) {
-                    ForEach(projects) { project in
-                        Button {
-                            onSelectProject(project.name)
-                        } label: {
-                            HStack(spacing: 8) {
-                                Text(project.name)
-                                    .font(.system(size: 13, weight: selectedProject(project.name) ? .semibold : .regular))
-                                    .lineLimit(1)
-                                Spacer()
-                                Text(tokenbarTokens(project.summary.totalTokens))
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(TokenBarStyle.faint)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .fill(selectedProject(project.name)
-                                          ? Color(nsColor: .controlAccentColor).opacity(0.18)
-                                          : Color.clear)
-                            )
+                    LazyVStack(spacing: 1) {
+                        if filteredProjects.isEmpty {
+                            Text("No matching projects")
+                                .font(.caption)
+                                .foregroundStyle(TokenBarStyle.faint)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
                         }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(selectedProject(project.name) ? TokenBarStyle.foreground : TokenBarStyle.muted)
+                        ForEach(filteredProjects) { project in
+                            Button {
+                                onSelectProject(project.name)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Text(project.name)
+                                        .font(.system(size: 13, weight: selectedProject(project.name) ? .semibold : .regular))
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text(tokenbarTokens(project.summary.totalTokens))
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundStyle(TokenBarStyle.faint)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                                .background(
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .fill(selectedProject(project.name)
+                                              ? Color(nsColor: .controlAccentColor).opacity(0.18)
+                                              : Color.clear)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .foregroundStyle(selectedProject(project.name) ? TokenBarStyle.foreground : TokenBarStyle.muted)
+                        }
                     }
-                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: 360)
+                .frame(maxHeight: .infinity, alignment: .top)
             }
             .padding(.horizontal, 16)
             .padding(.top, 10)
-
-            Spacer()
+            .padding(.bottom, 10)
+            .frame(maxHeight: .infinity, alignment: .top)
 
             HStack(spacing: 8) {
                 Circle()
@@ -341,6 +590,45 @@ private struct TokenBarSidebar: View {
         activeRoute == .settings
     }
 
+    private var filteredProjects: [UsageBreakdown] {
+        let query = projectSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return projects }
+        return projects.filter { project in
+            project.name.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private var projectCountLabel: String {
+        projectSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "\(projects.count)"
+            : "\(filteredProjects.count)/\(projects.count)"
+    }
+
+    private var sidebarSearchField: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(TokenBarStyle.faint)
+            TextField("Search projects", text: $projectSearchText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .monospaced))
+            if !projectSearchText.isEmpty {
+                Button {
+                    projectSearchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(TokenBarStyle.faint)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 9)
+        .frame(height: 28)
+        .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
+    }
+
     private func selectedProject(_ name: String) -> Bool {
         if case .project(let projectName) = activeRoute {
             return projectName == name
@@ -369,6 +657,8 @@ private struct TokenBarSidebar: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(selected
@@ -383,6 +673,7 @@ private struct TokenBarSidebar: View {
             }
         }
         .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .foregroundStyle(selected ? TokenBarStyle.foreground : TokenBarStyle.muted)
     }
 }
@@ -390,76 +681,97 @@ private struct TokenBarSidebar: View {
 private struct OverviewPage: View {
     @EnvironmentObject private var runtimeModel: TokenBarRuntimeModel
     @Binding var selectedRange: String
+    @Binding var rangeMetrics: TokenBarOverviewRangeMetrics
+    @Binding var isRangeLoading: Bool
     @AppStorage("tokenbar.pricingOverrides") private var pricingOverridesJSON = "{}"
     /// CL-P0-012: which KPI (Total / Input / Output / Cache) is currently
     /// expanded into a detail drawer. `nil` = collapsed.
     @State private var expandedKPI: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: TokenBarStyle.sectionSpacing) {
-            pageHeader
-            // CL-P0-027: when no events and no custom sources, the user has
-            // pointed TokenBar at nothing — show onboarding instead of empty
-            // KPI/chart cards that look like data is broken.
-            if showOnboarding {
-                OnboardingCard(onOpenSettings: { runtimeModel.mainRoute = .settings })
-            } else {
-                kpiRow
-                if let expandedKPI {
-                    TokenBarKPIDetailDrawer(
-                        title: expandedKPI,
-                        today: kpiToday(expandedKPI),
-                        yesterday: kpiYesterday(expandedKPI),
-                        sevenDayAverage: kpiSevenDayAverage(expandedKPI),
-                        cost: expandedKPI == "Total" ? todayCost : nil,
-                        onClose: { withAnimation(.easeOut(duration: 0.18)) { self.expandedKPI = nil } }
+        ZStack(alignment: .topTrailing) {
+            VStack(alignment: .leading, spacing: TokenBarStyle.sectionSpacing) {
+                pageHeader
+                if runtimeModel.indexingState.isVisible {
+                    TokenBarIndexingStatusCard(
+                        state: runtimeModel.indexingState,
+                        onPause: { runtimeModel.pauseInitialIndexing() },
+                        onRetry: { runtimeModel.retryInitialIndexing() },
+                        onOpenDiagnostics: { runtimeModel.navigate(to: .diagnostics, source: "overview.initial_index") }
                     )
                 }
-                hourlyCard
-                RangeBarsCard(
-                    days: rangeDays,
-                    title: rangeTitle,
-                    subtitle: tokenbarRangeAvailabilityNote(selection: selectedRange, availableDays: runtimeModel.snapshot.last30Days.count)
-                )
-                HStack(alignment: .top, spacing: TokenBarStyle.sectionSpacing) {
-                    RankingCard(
-                        title: "Top projects",
-                        footnote: "\(min(runtimeModel.snapshot.topProjects.count, 5)) of \(runtimeModel.snapshot.topProjects.count)",
-                        rows: tokenbarRankingRows(
-                            rows: runtimeModel.snapshot.topProjects,
-                            events: runtimeModel.events,
-                            kind: .project,
-                            days: tokenbarDaysForRange(selectedRange)
-                        ),
-                        onSelect: { runtimeModel.openProject(named: $0) }
+                // CL-P0-027: when no events and no custom sources, the user has
+                // pointed TokenBar at nothing — show onboarding instead of empty
+                // KPI/chart cards that look like data is broken.
+                if showIndexingOnly {
+                    EmptyView()
+                } else if showOnboarding {
+                    OnboardingCard(onOpenSettings: { runtimeModel.navigate(to: .settings, source: "overview.onboarding") })
+                } else {
+                    kpiRow
+                    if let expandedKPI {
+                        TokenBarKPIDetailDrawer(
+                            title: expandedKPI,
+                            today: kpiToday(expandedKPI),
+                            yesterday: kpiYesterday(expandedKPI),
+                            sevenDayAverage: kpiSevenDayAverage(expandedKPI),
+                            cost: expandedKPI == "Total" ? todayCost : nil,
+                            onClose: { withAnimation(.easeOut(duration: 0.18)) { self.expandedKPI = nil } }
+                        )
+                    }
+                    hourlyCard
+                    RangeBarsCard(
+                        days: rangeMetrics.days,
+                        title: rangeTitle,
+                        subtitle: rangeMetrics.availabilityNote,
+                        summary: rangeMetrics.summary,
+                        promptCounts: [:]
                     )
-                    RankingCard(
-                        title: "Top agents",
-                        footnote: "\(runtimeModel.snapshot.topAgents.count) active",
-                        rows: tokenbarRankingRows(
-                            rows: runtimeModel.snapshot.topAgents,
-                            events: runtimeModel.events,
-                            kind: .agent,
-                            days: tokenbarDaysForRange(selectedRange)
-                        ),
-                        onSelect: nil
+                    HStack(alignment: .top, spacing: TokenBarStyle.sectionSpacing) {
+                        RankingCard(
+                            title: "Top projects",
+                            footnote: "\(rangeMetrics.projectRows.count) of \(rangeMetrics.projectCount)",
+                            rows: rangeMetrics.projectRows,
+                            onSelect: { runtimeModel.openProject(named: $0, source: "overview.ranking.project") }
+                        )
+                        RankingCard(
+                            title: "Top agents",
+                            footnote: "\(rangeMetrics.agentCount) active",
+                            rows: rangeMetrics.agentRows,
+                            onSelect: nil
+                        )
+                    }
+                    ModelBreakdownTable(
+                        title: "Model",
+                        subtitle: "Share of tokens · \(tokenbarRangeTitle(selectedRange).lowercased())",
+                        totalCost: tokenbarCompactCurrency(rangeMetrics.cost),
+                        rows: rangeMetrics.modelRows
                     )
                 }
-                ModelBreakdownTable(
-                    title: "Model",
-                    subtitle: "Share of tokens · \(tokenbarRangeTitle(selectedRange).lowercased())",
-                    totalCost: tokenbarCompactCurrency(rangeCost),
-                    rows: tokenbarModelBreakdowns(
-                        events: runtimeModel.events,
-                        days: tokenbarDaysForRange(selectedRange)
-                    )
-                )
             }
+            if isPageUpdating && !showIndexingOnly && !showOnboarding {
+                TokenBarPageUpdatingOverlay(label: "updating \(tokenbarRangeShortLabel(selectedRange))")
+            }
+        }
+        .animation(.easeOut(duration: 0.14), value: isPageUpdating)
+        .onChange(of: selectedRange) { oldValue, newValue in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isRangeLoading = true
+            }
+            TokenBarTelemetry.event(
+                "overview.range.select",
+                metadata: "from=\(oldValue) to=\(newValue) events=\(runtimeModel.eventCount)",
+                success: true
+            )
         }
     }
 
     private var showOnboarding: Bool {
-        runtimeModel.events.isEmpty && runtimeModel.customSources.isEmpty
+        runtimeModel.events.isEmpty && runtimeModel.customSources.isEmpty && !runtimeModel.indexingState.isVisible && !runtimeModel.isBootstrapping
+    }
+
+    private var showIndexingOnly: Bool {
+        runtimeModel.events.isEmpty && runtimeModel.indexingState.isActive
     }
 
     private var pageHeader: some View {
@@ -467,19 +779,20 @@ private struct OverviewPage: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Overview")
                     .font(.system(size: 28, weight: .semibold, design: .rounded))
-                Text("\(Date().formatted(.dateTime.weekday(.wide).month(.abbreviated).day())) · visible numbers are from the local TokenBar index")
+                Text(headerSubtitle)
                     .font(.caption)
                     .foregroundStyle(TokenBarStyle.muted)
             }
             Spacer()
             TopRightCluster(
                 todayCost: todayCost,
-                rangeCost: rangeCost,
+                rangeCost: rangeMetrics.cost,
                 todayTokens: runtimeModel.snapshot.today.totalTokens,
-                totalTokens: runtimeModel.snapshot.last30Summary.totalTokens,
+                totalTokens: rangeMetrics.summary.totalTokens,
                 todaySessions: tokenbarSessionCount(runtimeModel.events),
                 refreshState: runtimeModel.refreshState,
-                onRefresh: { Task { await runtimeModel.refresh() } }
+                onRefresh: { Task { await runtimeModel.refresh() } },
+                rangeLabel: tokenbarRangeShortLabel(selectedRange)
             )
             .layoutPriority(2)
             DateRangeControl(selection: $selectedRange)
@@ -487,12 +800,16 @@ private struct OverviewPage: View {
         }
     }
 
-    private var todayCost: Double {
-        tokenbarEstimatedCost(events: runtimeModel.events, days: 1)
+    private var headerSubtitle: String {
+        Date().formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
     }
 
-    private var rangeCost: Double {
-        tokenbarEstimatedCost(events: runtimeModel.events, days: tokenbarDaysForRange(selectedRange))
+    private var isPageUpdating: Bool {
+        isRangeLoading
+    }
+
+    private var todayCost: Double {
+        tokenbarEstimatedCost(events: runtimeModel.events, days: 1)
     }
 
     private var kpiRow: some View {
@@ -594,10 +911,6 @@ private struct OverviewPage: View {
         return tokenbarIdleHourRanges(hourly.hoursOfDay)
     }
 
-    private var rangeDays: [UsageDay] {
-        tokenbarRangeDays(runtimeModel.snapshot.last30Days, selection: selectedRange)
-    }
-
     private var rangeTitle: String {
         tokenbarRangeTitle(selectedRange)
     }
@@ -625,8 +938,10 @@ struct TopRightCluster: View {
     @AppStorage("tokenbar.menuBarPaused") private var isPaused = false
     @State private var showFlyout = false
 
+    var rangeLabel = "30d"
+
     private func copyCostSummary() {
-        let line = "Today ~ \(tokenbarCompactCurrency(todayCost)) · 30d ~ \(tokenbarCompactCurrency(rangeCost)) · \(tokenbarCompactTokens(totalTokens)) tokens"
+        let line = "Today ~ \(tokenbarCompactCurrency(todayCost)) · \(rangeLabel) ~ \(tokenbarCompactCurrency(rangeCost)) · \(tokenbarCompactTokens(totalTokens)) tokens"
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(line, forType: .string)
     }
@@ -647,7 +962,7 @@ struct TopRightCluster: View {
                     Image(systemName: "chart.line.uptrend.xyaxis")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(TokenBarStyle.cache)
-                    Text("30d ~")
+                    Text("\(rangeLabel) ~")
                         .foregroundStyle(TokenBarStyle.muted)
                     Text(tokenbarCompactCurrency(rangeCost))
                         .fontWeight(.semibold)
@@ -672,7 +987,7 @@ struct TopRightCluster: View {
             // string to the pasteboard and shows a brief toast tooltip.
             .contentShape(Capsule())
             .onTapGesture { copyCostSummary() }
-            .help("Click to copy today / 30d cost summary")
+            .help("Click to copy today / \(rangeLabel) cost summary")
 
             Button {
                 showFlyout.toggle()

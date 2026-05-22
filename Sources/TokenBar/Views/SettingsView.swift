@@ -28,6 +28,7 @@ struct SettingsView: View {
     @State private var showResetAllConfirm = false  // CL-P1-019
     @State private var resetAck = ""                // CL-P1-019: type "RESET"
     @State private var sourceSaveMessage: String?
+    @State private var sourcePendingDelete: CustomSourceRecord?
     private let themeOptions = ["System", "Light", "Dark"]
     private let pricingColumns: [CGFloat] = [208, 96, 96, 96, 95, 128]
 
@@ -88,6 +89,7 @@ struct SettingsView: View {
             struct CustomSource: Codable {
                 let id: String
                 let name: String
+                let engine: CustomSourceEngine
                 let directory: String
                 let enabled: Bool
                 let fieldMapping: CustomSourceFieldMapping
@@ -106,13 +108,14 @@ struct SettingsView: View {
                 .init(
                     id: $0.id,
                     name: $0.name,
+                    engine: $0.engine,
                     directory: $0.directory,
                     enabled: $0.enabled,
                     fieldMapping: $0.fieldMapping
                 )
             },
-            eventCount: runtimeModel.events.count,
-            promptCount: runtimeModel.prompts.count
+            eventCount: runtimeModel.eventCount,
+            promptCount: runtimeModel.promptCount
         )
 
         let encoder = JSONEncoder()
@@ -134,7 +137,7 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
+        GeometryReader { _ in
             ZStack {
                 TokenBarGlassBackground()
                 ScrollView {
@@ -159,7 +162,6 @@ struct SettingsView: View {
                     )
                     .environmentObject(runtimeModel)
                     .id(editingSource?.id ?? "new")
-                    .frame(width: min(560, max(320, geometry.size.width - 64)))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                     .zIndex(10)
                 }
@@ -189,6 +191,24 @@ struct SettingsView: View {
         }
         .onChange(of: theme) { _, newValue in
             TokenBarTelemetry.event("settings.theme.change", metadata: "value=\(newValue)", success: true)
+        }
+        .alert(
+            "Delete Custom Source?",
+            isPresented: Binding(
+                get: { sourcePendingDelete != nil },
+                set: { if !$0 { sourcePendingDelete = nil } }
+            ),
+            presenting: sourcePendingDelete
+        ) { source in
+            Button("Cancel", role: .cancel) {
+                sourcePendingDelete = nil
+            }
+            Button("Delete Source", role: .destructive) {
+                sourcePendingDelete = nil
+                Task { await runtimeModel.removeCustomSource(id: source.id) }
+            }
+        } message: { source in
+            Text("This removes \(source.name) and hides its indexed usage, prompts, and watermarks from TokenBar. Built-in sources are untouched.")
         }
     }
 
@@ -544,7 +564,15 @@ struct SettingsView: View {
                 .fill(source.enabled ? TokenBarStyle.accent : TokenBarStyle.faint)
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 3) {
-                Text(source.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                HStack(spacing: 7) {
+                    Text(source.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                    Text(source.engine.displayName)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(TokenBarStyle.muted)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(TokenBarStyle.surface.opacity(0.7), in: Capsule())
+                }
                 Text(source.globPattern.isEmpty || source.globPattern == "**/*.jsonl"
                      ? source.directory
                      : "\(source.directory)/\(source.globPattern)")
@@ -573,7 +601,7 @@ struct SettingsView: View {
             .help(source.enabled ? "Disable this source" : "Enable this source")
             Button(role: .destructive) {
                 TokenBarTelemetry.event("settings.custom_source.remove.click", metadata: "name=\(source.name)", success: true)
-                Task { await runtimeModel.removeCustomSource(id: source.id) }
+                sourcePendingDelete = source
             } label: {
                 Image(systemName: "trash")
             }
@@ -829,6 +857,7 @@ private struct AddCustomSourceOverlay: View {
     @State private var name = ""
     @State private var displayAgent = ""
     @State private var pathGlob = ""
+    @State private var engine: CustomSourceEngine = .claudeCode
     @State private var format: CustomSourceFormat = .auto
     @State private var mappingOpen = false
     @State private var inputField = "usage.input_tokens"
@@ -836,6 +865,8 @@ private struct AddCustomSourceOverlay: View {
     @State private var cacheField = "usage.cache_read_tokens"
     @State private var modelField = "model"
     @State private var detectionState: SourceDetectionState = .idle
+    @State private var isSaving = false
+    @State private var saveError: String?
 
     init(
         isPresented: Binding<Bool>,
@@ -852,6 +883,7 @@ private struct AddCustomSourceOverlay: View {
             : "\(source.directory)/\(source.globPattern)"
             _pathGlob = State(initialValue: initialPath.replacingOccurrences(of: "//", with: "/"))
             _displayAgent = State(initialValue: source.displayAgent)
+            _engine = State(initialValue: source.engine)
             _format = State(initialValue: source.format)
             _mappingOpen = State(initialValue: source.fieldMapping != .default)
             _inputField = State(initialValue: source.fieldMapping.inputTokens)
@@ -863,6 +895,7 @@ private struct AddCustomSourceOverlay: View {
             _name = State(initialValue: "")
             _displayAgent = State(initialValue: "")
             _pathGlob = State(initialValue: "")
+            _engine = State(initialValue: .claudeCode)
             _format = State(initialValue: .auto)
             _mappingOpen = State(initialValue: false)
             _inputField = State(initialValue: CustomSourceFieldMapping.default.inputTokens)
@@ -875,8 +908,9 @@ private struct AddCustomSourceOverlay: View {
 
     var body: some View {
         ZStack(alignment: .center) {
-            Color.black.opacity(0.45)
+            Color.clear
                 .ignoresSafeArea()
+                .contentShape(Rectangle())
                 .onTapGesture { isPresented = false }
 
             TokenBarCard(padding: 0) {
@@ -906,8 +940,8 @@ private struct AddCustomSourceOverlay: View {
 
                     VStack(alignment: .leading, spacing: 14) {
                         field("Name", text: $name, prompt: "e.g. Hermes Runs")
-                        field("Display Agent", text: $displayAgent, prompt: "e.g. Hermes")
-                        field("Path or glob", text: $pathGlob, prompt: "~/agent/logs/*.jsonl", trailing: {
+                        enginePicker
+                        field("Path or glob", text: $pathGlob, prompt: pathPrompt, trailing: {
                             HStack(spacing: 7) {
                                 Button("Browse...") {
                                     browsePath()
@@ -931,26 +965,11 @@ private struct AddCustomSourceOverlay: View {
                         })
 
                         detectionBlock
-
-                        Button {
-                            mappingOpen.toggle()
-                        } label: {
-                            Label("Override field mapping", systemImage: mappingOpen ? "chevron.down" : "chevron.right")
-                                .font(.caption)
-                                .foregroundStyle(TokenBarStyle.muted)
-                        }
-                        .buttonStyle(.plain)
-
-                        if mappingOpen {
-                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                                field("Input field", text: $inputField)
-                                field("Output field", text: $outputField)
-                                field("Cache field", text: $cacheField)
-                                field("Model field", text: $modelField)
-                            }
-                            Text("Saved mappings are used for auto/unknown JSONL custom sources.")
-                                .font(.caption2)
-                                .foregroundStyle(TokenBarStyle.muted)
+                        if let saveError {
+                            Text(saveError)
+                                .font(.system(size: 11.5, weight: .medium))
+                                .foregroundStyle(TokenBarStyle.error)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .padding(18)
@@ -964,22 +983,65 @@ private struct AddCustomSourceOverlay: View {
                         Spacer()
                         Button("Cancel") { isPresented = false }
                             .buttonStyle(SettingsButtonStyle())
-                        Button(source == nil ? "Add Source" : "Save Source") {
+                        Button {
                             addSource()
+                        } label: {
+                            if isSaving {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .frame(width: 78)
+                            } else {
+                                Text(source == nil ? "Add Source" : "Save Source")
+                                    .frame(width: 78)
+                            }
                         }
                         .buttonStyle(SettingsButtonStyle(kind: .primary))
-                        .disabled(!canSave)
+                        .disabled(!canSave || isSaving)
                     }
                     .padding(.horizontal, 18)
                     .padding(.vertical, 14)
                 }
             }
+            .frame(maxWidth: 560)
+            .padding(.horizontal, 32)
+            .shadow(color: TokenBarStyle.appBackground.opacity(0.22), radius: 22, x: 0, y: 14)
         }
         .onChange(of: pathGlob) { _, _ in resetDetectionAfterEdit() }
-        .onChange(of: inputField) { _, _ in resetDetectionAfterEdit() }
-        .onChange(of: outputField) { _, _ in resetDetectionAfterEdit() }
-        .onChange(of: cacheField) { _, _ in resetDetectionAfterEdit() }
-        .onChange(of: modelField) { _, _ in resetDetectionAfterEdit() }
+        .onChange(of: engine) { _, _ in resetDetectionAfterEdit() }
+    }
+
+    private var enginePicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Engine")
+                .sectionLabel()
+            HStack(spacing: 8) {
+                ForEach(CustomSourceEngine.allCases, id: \.self) { option in
+                    Button {
+                        engine = option
+                    } label: {
+                        Text(option.displayName)
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(engine == option ? TokenBarStyle.input.opacity(0.20) : TokenBarStyle.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(engine == option ? TokenBarStyle.input.opacity(0.42) : TokenBarStyle.line, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(engine == option ? TokenBarStyle.foreground : TokenBarStyle.muted)
+                }
+            }
+        }
+    }
+
+    private var pathPrompt: String {
+        switch engine {
+        case .claudeCode:
+            "~/.claude/projects or **/*.jsonl"
+        case .codex:
+            "~/.codex/sessions or **/rollout-*.jsonl"
+        case .hermes:
+            "~/.hermes/state.db or ~/.hermes"
+        }
     }
 
     private var detectionBlock: some View {
@@ -1024,7 +1086,7 @@ private struct AddCustomSourceOverlay: View {
                 "ellipsis",
                 TokenBarStyle.input,
                 "Checking source",
-                "Scanning the path and reading a small JSONL sample."
+                "Scanning the path with the selected engine."
             )
         case .success(let message):
             return (
@@ -1073,6 +1135,7 @@ private struct AddCustomSourceOverlay: View {
         if detectionState.isSuccess || detectionState.isFailure {
             detectionState = .idle
         }
+        saveError = nil
     }
 
     private func detectSource() {
@@ -1091,9 +1154,10 @@ private struct AddCustomSourceOverlay: View {
         }
         detectionState = .detecting
         let mapping = normalizedFieldMapping()
+        let selectedEngine = engine
         Task {
             let result = await Task.detached(priority: .userInitiated) {
-                Self.detect(rawPathGlob: rawPath, fieldMapping: mapping)
+                Self.detect(rawPathGlob: rawPath, engine: selectedEngine, fieldMapping: mapping)
             }.value
             await MainActor.run {
                 switch result {
@@ -1102,7 +1166,7 @@ private struct AddCustomSourceOverlay: View {
                     self.detectionState = .success(message)
                     TokenBarTelemetry.event(
                         "custom_source.detect",
-                        metadata: "path=\(rawPath) format=\(format.displayName)",
+                        metadata: "path=\(rawPath) engine=\(selectedEngine.rawValue) format=\(format.displayName)",
                         success: true,
                         elapsed: Date().timeIntervalSince(started)
                     )
@@ -1122,6 +1186,15 @@ private struct AddCustomSourceOverlay: View {
 
     private func addSource() {
         let started = Date()
+        guard !isSaving else {
+            TokenBarTelemetry.event(
+                "custom_source.save.skip",
+                metadata: "reason=already_saving name=\(name)",
+                success: true,
+                elapsed: Date().timeIntervalSince(started)
+            )
+            return
+        }
         guard canSave else {
             TokenBarTelemetry.event(
                 "custom_source.save",
@@ -1132,42 +1205,58 @@ private struct AddCustomSourceOverlay: View {
             )
             return
         }
-        let split = splitPathGlob(pathGlob)
+        isSaving = true
+        saveError = nil
+        let split = splitPathGlob(pathGlob, defaultGlob: engine.defaultGlobPattern)
         Task {
             let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            let trimmedDisplayAgent = displayAgent.trimmingCharacters(in: .whitespacesAndNewlines)
             let finalName = trimmedName.isEmpty ? "Custom Source" : trimmedName
-            let finalDisplayAgent = trimmedDisplayAgent.isEmpty ? finalName : trimmedDisplayAgent
             let fieldMapping = normalizedFieldMapping()
+            let result: CustomSourceSaveResult
             if let source {
-                await runtimeModel.updateCustomSource(
+                result = await runtimeModel.updateCustomSource(
                     source,
                     name: finalName,
+                    engine: engine,
                     directory: split.directory,
                     globPattern: split.glob,
                     format: format,
-                    displayAgent: finalDisplayAgent,
+                    displayAgent: engine.displayName,
                     fieldMapping: fieldMapping
                 )
             } else {
-                await runtimeModel.addCustomSource(
+                result = await runtimeModel.addCustomSource(
                     name: finalName,
+                    engine: engine,
                     directory: split.directory,
                     globPattern: split.glob,
                     format: format,
-                    displayAgent: finalDisplayAgent,
+                    displayAgent: engine.displayName,
                     fieldMapping: fieldMapping
                 )
             }
             await MainActor.run {
-                TokenBarTelemetry.event(
-                    "custom_source.save",
-                    metadata: "name=\(finalName) mode=\(source == nil ? "add" : "edit")",
-                    success: true,
-                    elapsed: Date().timeIntervalSince(started)
-                )
-                onSaved(finalName)
-                isPresented = false
+                isSaving = false
+                switch result {
+                case .saved(let savedName, let deduplicated):
+                    TokenBarTelemetry.event(
+                        "custom_source.save",
+                        metadata: "name=\(savedName) mode=\(source == nil ? "add" : "edit") deduplicated=\(deduplicated)",
+                        success: true,
+                        elapsed: Date().timeIntervalSince(started)
+                    )
+                    onSaved(savedName)
+                    isPresented = false
+                case .failed(let message):
+                    saveError = "Could not save source: \(message)"
+                    TokenBarTelemetry.event(
+                        "custom_source.save",
+                        metadata: "name=\(finalName) mode=\(source == nil ? "add" : "edit")",
+                        success: false,
+                        elapsed: Date().timeIntervalSince(started),
+                        error: message
+                    )
+                }
             }
         }
     }
@@ -1193,7 +1282,7 @@ private struct AddCustomSourceOverlay: View {
         }
     }
 
-    private func splitPathGlob(_ raw: String) -> (directory: String, glob: String) {
+    private func splitPathGlob(_ raw: String, defaultGlob: String) -> (directory: String, glob: String) {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.contains("*") else {
             let expanded = CodexDataSource.expandHome(in: trimmed)
@@ -1202,48 +1291,77 @@ private struct AddCustomSourceOverlay: View {
                !isDirectory.boolValue {
                 return Self.splitConcreteFilePath(trimmed)
             }
-            return (trimmed, "**/*.jsonl")
+            return (trimmed, defaultGlob)
         }
         let parts = trimmed.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
         guard let firstWildcard = parts.firstIndex(where: { $0.contains("*") }) else {
-            return (trimmed, "**/*.jsonl")
+            return (trimmed, defaultGlob)
         }
         let dir = parts[..<firstWildcard].joined(separator: "/")
         let glob = parts[firstWildcard...].joined(separator: "/")
-        return (dir.isEmpty ? "." : dir, glob.isEmpty ? "**/*.jsonl" : glob)
+        return (dir.isEmpty ? "." : dir, glob.isEmpty ? defaultGlob : glob)
     }
 
     nonisolated private static func detect(
         rawPathGlob: String,
+        engine: CustomSourceEngine,
         fieldMapping: CustomSourceFieldMapping
     ) -> SourceDetectionResult {
-        let split = splitPathGlob(rawPathGlob)
-        let files = discoverFiles(directory: split.directory, globPattern: split.glob)
+        let split = splitPathGlob(rawPathGlob, defaultGlob: engine.defaultGlobPattern)
+        let files = discoverFiles(directory: split.directory, globPattern: split.glob, engine: engine)
         guard let sample = files.first else {
             return .failure("No readable files matched this path.")
         }
 
-        let detected = SourceFormatDetector.detect(fileURL: sample)
-        switch detected {
-        case .claudeCodeJSONL, .codexJSONL:
-            return .success(detected, "\(detected.displayName) · \(files.count) file(s) matched.")
-        case .auto, .unknown:
-            guard mappedJSONLooksValid(fileURL: sample, mapping: fieldMapping) else {
-                return .failure("Sample file is JSONL, but the configured token fields were not found.")
+        if engine == .hermes {
+            do {
+                _ = try HermesUsageParser.parse(databaseURL: sample)
+                return .success(.auto, "Hermes state database · \(files.count) database(s) matched.")
+            } catch {
+                return .failure("Hermes database could not be read: \(error.localizedDescription)")
             }
-            return .success(.auto, "Custom JSONL mapping · \(files.count) file(s) matched.")
         }
+
+        let detected = SourceFormatDetector.detect(fileURL: sample)
+        if engine == .claudeCode, detected == .claudeCodeJSONL {
+            return .success(detected, "\(engine.displayName) JSONL · \(files.count) file(s) matched.")
+        }
+        if engine == .codex, detected == .codexJSONL {
+            return .success(detected, "\(engine.displayName) rollout JSONL · \(files.count) file(s) matched.")
+        }
+        if detected == .unknown, mappedJSONLooksValid(fileURL: sample, mapping: fieldMapping) {
+            return .failure("The sample is mapped JSONL, but only Claude Code, Codex, and Hermes engines are supported here.")
+        }
+        return .failure("Selected \(engine.displayName) engine does not match the sample file.")
     }
 
-    nonisolated private static func discoverFiles(directory: String, globPattern: String) -> [URL] {
+    nonisolated private static func discoverFiles(directory: String, globPattern: String, engine: CustomSourceEngine) -> [URL] {
         let expanded = CodexDataSource.expandHome(in: directory)
         let root = URL(fileURLWithPath: expanded, isDirectory: true)
-        guard FileManager.default.fileExists(atPath: root.path(percentEncoded: false)) else {
+        var isDirectory = ObjCBool(false)
+        guard FileManager.default.fileExists(atPath: root.path(percentEncoded: false), isDirectory: &isDirectory) else {
             return []
+        }
+        if engine == .hermes {
+            if !isDirectory.boolValue {
+                return FileManager.default.isReadableFile(atPath: root.path(percentEncoded: false)) ? [root] : []
+            }
+            let stateDB = root.appendingPathComponent("state.db")
+            return FileManager.default.isReadableFile(atPath: stateDB.path(percentEncoded: false)) ? [stateDB] : []
         }
 
         let recursive = globPattern.contains("**")
         let suffix = globPattern.split(separator: "*").last.map(String.init) ?? ".jsonl"
+        let matcher: (URL) -> Bool = { url in
+            let name = url.lastPathComponent
+            if globPattern.contains("rollout-*.jsonl") {
+                return name.hasPrefix("rollout-") && name.hasSuffix(".jsonl")
+            }
+            if globPattern.contains("*.jsonl") || globPattern.contains("**") {
+                return name.hasSuffix(".jsonl")
+            }
+            return name == globPattern || name.hasSuffix(suffix)
+        }
         if recursive {
             guard let enumerator = FileManager.default.enumerator(
                 at: root,
@@ -1252,7 +1370,7 @@ private struct AddCustomSourceOverlay: View {
             ) else { return [] }
             return enumerator.compactMap { item -> URL? in
                 guard let url = item as? URL else { return nil }
-                guard url.lastPathComponent.hasSuffix(suffix) else { return nil }
+                guard matcher(url) else { return nil }
                 return url
             }
             .prefix(25)
@@ -1264,7 +1382,7 @@ private struct AddCustomSourceOverlay: View {
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
         )) ?? [])
-        .filter { $0.lastPathComponent.hasSuffix(suffix) }
+        .filter { matcher($0) }
         .prefix(25)
         .sorted { $0.path < $1.path }
     }
@@ -1323,7 +1441,7 @@ private struct AddCustomSourceOverlay: View {
         return current
     }
 
-    nonisolated private static func splitPathGlob(_ raw: String) -> (directory: String, glob: String) {
+    nonisolated private static func splitPathGlob(_ raw: String, defaultGlob: String) -> (directory: String, glob: String) {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.contains("*") else {
             let expanded = CodexDataSource.expandHome(in: trimmed)
@@ -1332,15 +1450,15 @@ private struct AddCustomSourceOverlay: View {
                !isDirectory.boolValue {
                 return splitConcreteFilePath(trimmed)
             }
-            return (trimmed, "**/*.jsonl")
+            return (trimmed, defaultGlob)
         }
         let parts = trimmed.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
         guard let firstWildcard = parts.firstIndex(where: { $0.contains("*") }) else {
-            return (trimmed, "**/*.jsonl")
+            return (trimmed, defaultGlob)
         }
         let dir = parts[..<firstWildcard].joined(separator: "/")
         let glob = parts[firstWildcard...].joined(separator: "/")
-        return (dir.isEmpty ? "." : dir, glob.isEmpty ? "**/*.jsonl" : glob)
+        return (dir.isEmpty ? "." : dir, glob.isEmpty ? defaultGlob : glob)
     }
 
     nonisolated private static func splitConcreteFilePath(_ raw: String) -> (directory: String, glob: String) {

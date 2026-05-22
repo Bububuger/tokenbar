@@ -4,6 +4,25 @@ import GRDB
 public struct UsageRepository: Sendable {
     private let database: UsageDatabase
 
+    public struct CollectionSignatures: Sendable, Hashable {
+        public let eventCount: Int
+        public let promptCount: Int
+        public let eventSignature: String
+        public let promptSignature: String
+
+        public init(
+            eventCount: Int,
+            promptCount: Int,
+            eventSignature: String,
+            promptSignature: String
+        ) {
+            self.eventCount = eventCount
+            self.promptCount = promptCount
+            self.eventSignature = eventSignature
+            self.promptSignature = promptSignature
+        }
+    }
+
     public init(database: UsageDatabase) {
         self.database = database
     }
@@ -186,6 +205,102 @@ public struct UsageRepository: Sendable {
             ORDER BY timestamp ASC, id ASC
             """)
             return rows.compactMap(prompt(from:))
+        }
+    }
+
+    public func projectEvents(projectName: String, limit: Int? = nil) throws -> [UsageEvent] {
+        try database.queue.read { db in
+            var rows: [Row]
+            if let limit {
+                rows = try Row.fetchAll(db, sql: """
+                SELECT id, agent, project_path, project_name, session_id, timestamp,
+                       input_tokens, output_tokens, cache_tokens, reasoning_tokens, model_name,
+                       source_path, parser, confidence
+                FROM usage_events
+                WHERE project_name = ?
+                ORDER BY timestamp DESC, id DESC
+                LIMIT ?
+                """, arguments: [projectName, limit])
+            } else {
+                rows = try Row.fetchAll(db, sql: """
+                SELECT id, agent, project_path, project_name, session_id, timestamp,
+                       input_tokens, output_tokens, cache_tokens, reasoning_tokens, model_name,
+                       source_path, parser, confidence
+                FROM usage_events
+                WHERE project_name = ?
+                ORDER BY timestamp DESC, id DESC
+                """, arguments: [projectName])
+            }
+            return rows.compactMap(event(from:))
+        }
+    }
+
+    public func projectPromptHistory(projectName: String, limit: Int? = nil, includeContent: Bool = false) throws -> [PromptRecord] {
+        try database.queue.read { db in
+            let contentSelection = includeContent ? "content" : "'' AS content"
+            var rows: [Row]
+            if let limit {
+                rows = try Row.fetchAll(db, sql: """
+                SELECT id, event_id, agent, project_name, session_id, timestamp,
+                       \(contentSelection), content_hash, source_path
+                FROM prompts
+                WHERE project_name = ?
+                ORDER BY timestamp DESC, id DESC
+                LIMIT ?
+                """, arguments: [projectName, limit])
+            } else {
+                rows = try Row.fetchAll(db, sql: """
+                SELECT id, event_id, agent, project_name, session_id, timestamp,
+                       \(contentSelection), content_hash, source_path
+                FROM prompts
+                WHERE project_name = ?
+                ORDER BY timestamp DESC, id DESC
+                """, arguments: [projectName])
+            }
+            return rows.compactMap { row in
+                guard
+                    let id: String = row["id"],
+                    let agent = AgentKind(rawValue: row["agent"] as String),
+                    let projectName: String = row["project_name"],
+                    let sessionId: String = row["session_id"],
+                    let timestampMillis: Int64 = row["timestamp"],
+                    let content: String = row["content"],
+                    let contentHash: String = row["content_hash"],
+                    let sourcePath: String = row["source_path"]
+                else {
+                    return nil
+                }
+                return PromptRecord(
+                    id: id,
+                    eventId: row["event_id"],
+                    agent: agent,
+                    projectName: projectName,
+                    sessionId: sessionId,
+                    timestamp: .tokenBarDate(millisecondsSince1970: timestampMillis),
+                    content: content,
+                    contentHash: contentHash,
+                    sourcePath: sourcePath
+                )
+            }
+        }
+    }
+
+    public func projectSummary(projectName: String) throws -> UsageSummary {
+        try database.queue.read { db in
+            try summary(db: db, start: nil, end: nil, projectName: projectName)
+        }
+    }
+
+    public func collectionSignatures() throws -> CollectionSignatures {
+        try database.queue.read { db in
+            let eventSignature = try collectionSignatureForEvents(db: db)
+            let promptSignature = try collectionSignatureForPrompts(db: db)
+            return CollectionSignatures(
+                eventCount: eventSignature.count,
+                promptCount: promptSignature.count,
+                eventSignature: eventSignature.signature,
+                promptSignature: promptSignature.signature
+            )
         }
     }
 
@@ -397,7 +512,7 @@ public struct UsageRepository: Sendable {
     public func listCustomSources() throws -> [CustomSourceRecord] {
         try database.queue.read { db in
             let rows = try Row.fetchAll(db, sql: """
-            SELECT id, name, directory, glob_pattern, format, display_agent, enabled, field_mapping, created_at
+            SELECT id, name, engine, directory, glob_pattern, format, display_agent, enabled, field_mapping, created_at
             FROM custom_sources
             ORDER BY created_at ASC, name ASC
             """)
@@ -409,12 +524,27 @@ public struct UsageRepository: Sendable {
 
     public func upsertCustomSource(_ source: CustomSourceRecord) throws {
         try database.queue.write { db in
+            let matchingRows = try Row.fetchAll(
+                db,
+                sql: """
+                SELECT id, directory, glob_pattern
+                FROM custom_sources
+                ORDER BY created_at ASC, name ASC
+                """
+            )
+            .filter { row in
+                let directory: String = row["directory"]
+                let globPattern: String = row["glob_pattern"]
+                return CustomSourceRecord.sourcePathKey(directory: directory, globPattern: globPattern) == source.sourcePathKey
+            }
+            let targetID = (matchingRows.first?["id"] as String?) ?? source.id
             try db.execute(
                 sql: """
-                INSERT INTO custom_sources (id, name, directory, glob_pattern, format, display_agent, enabled, field_mapping, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO custom_sources (id, name, engine, directory, glob_pattern, format, display_agent, enabled, field_mapping, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
+                    engine = excluded.engine,
                     directory = excluded.directory,
                     glob_pattern = excluded.glob_pattern,
                     format = excluded.format,
@@ -423,8 +553,9 @@ public struct UsageRepository: Sendable {
                     field_mapping = excluded.field_mapping
                 """,
                 arguments: [
-                    source.id,
+                    targetID,
                     source.name,
+                    source.engine.rawValue,
                     source.directory,
                     source.globPattern,
                     source.format.rawValue,
@@ -434,13 +565,52 @@ public struct UsageRepository: Sendable {
                     source.createdAt.tokenBarMillisecondsSince1970,
                 ]
             )
+            for row in matchingRows.dropFirst() {
+                let duplicateID: String = row["id"]
+                try db.execute(sql: "DELETE FROM custom_sources WHERE id = ?", arguments: [duplicateID])
+            }
+            if targetID != source.id {
+                try db.execute(sql: "DELETE FROM custom_sources WHERE id = ?", arguments: [source.id])
+            }
         }
     }
 
     public func deleteCustomSource(id: String) throws {
         try database.queue.write { db in
+            try deleteCustomSourceData(id: id, db: db)
             try db.execute(sql: "DELETE FROM custom_sources WHERE id = ?", arguments: [id])
         }
+    }
+
+    public func deleteCustomSourceData(id: String) throws {
+        try database.queue.write { db in
+            try deleteCustomSourceData(id: id, db: db)
+        }
+    }
+
+    private func deleteCustomSourceData(id: String, db: Database) throws {
+        let prefix = "custom:\(id):"
+        let prefixLength = prefix.count
+        try db.execute(
+            sql: """
+            DELETE FROM prompts
+            WHERE substr(id, 1, ?) = ?
+               OR (event_id IS NOT NULL AND substr(event_id, 1, ?) = ?)
+            """,
+            arguments: [prefixLength, prefix, prefixLength, prefix]
+        )
+        try db.execute(
+            sql: "DELETE FROM usage_events WHERE substr(id, 1, ?) = ?",
+            arguments: [prefixLength, prefix]
+        )
+        try db.execute(
+            sql: """
+            DELETE FROM source_watermarks
+            WHERE last_event_id IS NOT NULL
+              AND substr(last_event_id, 1, ?) = ?
+            """,
+            arguments: [prefixLength, prefix]
+        )
     }
 
     private func insertEvent(_ event: UsageEvent, db: Database) throws -> Int {
@@ -743,6 +913,7 @@ public struct UsageRepository: Sendable {
         CustomSourceRecord(
             id: row["id"],
             name: row["name"],
+            engine: CustomSourceEngine(rawValue: row["engine"] as String) ?? .claudeCode,
             directory: row["directory"],
             globPattern: row["glob_pattern"],
             format: CustomSourceFormat(rawValue: row["format"] as String) ?? .unknown,
@@ -806,5 +977,67 @@ public struct UsageRepository: Sendable {
             db,
             sql: "SELECT COALESCE(warnings, 0) FROM checkpoints ORDER BY id DESC LIMIT 1"
         ) ?? 0
+    }
+
+    private struct CollectionFingerprint: Sendable {
+        let count: Int
+        let signature: String
+    }
+
+    private func collectionSignatureForEvents(db: Database) throws -> CollectionFingerprint {
+        let row = try Row.fetchOne(db, sql: """
+        SELECT COALESCE(COUNT(*), 0) AS total_count,
+               COALESCE(MIN(timestamp), 0) AS min_timestamp,
+               COALESCE(MAX(timestamp), 0) AS max_timestamp,
+               COALESCE(MIN(id), '') AS min_id,
+               COALESCE(MAX(id), '') AS max_id,
+               COALESCE(SUM(LENGTH(id)), 0) AS id_bytes
+        FROM usage_events
+        """)
+        return CollectionFingerprint(
+            count: row?["total_count"] ?? 0,
+            signature: makeCollectionSignature(
+                count: row?["total_count"] ?? 0,
+                minTimestamp: row?["min_timestamp"] ?? Int64.zero,
+                maxTimestamp: row?["max_timestamp"] ?? Int64.zero,
+                minMarker: row?["min_id"] ?? "",
+                maxMarker: row?["max_id"] ?? "",
+                markerBytes: row?["id_bytes"] ?? 0
+            )
+        )
+    }
+
+    private func collectionSignatureForPrompts(db: Database) throws -> CollectionFingerprint {
+        let row = try Row.fetchOne(db, sql: """
+        SELECT COALESCE(COUNT(*), 0) AS total_count,
+               COALESCE(MIN(timestamp), 0) AS min_timestamp,
+               COALESCE(MAX(timestamp), 0) AS max_timestamp,
+               COALESCE(MIN(content_hash), '') AS min_hash,
+               COALESCE(MAX(content_hash), '') AS max_hash,
+               COALESCE(SUM(LENGTH(content_hash)), 0) AS hash_bytes
+        FROM prompts
+        """)
+        return CollectionFingerprint(
+            count: row?["total_count"] ?? 0,
+            signature: makeCollectionSignature(
+                count: row?["total_count"] ?? 0,
+                minTimestamp: row?["min_timestamp"] ?? Int64.zero,
+                maxTimestamp: row?["max_timestamp"] ?? Int64.zero,
+                minMarker: row?["min_hash"] ?? "",
+                maxMarker: row?["max_hash"] ?? "",
+                markerBytes: row?["hash_bytes"] ?? 0
+            )
+        )
+    }
+
+    private func makeCollectionSignature(
+        count: Int,
+        minTimestamp: Int64,
+        maxTimestamp: Int64,
+        minMarker: String,
+        maxMarker: String,
+        markerBytes: Int
+    ) -> String {
+        "\(count)|\(minTimestamp)|\(maxTimestamp)|\(markerBytes)|\(minMarker)|\(maxMarker)"
     }
 }

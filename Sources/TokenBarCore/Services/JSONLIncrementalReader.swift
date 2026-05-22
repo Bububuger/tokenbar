@@ -32,6 +32,13 @@ public struct JSONLIncrementalReadResult: Sendable, Hashable {
     public let warnings: [UsageSourceWarning]
 }
 
+private enum JSONLReaderThrottle {
+    static let activeSliceSeconds: TimeInterval = 0.004
+    static let lineInterval = 16
+    static let unthrottledChunkSize = 1024 * 1024
+    static let throttledChunkSize = 64 * 1024
+}
+
 public enum JSONLIncrementalReader {
     public static func fingerprint(at path: String) throws -> FileFingerprint {
         let attributes = try FileManager.default.attributesOfItem(atPath: path)
@@ -83,6 +90,18 @@ public enum JSONLIncrementalReader {
         case .fullReparse(let message):
             startOffset = 0
             reason = message
+        }
+
+        if startOffset >= current.size {
+            return emptyResult(
+                path: path,
+                agent: agent,
+                current: current,
+                now: now,
+                cleanOffset: current.size,
+                reason: reason,
+                sourceName: sourceName
+            )
         }
 
         let data = try Data(contentsOf: fileURL)
@@ -173,6 +192,239 @@ public enum JSONLIncrementalReader {
         return JSONLIncrementalReadResult(
             lines: lines,
             nextWatermark: nextWatermark,
+            forcedFullReparseReason: reason,
+            warnings: warnings
+        )
+    }
+
+    public static func read(
+        fileURL: URL,
+        sourceName: String,
+        agent: AgentKind,
+        watermark: SourceWatermark?,
+        now: Date = Date(),
+        resourceThrottle: IndexingResourceThrottle?
+    ) async throws -> JSONLIncrementalReadResult {
+        let path = fileURL.path
+        let current = try fingerprint(at: path)
+        let strategy = decide(current: current, watermark: watermark)
+        let startOffset: Int64
+        let reason: String?
+        switch strategy {
+        case .incremental(let offset):
+            startOffset = offset
+            reason = nil
+        case .fullReparse(let message):
+            startOffset = 0
+            reason = message
+        }
+
+        if startOffset >= current.size {
+            return emptyResult(
+                path: path,
+                agent: agent,
+                current: current,
+                now: now,
+                cleanOffset: current.size,
+                reason: reason,
+                sourceName: sourceName
+            )
+        }
+
+        let safeStart = max(0, min(Int(startOffset), Int(current.size)))
+        let prefixLineCount = safeStart == 0
+            ? 0
+            : try await countNewlines(
+                fileURL: fileURL,
+                upToOffset: safeStart,
+                resourceThrottle: resourceThrottle
+            )
+        let data = try readData(fileURL: fileURL, fromOffset: safeStart)
+
+        var lines: [JSONLLineRecord] = []
+        var warnings: [UsageSourceWarning] = []
+        var cursor = 0
+        var currentLineNumber = prefixLineCount + 1
+        var cleanOffset = Int64(safeStart)
+        var sliceStartedAt = Date()
+        var linesSinceThrottle = 0
+
+        while cursor < data.count {
+            let lineStart = cursor
+            while cursor < data.count, data[cursor] != 10 {
+                cursor += 1
+            }
+
+            guard cursor < data.count else {
+                let absoluteLineStart = safeStart + lineStart
+                cleanOffset = Int64(absoluteLineStart)
+                warnings.append(
+                    UsageSourceWarning(
+                        sourceName: sourceName,
+                        sourcePath: path,
+                        lineNumber: currentLineNumber,
+                        message: "partial trailing JSONL line; watermark rewound to byte \(absoluteLineStart)"
+                    )
+                )
+                break
+            }
+
+            let lineEnd = cursor
+            cursor += 1
+            cleanOffset = Int64(safeStart + cursor)
+
+            let rawLine = data[lineStart..<lineEnd]
+            guard !rawLine.isEmpty else {
+                currentLineNumber += 1
+                continue
+            }
+            guard let text = String(data: rawLine, encoding: .utf8) else {
+                let absoluteLineStart = safeStart + lineStart
+                cleanOffset = Int64(absoluteLineStart)
+                warnings.append(
+                    UsageSourceWarning(
+                        sourceName: sourceName,
+                        sourcePath: path,
+                        lineNumber: currentLineNumber,
+                        message: "invalid UTF-8 JSONL line; watermark rewound to byte \(absoluteLineStart)"
+                    )
+                )
+                break
+            }
+
+            lines.append(
+                JSONLLineRecord(
+                    text: text,
+                    lineNumber: currentLineNumber,
+                    startOffset: Int64(safeStart + lineStart),
+                    endOffset: Int64(safeStart + cursor)
+                )
+            )
+            currentLineNumber += 1
+            linesSinceThrottle += 1
+
+            if let resourceThrottle, linesSinceThrottle >= JSONLReaderThrottle.lineInterval {
+                let active = Date().timeIntervalSince(sliceStartedAt)
+                if active >= JSONLReaderThrottle.activeSliceSeconds {
+                    await resourceThrottle.rest(afterActive: active)
+                    sliceStartedAt = Date()
+                }
+                linesSinceThrottle = 0
+            }
+        }
+
+        if let resourceThrottle {
+            let active = Date().timeIntervalSince(sliceStartedAt)
+            await resourceThrottle.rest(afterActive: active)
+        }
+
+        if let reason {
+            warnings.append(
+                UsageSourceWarning(
+                    sourceName: sourceName,
+                    sourcePath: path,
+                    lineNumber: nil,
+                    message: "forced full reparse: \(reason)"
+                )
+            )
+        }
+
+        let nextWatermark = SourceWatermark(
+            sourcePath: path,
+            agent: agent,
+            lastMtime: current.mtime,
+            lastByteOffset: cleanOffset,
+            lastEventId: nil,
+            lastInode: current.inode,
+            updatedAt: now
+        )
+
+        return JSONLIncrementalReadResult(
+            lines: lines,
+            nextWatermark: nextWatermark,
+            forcedFullReparseReason: reason,
+            warnings: warnings
+        )
+    }
+
+    private static func readData(fileURL: URL, fromOffset offset: Int) throws -> Data {
+        let handle = try FileHandle(forReadingFrom: fileURL)
+        defer { try? handle.close() }
+        try handle.seek(toOffset: UInt64(offset))
+        return try handle.readToEnd() ?? Data()
+    }
+
+    private static func countNewlines(
+        fileURL: URL,
+        upToOffset offset: Int,
+        resourceThrottle: IndexingResourceThrottle?
+    ) async throws -> Int {
+        let handle = try FileHandle(forReadingFrom: fileURL)
+        defer { try? handle.close() }
+
+        var remaining = offset
+        var count = 0
+        var sliceStartedAt = Date()
+        let chunkSize = resourceThrottle == nil
+            ? JSONLReaderThrottle.unthrottledChunkSize
+            : JSONLReaderThrottle.throttledChunkSize
+
+        while remaining > 0 {
+            let readSize = min(chunkSize, remaining)
+            guard let chunk = try handle.read(upToCount: readSize), !chunk.isEmpty else {
+                break
+            }
+            count += chunk.reduce(0) { partial, byte in
+                byte == 10 ? partial + 1 : partial
+            }
+            remaining -= chunk.count
+
+            if let resourceThrottle {
+                let active = Date().timeIntervalSince(sliceStartedAt)
+                if active >= JSONLReaderThrottle.activeSliceSeconds {
+                    await resourceThrottle.rest(afterActive: active)
+                    sliceStartedAt = Date()
+                }
+            }
+        }
+
+        if let resourceThrottle {
+            await resourceThrottle.rest(afterActive: Date().timeIntervalSince(sliceStartedAt))
+        }
+        return count
+    }
+
+    private static func emptyResult(
+        path: String,
+        agent: AgentKind,
+        current: FileFingerprint,
+        now: Date,
+        cleanOffset: Int64,
+        reason: String?,
+        sourceName: String
+    ) -> JSONLIncrementalReadResult {
+        var warnings: [UsageSourceWarning] = []
+        if let reason {
+            warnings.append(
+                UsageSourceWarning(
+                    sourceName: sourceName,
+                    sourcePath: path,
+                    lineNumber: nil,
+                    message: "forced full reparse: \(reason)"
+                )
+            )
+        }
+        return JSONLIncrementalReadResult(
+            lines: [],
+            nextWatermark: SourceWatermark(
+                sourcePath: path,
+                agent: agent,
+                lastMtime: current.mtime,
+                lastByteOffset: cleanOffset,
+                lastEventId: nil,
+                lastInode: current.inode,
+                updatedAt: now
+            ),
             forcedFullReparseReason: reason,
             warnings: warnings
         )

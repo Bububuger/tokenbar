@@ -16,6 +16,20 @@ XCODE_PROJECT="$ROOT_DIR/TokenBar.xcodeproj"
 DEFAULT_DEVELOPMENT_TEAM="${TOKENBAR_DEVELOPMENT_TEAM:-MNTV7AH6PF}"
 SIGNING_IDENTITY="${TOKENBAR_CODE_SIGN_IDENTITY:-Apple Development}"
 
+reset_derived_data() {
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    rm -rf "$DERIVED_DATA_DIR" >/dev/null 2>&1 || true
+    if [[ ! -e "$DERIVED_DATA_DIR" ]]; then
+      return 0
+    fi
+    sleep 0.25
+  done
+
+  echo "error: failed to clear DerivedData at $DERIVED_DATA_DIR" >&2
+  return 1
+}
+
 if ! security find-identity -p codesigning -v | grep -Eq '^[[:space:]]*[1-9][0-9]* valid identities found'; then
   echo "warning: no local signing identity found yet; asking xcodebuild to provision via the signed-in Xcode account." >&2
 fi
@@ -36,7 +50,10 @@ if pids="$(pgrep -x "$APP_NAME" 2>/dev/null)" && [[ -n "$pids" ]]; then
 fi
 
 xcodegen generate --spec project.yml --project "$ROOT_DIR" >/dev/null
-rm -rf "$DERIVED_DATA_DIR"
+if [[ "${TOKENBAR_CLEAN_DERIVED_DATA:-0}" == "1" ]]; then
+  reset_derived_data
+fi
+mkdir -p "$DERIVED_DATA_DIR"
 xcodebuild \
   -project "$XCODE_PROJECT" \
   -scheme TokenBar \

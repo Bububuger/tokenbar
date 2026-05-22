@@ -66,6 +66,56 @@ public enum CustomSourceFormat: String, CaseIterable, Sendable, Hashable {
     }
 }
 
+public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codable {
+    case claudeCode
+    case codex
+    case hermes
+
+    public var displayName: String {
+        switch self {
+        case .claudeCode:
+            "Claude Code"
+        case .codex:
+            "Codex"
+        case .hermes:
+            "Hermes"
+        }
+    }
+
+    public var defaultGlobPattern: String {
+        switch self {
+        case .claudeCode:
+            "**/*.jsonl"
+        case .codex:
+            "**/rollout-*.jsonl"
+        case .hermes:
+            "state.db"
+        }
+    }
+
+    public var agentKind: AgentKind {
+        switch self {
+        case .claudeCode:
+            .claudeCode
+        case .codex:
+            .codex
+        case .hermes:
+            .hermes
+        }
+    }
+
+    public var parserKind: ParserKind {
+        switch self {
+        case .claudeCode:
+            .claudeCode
+        case .codex:
+            .codex
+        case .hermes:
+            .hermes
+        }
+    }
+}
+
 public struct UsageSummary: Sendable, Hashable {
     public let inputTokens: Int
     public let outputTokens: Int
@@ -383,6 +433,7 @@ public struct CheckpointSummary: Identifiable, Sendable, Hashable {
 public struct CustomSourceRecord: Identifiable, Sendable, Hashable {
     public let id: String
     public var name: String
+    public var engine: CustomSourceEngine
     public var directory: String
     public var globPattern: String
     public var format: CustomSourceFormat
@@ -394,6 +445,7 @@ public struct CustomSourceRecord: Identifiable, Sendable, Hashable {
     public init(
         id: String = UUID().uuidString,
         name: String,
+        engine: CustomSourceEngine = .claudeCode,
         directory: String,
         globPattern: String = "**/*.jsonl",
         format: CustomSourceFormat = .auto,
@@ -404,6 +456,7 @@ public struct CustomSourceRecord: Identifiable, Sendable, Hashable {
     ) {
         self.id = id
         self.name = name
+        self.engine = engine
         self.directory = directory
         self.globPattern = globPattern
         self.format = format
@@ -411,6 +464,41 @@ public struct CustomSourceRecord: Identifiable, Sendable, Hashable {
         self.enabled = enabled
         self.fieldMapping = fieldMapping
         self.createdAt = createdAt
+    }
+}
+
+public extension CustomSourceRecord {
+    var sourcePathKey: String {
+        Self.sourcePathKey(directory: directory, globPattern: globPattern)
+    }
+
+    static func sourcePathKey(directory: String, globPattern: String) -> String {
+        "\(normalizedSourceDirectory(directory))|\(normalizedSourceGlob(globPattern))"
+    }
+
+    static func normalizedSourceDirectory(_ directory: String) -> String {
+        let trimmed = directory.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "." }
+        let expanded = (trimmed as NSString).expandingTildeInPath
+        let standardized: String
+        if expanded.hasPrefix("/") {
+            standardized = URL(fileURLWithPath: expanded, isDirectory: true).standardizedFileURL.path
+        } else {
+            standardized = (expanded as NSString).standardizingPath
+        }
+        guard standardized.count > 1 else { return standardized }
+        return String(standardized.dropLast(standardized.hasSuffix("/") ? 1 : 0))
+    }
+
+    static func normalizedSourceGlob(_ globPattern: String) -> String {
+        var normalized = globPattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        while normalized.hasPrefix("./") {
+            normalized.removeFirst(2)
+        }
+        while normalized.hasPrefix("/") {
+            normalized.removeFirst()
+        }
+        return normalized
     }
 }
 

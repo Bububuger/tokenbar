@@ -3,6 +3,10 @@ import Foundation
 public struct UsageStoreState: Sendable, Hashable {
     public let events: [UsageEvent]
     public let prompts: [PromptRecord]
+    public let eventCount: Int
+    public let promptCount: Int
+    public let eventSignature: String
+    public let promptSignature: String
     public let snapshot: UsageSnapshot
     public let warnings: [UsageSourceWarning]
     public let lastIndexedAt: Date?
@@ -12,6 +16,10 @@ public struct UsageStoreState: Sendable, Hashable {
     public init(
         events: [UsageEvent],
         prompts: [PromptRecord] = [],
+        eventCount: Int? = nil,
+        promptCount: Int? = nil,
+        eventSignature: String? = nil,
+        promptSignature: String? = nil,
         snapshot: UsageSnapshot,
         warnings: [UsageSourceWarning],
         lastIndexedAt: Date?,
@@ -20,11 +28,67 @@ public struct UsageStoreState: Sendable, Hashable {
     ) {
         self.events = events
         self.prompts = prompts
+        self.eventCount = eventCount ?? events.count
+        self.promptCount = promptCount ?? prompts.count
+        self.eventSignature = eventSignature ?? Self.makeEventSignature(from: events)
+        self.promptSignature = promptSignature ?? Self.makePromptSignature(from: prompts)
         self.snapshot = snapshot
         self.warnings = warnings
         self.lastIndexedAt = lastIndexedAt
         self.lastRebuildError = lastRebuildError
         self.lastCheckpoint = lastCheckpoint
+    }
+
+    fileprivate static func makeEventSignature(from events: [UsageEvent]) -> String {
+        guard !events.isEmpty else {
+            return "events:0:ts0:ts0:0:0"
+        }
+        var minTimestamp = Int64.max
+        var maxTimestamp = Int64.min
+        var minId = ""
+        var maxId = ""
+        var eventBytes = 0
+
+        for event in events {
+            let timestamp = event.timestamp.tokenBarMillisecondsSince1970
+            minTimestamp = min(minTimestamp, timestamp)
+            maxTimestamp = max(maxTimestamp, timestamp)
+            if minId.isEmpty || event.id < minId {
+                minId = event.id
+            }
+            if maxId.isEmpty || event.id > maxId {
+                maxId = event.id
+            }
+            eventBytes += event.id.utf8.count
+        }
+
+        return "events:\(events.count):\(minTimestamp):\(maxTimestamp):\(eventBytes):\(minId):\(maxId)"
+    }
+
+    fileprivate static func makePromptSignature(from prompts: [PromptRecord]) -> String {
+        guard !prompts.isEmpty else {
+            return "prompts:0:ts0:ts0:0:0"
+        }
+        var minTimestamp = Int64.max
+        var maxTimestamp = Int64.min
+        var minHash = ""
+        var maxHash = ""
+        var hashBytes = 0
+
+        for prompt in prompts {
+            let timestamp = prompt.timestamp.tokenBarMillisecondsSince1970
+            minTimestamp = min(minTimestamp, timestamp)
+            maxTimestamp = max(maxTimestamp, timestamp)
+            if minHash.isEmpty || prompt.contentHash < minHash {
+                minHash = prompt.contentHash
+            }
+            if maxHash.isEmpty || prompt.contentHash > maxHash {
+                maxHash = prompt.contentHash
+            }
+            hashBytes += prompt.contentHash.utf8.count
+        }
+
+        return "prompts:\(prompts.count):\(minTimestamp):\(maxTimestamp):\(hashBytes):\(minHash):\(maxHash)"
     }
 }
 
@@ -60,6 +124,10 @@ public actor UsageStore {
         try repository.deleteCustomSource(id: id)
     }
 
+    public func deleteCustomSourceData(id: String) throws {
+        try repository.deleteCustomSourceData(id: id)
+    }
+
     public func watermarks() throws -> [String: SourceWatermark] {
         try repository.watermarks()
     }
@@ -77,7 +145,7 @@ public actor UsageStore {
         lastIndexedAt = indexedAt
         lastRebuildError = newLastRebuildError
         _ = try? repository.replaceEvents(newEvents)
-        return makeState(referenceDate: referenceDate, calendar: calendar)
+        return makeState(referenceDate: referenceDate, calendar: calendar, includePrompts: true)
     }
 
     @discardableResult
@@ -91,7 +159,8 @@ public actor UsageStore {
         warnings newWarnings: [UsageSourceWarning],
         referenceDate: Date,
         calendar: Calendar,
-        lastRebuildError newLastRebuildError: String?
+        lastRebuildError newLastRebuildError: String?,
+        stateIncludesPrompts: Bool = true
     ) -> UsageStoreState {
         let visibleWarnings = userActionableWarnings(newWarnings)
         warnings = visibleWarnings
@@ -107,7 +176,7 @@ public actor UsageStore {
             warnings: visibleWarnings,
             error: newLastRebuildError
         )
-        return makeState(referenceDate: referenceDate, calendar: calendar)
+        return makeState(referenceDate: referenceDate, calendar: calendar, includePrompts: stateIncludesPrompts)
     }
 
     public func reparseSource(_ sourcePath: String) throws {
@@ -137,16 +206,47 @@ public actor UsageStore {
         calendar: Calendar
     ) -> UsageStoreState {
         lastRebuildError = message
-        return makeState(referenceDate: referenceDate, calendar: calendar)
+        return makeState(referenceDate: referenceDate, calendar: calendar, includePrompts: true)
     }
 
-    public func state(referenceDate: Date = Date(), calendar: Calendar = Calendar(identifier: .gregorian)) -> UsageStoreState {
-        makeState(referenceDate: referenceDate, calendar: calendar)
+    public func state(
+        referenceDate: Date = Date(),
+        calendar: Calendar = Calendar(identifier: .gregorian),
+        includePrompts: Bool = true
+    ) -> UsageStoreState {
+        makeState(referenceDate: referenceDate, calendar: calendar, includePrompts: includePrompts)
     }
 
-    private func makeState(referenceDate: Date, calendar: Calendar) -> UsageStoreState {
+    public func projectEvents(projectName: String, limit: Int? = nil) throws -> [UsageEvent] {
+        try repository.projectEvents(projectName: projectName, limit: limit)
+    }
+
+    public func projectPromptHistory(
+        projectName: String,
+        limit: Int? = nil,
+        includeContent: Bool = false
+    ) throws -> [PromptRecord] {
+        try repository.projectPromptHistory(
+            projectName: projectName,
+            limit: limit,
+            includeContent: includeContent
+        )
+    }
+
+    public func projectSummary(projectName: String) throws -> UsageSummary {
+        try repository.projectSummary(projectName: projectName)
+    }
+
+    private func makeState(
+        referenceDate: Date,
+        calendar: Calendar,
+        includePrompts: Bool
+    ) -> UsageStoreState {
         let events = (try? repository.allEvents()) ?? []
-        let prompts = (try? repository.allPrompts()) ?? []
+        let signatures = (try? repository.collectionSignatures()) ?? nil
+        let prompts = includePrompts
+            ? (try? repository.allPrompts()) ?? []
+            : []
         let latestCheckpoint = try? repository.latestCheckpoint()
         let effectiveWarnings = warnings.isEmpty && lastIndexedAt == nil
             ? userActionableWarnings((try? repository.latestWarnings()) ?? [])
@@ -161,6 +261,14 @@ public actor UsageStore {
         return UsageStoreState(
             events: events,
             prompts: prompts,
+            eventCount: events.count,
+            promptCount: includePrompts
+                ? prompts.count
+                : signatures?.promptCount ?? 0,
+            eventSignature: signatures?.eventSignature ?? UsageStoreState.makeEventSignature(from: events),
+            promptSignature: includePrompts
+                ? UsageStoreState.makePromptSignature(from: prompts)
+                : signatures?.promptSignature ?? UsageStoreState.makePromptSignature(from: []),
             snapshot: snapshot,
             warnings: effectiveWarnings,
             lastIndexedAt: effectiveLastIndexedAt,

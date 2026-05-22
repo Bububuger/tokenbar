@@ -25,10 +25,14 @@ public struct IndexRebuilder: Sendable {
     public let store: UsageStore
     private let checkpointEngine: CheckpointEngine
 
-    public init(sources: [any UsageEventSource], store: UsageStore) {
+    public init(
+        sources: [any UsageEventSource],
+        store: UsageStore,
+        resourceThrottle: IndexingResourceThrottle? = nil
+    ) {
         self.sources = sources
         self.store = store
-        self.checkpointEngine = CheckpointEngine(sources: sources, store: store)
+        self.checkpointEngine = CheckpointEngine(sources: sources, store: store, resourceThrottle: resourceThrottle)
     }
 
     public func rebuild(

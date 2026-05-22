@@ -11,7 +11,7 @@ struct ClaudeDataSourceTests {
         let referenceDate = Date(timeIntervalSince1970: 1_777_000_000)
         let recent = try writeProjectFile(root: root, slug: "-Users-javis-Documents-workspace-openclaw", name: "recent.jsonl", modifiedAt: referenceDate)
         _ = try writeProjectFile(root: root, slug: "-Users-javis-Documents-workspace-openclaw", name: "stale.jsonl", modifiedAt: referenceDate.addingTimeInterval(-60 * 60 * 24 * 45))
-        _ = try writeSubagentFile(root: root, slug: "-Users-javis-Documents-workspace-openclaw", name: "agent-a.jsonl", modifiedAt: referenceDate)
+        let subagent = try writeSubagentFile(root: root, slug: "-Users-javis-Documents-workspace-openclaw", name: "agent-a.jsonl", modifiedAt: referenceDate)
 
         let urls = try ClaudeDataSource.discoverSessionFiles(
             rootDirectory: root.path,
@@ -19,13 +19,53 @@ struct ClaudeDataSourceTests {
             daysBack: 30
         )
 
-        #expect(urls.map { $0.standardizedFileURL } == [recent.standardizedFileURL])
+        #expect(urls.map { $0.standardizedFileURL } == [recent, subagent].map(\.standardizedFileURL).sorted { $0.path < $1.path })
+    }
+
+    @Test
+    func discoveryFindsAllRootJsonlFilesWhenWindowIsNil() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let referenceDate = Date(timeIntervalSince1970: 1_777_000_000)
+        let recent = try writeProjectFile(root: root, slug: "-Users-javis-Documents-workspace-openclaw", name: "recent.jsonl", modifiedAt: referenceDate)
+        let historical = try writeProjectFile(root: root, slug: "-Users-javis-Documents-workspace-openclaw", name: "historical.jsonl", modifiedAt: referenceDate.addingTimeInterval(-60 * 60 * 24 * 120))
+        let subagent = try writeSubagentFile(root: root, slug: "-Users-javis-Documents-workspace-openclaw", name: "agent-a.jsonl", modifiedAt: referenceDate)
+
+        let urls = try ClaudeDataSource.discoverSessionFiles(
+            rootDirectory: root.path,
+            referenceDate: referenceDate,
+            daysBack: nil
+        )
+
+        let actual = urls.map(\.standardizedFileURL)
+        let expected = [historical, recent, subagent]
+            .map(\.standardizedFileURL)
+            .sorted(by: { $0.path < $1.path })
+
+        #expect(actual == expected)
     }
 
     @Test
     func readableProjectNameFallsBackFromSlug() {
         let projectName = ClaudeDataSource.readableProjectName(fromSlug: "-Users-javis-Documents-workspace-projects-tokenbar")
         #expect(projectName == "tokenbar")
+    }
+
+    @Test
+    func projectSlugForSubagentFileUsesParentProjectDirectory() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let file = try writeSubagentFile(
+            root: root,
+            slug: "-Users-javis-Documents-workspace-projects-tokenbar",
+            name: "agent-a.jsonl",
+            modifiedAt: Date()
+        )
+
+        let slug = ClaudeDataSource.projectSlug(for: file, rootDirectory: root.path)
+        #expect(slug == "-Users-javis-Documents-workspace-projects-tokenbar")
     }
 
     private func temporaryDirectory() throws -> URL {
@@ -49,6 +89,7 @@ struct ClaudeDataSourceTests {
 
     private func writeSubagentFile(root: URL, slug: String, name: String, modifiedAt: Date) throws -> URL {
         let dir = root.appendingPathComponent(slug, isDirectory: true)
+            .appendingPathComponent("session-a", isDirectory: true)
             .appendingPathComponent("subagents", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let file = dir.appendingPathComponent(name)

@@ -24,6 +24,11 @@ public struct ClaudeParseResult: Sendable, Hashable {
     }
 }
 
+private enum ClaudeParserThrottle {
+    static let activeSliceSeconds: TimeInterval = 0.004
+    static let lineInterval = 8
+}
+
 public enum ClaudeUsageParser {
     public static func parse(fileURL: URL, fallbackProjectSlug: String) throws -> ClaudeParseResult {
         let text = try String(contentsOf: fileURL, encoding: .utf8)
@@ -129,6 +134,106 @@ public enum ClaudeUsageParser {
                     confidence: 1.0
                 )
             )
+        }
+
+        return ClaudeParseResult(events: events, prompts: prompts, warnings: warnings)
+    }
+
+    public static func parse(
+        lines: [JSONLLineRecord],
+        fileURL: URL,
+        fallbackProjectSlug: String,
+        resourceThrottle: IndexingResourceThrottle?
+    ) async -> ClaudeParseResult {
+        let sourcePath = fileURL.path
+
+        var events: [UsageEvent] = []
+        var prompts: [PromptRecord] = []
+        var warnings: [ClaudeParseWarning] = []
+        var sliceStartedAt = Date()
+        var linesSinceThrottle = 0
+
+        for line in lines {
+            let lineNumber = line.lineNumber
+            let lineText = line.text
+
+            guard let data = lineText.data(using: .utf8) else {
+                warnings.append(ClaudeParseWarning(sourcePath: sourcePath, lineNumber: lineNumber, message: "line is not valid UTF-8"))
+                continue
+            }
+
+            let object: [String: Any]
+            do {
+                object = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            } catch {
+                warnings.append(ClaudeParseWarning(sourcePath: sourcePath, lineNumber: lineNumber, message: "malformed JSON"))
+                continue
+            }
+
+            if let prompt = extractUserPrompt(
+                object: object,
+                sourcePath: sourcePath,
+                lineNumber: lineNumber,
+                fileURL: fileURL,
+                fallbackProjectSlug: fallbackProjectSlug
+            ) {
+                prompts.append(prompt)
+            } else if let message = object["message"] as? [String: Any],
+                      let usage = message["usage"] as? [String: Any] {
+                guard let rawInput = usage["input_tokens"] as? Int,
+                      let rawOutput = usage["output_tokens"] as? Int,
+                      let rawCacheCreation = usage["cache_creation_input_tokens"] as? Int,
+                      let rawCacheRead = usage["cache_read_input_tokens"] as? Int else {
+                    warnings.append(ClaudeParseWarning(sourcePath: sourcePath, lineNumber: lineNumber, message: "usage fields are incomplete"))
+                    continue
+                }
+                let inputClamp = TokenBarNumberFormatting.clampNonNegative(rawInput)
+                let outputClamp = TokenBarNumberFormatting.clampNonNegative(rawOutput)
+                let cacheCreationClamp = TokenBarNumberFormatting.clampNonNegative(rawCacheCreation)
+                let cacheReadClamp = TokenBarNumberFormatting.clampNonNegative(rawCacheRead)
+                if inputClamp.wasNegative || outputClamp.wasNegative || cacheCreationClamp.wasNegative || cacheReadClamp.wasNegative {
+                    warnings.append(ClaudeParseWarning(sourcePath: sourcePath, lineNumber: lineNumber, message: "negative token count clamped to 0"))
+                }
+                let modelName = message["model"] as? String
+                let projectPath = object["cwd"] as? String
+                let projectName = projectPath
+                    .map { URL(fileURLWithPath: $0).lastPathComponent }
+                    .flatMap { $0.isEmpty ? nil : $0 }
+                    ?? ClaudeDataSource.readableProjectName(fromSlug: fallbackProjectSlug)
+
+                events.append(
+                    UsageEvent(
+                        id: "\(sourcePath)#\(lineNumber)",
+                        agent: .claudeCode,
+                        projectPath: projectPath,
+                        projectName: projectName,
+                        sessionId: object["sessionId"] as? String ?? fileURL.deletingPathExtension().lastPathComponent,
+                        timestamp: parseTimestamp(object["timestamp"] as? String) ?? .distantPast,
+                        inputTokens: inputClamp.value,
+                        outputTokens: outputClamp.value,
+                        cacheTokens: cacheCreationClamp.value + cacheReadClamp.value,
+                        reasoningTokens: nil,
+                        modelName: modelName,
+                        sourcePath: sourcePath,
+                        parser: .claudeCode,
+                        confidence: 1.0
+                    )
+                )
+            }
+
+            linesSinceThrottle += 1
+            if let resourceThrottle, linesSinceThrottle >= ClaudeParserThrottle.lineInterval {
+                let active = Date().timeIntervalSince(sliceStartedAt)
+                if active >= ClaudeParserThrottle.activeSliceSeconds {
+                    await resourceThrottle.rest(afterActive: active)
+                    sliceStartedAt = Date()
+                }
+                linesSinceThrottle = 0
+            }
+        }
+
+        if let resourceThrottle {
+            await resourceThrottle.rest(afterActive: Date().timeIntervalSince(sliceStartedAt))
         }
 
         return ClaudeParseResult(events: events, prompts: prompts, warnings: warnings)

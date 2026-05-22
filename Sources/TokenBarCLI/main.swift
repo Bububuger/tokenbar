@@ -1,11 +1,12 @@
+import Darwin
 import Foundation
 import TokenBarCore
 
 struct TokenBarCLI {
-    static func main() {
+    static func main() async {
         do {
             let config = try parse()
-            try run(config)
+            try await run(config)
         } catch {
             fputs("Error: \(error.localizedDescription)\n", stderr)
             if error is CLIError {
@@ -33,7 +34,7 @@ struct TokenBarCLI {
                 return .init(dbPath: dbOverride, command: .help)
             case "--db":
                 dbOverride = try iterator.nextValue(for: "--db")
-            case "summary", "prompts", "hours", "hourly", "help":
+            case "summary", "prompts", "hours", "hourly", "rebuild", "help":
                 command = try parseCommand(named: arg, cursor: &iterator, dbOverride: dbOverride)
                 break
             case let unknown where unknown.hasPrefix("-"):
@@ -61,6 +62,27 @@ struct TokenBarCLI {
         switch named {
         case "help":
             return .help
+        case "rebuild":
+            var options = RebuildOptions(databasePath: dbOverride)
+            while let arg = cursor.next() {
+                switch arg {
+                case "--help", "-h":
+                    return .help
+                case "--db":
+                    options.databasePath = try cursor.nextValue(for: "--db")
+                case "--background":
+                    options.background = true
+                case "--cpu-percent":
+                    options.cpuPercent = try parseCPUPercent(try cursor.nextValue(for: "--cpu-percent"))
+                case "--json":
+                    options.json = true
+                case let unknown where unknown.hasPrefix("-"):
+                    throw CLIError.invalidArgument("Unknown rebuild option: \(unknown)")
+                default:
+                    throw CLIError.invalidArgument("Unexpected rebuild argument: \(arg)")
+                }
+            }
+            return .rebuild(options)
         case "summary":
             var options = SummaryOptions(
                 databasePath: dbOverride,
@@ -161,6 +183,13 @@ struct TokenBarCLI {
         try parseInt(raw, optionName: optionName, allowZero: false)
     }
 
+    private static func parseCPUPercent(_ raw: String) throws -> Double {
+        guard let value = Double(raw), value >= 1, value <= 100 else {
+            throw CLIError.invalidArgument("--cpu-percent must be between 1 and 100")
+        }
+        return value
+    }
+
     private static func parseInt(_ raw: String, optionName: String, allowZero: Bool) throws -> Int {
         guard let value = Int(raw), value >= 0 else {
             throw CLIError.invalidArgument("--\(optionName) must be a non-negative integer")
@@ -189,16 +218,100 @@ struct TokenBarCLI {
         throw CLIError.invalidArgument("Unknown agent '\(raw)'. Allowed: \(candidates)")
     }
 
-    private static func run(_ config: RunConfiguration) throws {
+    private static func run(_ config: RunConfiguration) async throws {
         switch config.command {
         case .help:
             printUsage()
+        case .rebuild(let options):
+            try await runRebuild(with: options)
         case .summary(let options):
             try runSummary(with: options)
         case .prompts(let options):
             try runPrompts(with: options)
         case .hours(let options):
             try runHours(with: options)
+        }
+    }
+
+    private static func runRebuild(with options: RebuildOptions) async throws {
+        let started = Date()
+        let databaseURL = resolveDatabasePath(options.databasePath)
+        let store = try UsageStore(databaseURL: databaseURL)
+        if options.background {
+            _ = setpriority(PRIO_PROCESS, 0, 20)
+        }
+        let resourceThrottle = options.background || options.cpuPercent != nil
+            ? IndexingResourceThrottle(budget: IndexingResourceBudget(cpuPercent: options.cpuPercent ?? IndexingResourceBudget.backgroundCPUPercent))
+            : nil
+        let sources: [any InspectableUsageEventSource] = [
+            CodexUsageEventSource(daysBack: nil),
+            ClaudeUsageEventSource(daysBack: nil),
+            HermesUsageEventSource(),
+        ]
+        let calendar = Calendar(identifier: .gregorian)
+
+        try await store.reparseAll()
+        let engine = CheckpointEngine(sources: sources, store: store, resourceThrottle: resourceThrottle)
+        let result = await engine.run(
+            trigger: "cli-rebuild-all-history",
+            startedAt: started,
+            referenceDate: started,
+            calendar: calendar
+        )
+        let state = result.state
+        let statuses = await collectStatuses(from: sources, referenceDate: started, calendar: calendar)
+        let totalInput = state.events.reduce(0) { $0 + $1.inputTokens }
+        let totalOutput = state.events.reduce(0) { $0 + $1.outputTokens }
+        let totalCache = state.events.reduce(0) { $0 + $1.cacheTokens }
+        let output = RebuildOutput(
+            generatedAt: iso8601Date(Date()),
+            databasePath: databaseURL.path,
+            trigger: result.checkpoint?.trigger ?? "cli-rebuild-all-history",
+            sourceWindow: "all-history",
+            eventCount: state.events.count,
+            promptCount: state.promptCount,
+            inputTokens: totalInput,
+            outputTokens: totalOutput,
+            cacheTokens: totalCache,
+            warningCount: state.warnings.count,
+            rebuildError: state.lastRebuildError,
+            checkpointEventsAdded: result.checkpoint?.eventsAdded,
+            checkpointPromptsAdded: result.checkpoint?.promptsAdded,
+            background: options.background || options.cpuPercent != nil,
+            cpuPercent: options.cpuPercent ?? (options.background ? IndexingResourceBudget.backgroundCPUPercent : nil),
+            resourceSnapshot: await resourceThrottle?.snapshot(),
+            sources: statuses.map(DataSourceStatusOutput.from)
+        )
+
+        if options.json {
+            printJSON(output)
+            return
+        }
+
+        print("\(commandName()) rebuild")
+        print("  Database: \(databaseURL.path)")
+        print("  Source window: all-history")
+        if output.background {
+            print("  Mode: background (~\(formatCPUPercent(output.cpuPercent ?? IndexingResourceBudget.backgroundCPUPercent)) CPU budget)")
+        }
+        print("  Sources: Codex ~/.codex/sessions, Claude ~/.claude/projects, Hermes ~/.hermes/state.db")
+        print("  Discovered files:")
+        for source in output.sources {
+            let readable = source.isReadable ? "readable" : "not readable"
+            print("    \(source.name): \(source.discoveredFileCount) (\(readable))")
+        }
+        print("  Events: \(output.eventCount) | Prompts: \(output.promptCount)")
+        print("  Input tokens: \(output.inputTokens)")
+        print("  Output tokens: \(output.outputTokens)")
+        print("  Cache tokens: \(output.cacheTokens)")
+        print("  Total tokens: \(output.totalTokens)")
+        print("  Checkpoint added: events \(output.checkpointEventsAdded ?? 0), prompts \(output.checkpointPromptsAdded ?? 0)")
+        print("  Warnings: \(output.warningCount)")
+        if let rebuildError = output.rebuildError, !rebuildError.isEmpty {
+            print("  Rebuild error: \(rebuildError)")
+        }
+        if let resourceSnapshot = output.resourceSnapshot {
+            print("  Estimated CPU: \(formatCPUPercent(resourceSnapshot.estimatedCPUPercent))")
         }
     }
 
@@ -417,6 +530,18 @@ struct TokenBarCLI {
         }
     }
 
+    private static func collectStatuses(
+        from sources: [any InspectableUsageEventSource],
+        referenceDate: Date,
+        calendar: Calendar
+    ) async -> [UsageDataSourceStatus] {
+        var statuses: [UsageDataSourceStatus] = []
+        for source in sources {
+            statuses.append(await source.status(referenceDate: referenceDate, calendar: calendar))
+        }
+        return statuses.sorted { $0.sourceName < $1.sourceName }
+    }
+
     private static func filterEvents(_ events: [UsageEvent], days: Int, projectName: String?) -> [UsageEvent] {
         let cutoff = days == 0 ? nil : cutoffDate(days: days)
         return events.filter { event in
@@ -587,6 +712,10 @@ struct TokenBarCLI {
         return String(format: "%02d:00-%02d:59", normalized, normalized)
     }
 
+    private static func formatCPUPercent(_ value: Double) -> String {
+        String(format: "%.1f%%", value)
+    }
+
     private static func truncate(_ value: String, _ maxLength: Int) -> String {
         guard value.count > maxLength else {
             return value
@@ -601,6 +730,11 @@ Usage:
   \(commandName()) [--db <path>] <command> [options]
 
 Commands:
+  rebuild     Rescan all local agent history and rebuild the index
+    --background    Run at utility priority with a \(formatCPUPercent(IndexingResourceBudget.backgroundCPUPercent)) CPU budget
+    --cpu-percent N Override background CPU budget (1-100)
+    --json          Emit JSON output
+
   summary     Show token summary
     --days N        Filter by last N days (default 30, 0 = all-time)
     --project <name> Filter to project name
@@ -665,9 +799,17 @@ private struct RunConfiguration {
 
 private enum ParsedCommand {
     case help
+    case rebuild(RebuildOptions)
     case summary(SummaryOptions)
     case prompts(PromptOptions)
     case hours(HourlyOptions)
+}
+
+private struct RebuildOptions {
+    var databasePath: String?
+    var background = false
+    var cpuPercent: Double?
+    var json: Bool = false
 }
 
 private struct SummaryOptions {
@@ -726,6 +868,82 @@ private struct TokenBucketOutput: Codable {
         self.outputTokens = outputTokens
         self.cacheTokens = cacheTokens
         self.totalTokens = inputTokens + outputTokens + cacheTokens
+    }
+}
+
+private struct RebuildOutput: Codable {
+    let generatedAt: String
+    let databasePath: String
+    let trigger: String
+    let sourceWindow: String
+    let eventCount: Int
+    let promptCount: Int
+    let inputTokens: Int
+    let outputTokens: Int
+    let cacheTokens: Int
+    let totalTokens: Int
+    let warningCount: Int
+    let rebuildError: String?
+    let checkpointEventsAdded: Int?
+    let checkpointPromptsAdded: Int?
+    let background: Bool
+    let cpuPercent: Double?
+    let resourceSnapshot: IndexingResourceSnapshot?
+    let sources: [DataSourceStatusOutput]
+
+    init(
+        generatedAt: String,
+        databasePath: String,
+        trigger: String,
+        sourceWindow: String,
+        eventCount: Int,
+        promptCount: Int,
+        inputTokens: Int,
+        outputTokens: Int,
+        cacheTokens: Int,
+        warningCount: Int,
+        rebuildError: String?,
+        checkpointEventsAdded: Int?,
+        checkpointPromptsAdded: Int?,
+        background: Bool,
+        cpuPercent: Double?,
+        resourceSnapshot: IndexingResourceSnapshot?,
+        sources: [DataSourceStatusOutput]
+    ) {
+        self.generatedAt = generatedAt
+        self.databasePath = databasePath
+        self.trigger = trigger
+        self.sourceWindow = sourceWindow
+        self.eventCount = eventCount
+        self.promptCount = promptCount
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheTokens = cacheTokens
+        self.totalTokens = inputTokens + outputTokens + cacheTokens
+        self.warningCount = warningCount
+        self.rebuildError = rebuildError
+        self.checkpointEventsAdded = checkpointEventsAdded
+        self.checkpointPromptsAdded = checkpointPromptsAdded
+        self.background = background
+        self.cpuPercent = cpuPercent
+        self.resourceSnapshot = resourceSnapshot
+        self.sources = sources
+    }
+}
+
+private struct DataSourceStatusOutput: Codable {
+    let name: String
+    let rootPath: String
+    let isReadable: Bool
+    let discoveredFileCount: Int
+
+    static func from(_ status: UsageDataSourceStatus) -> DataSourceStatusOutput {
+        DataSourceStatusOutput(
+            name: status.sourceName,
+            rootPath: status.rootPath,
+            isReadable: status.isReadable,
+            discoveredFileCount: status.discoveredFileCount
+        )
     }
 }
 
@@ -962,4 +1180,9 @@ private enum CLIError: LocalizedError {
     }
 }
 
-TokenBarCLI.main()
+@main
+struct TokenBarCLIEntry {
+    static func main() async {
+        await TokenBarCLI.main()
+    }
+}

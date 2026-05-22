@@ -29,6 +29,7 @@ struct TokenBarProbe {
             CodexUsageEventSource(),
             ClaudeUsageEventSource(),
             HermesUsageEventSource(),
+            GeminiUsageEventSource(),
         ]
 
         let rebuilder = IndexRebuilder(sources: sources, store: store)

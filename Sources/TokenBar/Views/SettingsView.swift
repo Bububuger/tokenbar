@@ -1145,6 +1145,8 @@ private struct AddCustomSourceOverlay: View {
             "~/.codex/sessions or **/rollout-*.jsonl"
         case .hermes:
             "~/.hermes/state.db or ~/.hermes"
+        case .gemini:
+            "~/.gemini/tmp or **/chats/*.json"
         }
     }
 

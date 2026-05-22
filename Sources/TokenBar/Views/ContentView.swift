@@ -972,18 +972,18 @@ private struct OverviewPage: View {
     }
 
     private var showOnboarding: Bool {
-        runtimeModel.events.isEmpty && runtimeModel.customSources.isEmpty && !runtimeModel.indexingState.isVisible && !runtimeModel.isMeasuringToday
+        runtimeModel.events.isEmpty && runtimeModel.customSources.isEmpty && !runtimeModel.indexingState.isVisible && !runtimeModel.isInitialMeasurement
     }
 
     private var showIndexingOnly: Bool {
         runtimeModel.events.isEmpty && runtimeModel.indexingState.isActive
     }
 
-    /// Show only the indexing card (no KPI/chart cards) while a refresh on an
-    /// empty store is still running. Prevents confident-zero rendering on the
-    /// main page during the bootstrap-background window.
+    /// Show only the indexing card (no KPI/chart cards) during the bootstrap
+    /// window when the store is empty. Uses the stable `isInitialMeasurement`
+    /// signal so the layout does not toggle on every periodic refresh.
     private var showCatchingUp: Bool {
-        runtimeModel.events.isEmpty && runtimeModel.isMeasuringToday && !runtimeModel.indexingState.isActive
+        runtimeModel.events.isEmpty && runtimeModel.isInitialMeasurement && !runtimeModel.indexingState.isActive
     }
 
     private var pageHeader: some View {
@@ -1170,7 +1170,6 @@ struct TopRightCluster: View {
                         .fontWeight(.semibold)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
-                        .tokenBarShimmer(active: measuring)
                 }
                 Divider().frame(height: 15).overlay(TokenBarStyle.line)
                 HStack(spacing: 4) {
@@ -1183,14 +1182,12 @@ struct TopRightCluster: View {
                         .fontWeight(.semibold)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
-                        .tokenBarShimmer(active: measuring)
                     Text("·")
                         .foregroundStyle(TokenBarStyle.faint)
                     Text(measuring ? "—" : tokenbarCompactTokens(totalTokens))
                         .fontWeight(.semibold)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
-                        .tokenBarShimmer(active: measuring)
                 }
             }
             .font(.system(size: 12.5))

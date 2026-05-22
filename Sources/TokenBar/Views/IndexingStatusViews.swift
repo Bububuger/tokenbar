@@ -80,11 +80,15 @@ struct TokenBarIndexingStatusCard: View {
             Spacer()
 
             if let onOpenDiagnostics {
-                Button("Open Diagnostics") {
+                Button {
                     onOpenDiagnostics()
+                } label: {
+                    Image(systemName: "stethoscope")
+                        .font(.system(size: 12, weight: .medium))
                 }
-                .controlSize(.small)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.borderless)
+                .foregroundStyle(TokenBarStyle.muted)
+                .help("Open Diagnostics")
             }
         }
     }
@@ -129,6 +133,8 @@ struct TokenBarIndexingStatusCard: View {
             "Indexing queued"
         case .discovering, .indexing:
             "Building local index"
+        case .refreshing:
+            "Catching up"
         case .paused:
             "Indexing paused"
         case .completed:
@@ -148,6 +154,10 @@ struct TokenBarIndexingStatusCard: View {
         switch state.phase {
         case .queued:
             return "Waiting for the current refresh to finish before scanning this source."
+        case .refreshing:
+            let completed = state.completedSourceCount
+            let total = state.sources.count
+            return total > 0 ? "Reading \(completed) of \(total) sources." : "Reading local agent history."
         case .paused:
             return "Resume when you want TokenBar to continue reading local agent history."
         case .completed:

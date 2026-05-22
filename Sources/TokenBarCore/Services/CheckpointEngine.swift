@@ -37,11 +37,18 @@ public actor CheckpointEngine {
         self.stateIncludesPrompts = stateIncludesPrompts
     }
 
+    /// Per-source progress callback. Fires once per source as its TaskGroup
+    /// child completes, in completion order. Callers (e.g. the runtime model)
+    /// use this to drive a live `indexingState` while a bootstrap refresh is
+    /// reading from disk.
+    public typealias SourceProgressHandler = @Sendable (_ sourceName: String, _ succeeded: Bool) async -> Void
+
     public func trigger(
         _ trigger: String,
         startedAt: Date = Date(),
         referenceDate: Date = Date(),
-        calendar: Calendar = Calendar(identifier: .gregorian)
+        calendar: Calendar = Calendar(identifier: .gregorian),
+        onSourceProgress: SourceProgressHandler? = nil
     ) async -> CheckpointRunResult? {
         switch runState {
         case .idle:
@@ -55,7 +62,8 @@ public actor CheckpointEngine {
             trigger: trigger,
             startedAt: startedAt,
             referenceDate: referenceDate,
-            calendar: calendar
+            calendar: calendar,
+            onSourceProgress: onSourceProgress
         )
 
         while case .pending(let pendingTrigger) = runState {
@@ -64,7 +72,8 @@ public actor CheckpointEngine {
                 trigger: pendingTrigger,
                 startedAt: Date(),
                 referenceDate: Date(),
-                calendar: calendar
+                calendar: calendar,
+                onSourceProgress: nil
             )
         }
 
@@ -76,9 +85,10 @@ public actor CheckpointEngine {
         trigger: String,
         startedAt: Date = Date(),
         referenceDate: Date = Date(),
-        calendar: Calendar = Calendar(identifier: .gregorian)
+        calendar: Calendar = Calendar(identifier: .gregorian),
+        onSourceProgress: SourceProgressHandler? = nil
     ) async -> CheckpointRunResult {
-        if let result = await self.trigger(trigger, startedAt: startedAt, referenceDate: referenceDate, calendar: calendar) {
+        if let result = await self.trigger(trigger, startedAt: startedAt, referenceDate: referenceDate, calendar: calendar, onSourceProgress: onSourceProgress) {
             return result
         }
         let state = await store.state(referenceDate: referenceDate, calendar: calendar, includePrompts: stateIncludesPrompts)
@@ -105,7 +115,8 @@ public actor CheckpointEngine {
         trigger: String,
         startedAt: Date,
         referenceDate: Date,
-        calendar: Calendar
+        calendar: Calendar,
+        onSourceProgress: SourceProgressHandler? = nil
     ) async -> CheckpointRunResult {
         let watermarks = (try? await store.watermarks()) ?? [:]
         let slotCount = Self.parallelSlotCount(for: resourceThrottle)
@@ -147,6 +158,9 @@ public actor CheckpointEngine {
 
             while let outcome = await group.next() {
                 outcomes.append(outcome)
+                if let onSourceProgress {
+                    await onSourceProgress(outcome.sourceName, outcome.result != nil)
+                }
                 if nextSourceIndex < sources.count {
                     let i = nextSourceIndex
                     nextSourceIndex += 1

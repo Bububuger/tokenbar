@@ -109,6 +109,55 @@ struct CheckpointEngineParallelTests {
     }
 
     @Test
+    func partialFailureStillAppliesCheckpointForSucceedingSources() async throws {
+        // 1 failing + 1 empty-success + 1 returning-events. Pre-fix the
+        // engine would short-circuit because allEvents was empty AND a
+        // failure existed; post-fix the success path's events must land
+        // and lastRebuildError must reflect the failing source.
+        let sources: [any UsageEventSource] = [
+            FailingStubSource(sourceName: "broken", sleepMilliseconds: 20, message: "boom"),
+            EmptyStubSource(sourceName: "at-watermark"),
+            SleepingStubSource(name: "active", sleepMilliseconds: 20, eventID: "active-evt"),
+        ]
+        let store = try UsageStore(databaseURL: temporaryDatabaseURL())
+        let engine = CheckpointEngine(
+            sources: sources,
+            store: store,
+            resourceThrottle: IndexingResourceThrottle(budget: .background)
+        )
+
+        let result = await engine.run(trigger: "test-partial")
+
+        #expect(result.state.events.count == 1)
+        #expect(result.state.events.first?.id == "active-evt")
+        #expect(result.state.lastRebuildError?.contains("broken") == true)
+        #expect(result.state.lastRebuildError?.contains("boom") == true)
+        #expect(result.checkpoint != nil, "applyCheckpoint must run even with a partial failure")
+    }
+
+    @Test
+    func totalFailureStillRecordsFailureWithoutCheckpoint() async throws {
+        // Every source throws and no events are produced — preserve the
+        // `recordFailure` path so the runtime still surfaces the error.
+        let sources: [any UsageEventSource] = [
+            FailingStubSource(sourceName: "broken-a", sleepMilliseconds: 5, message: "a-boom"),
+            FailingStubSource(sourceName: "broken-b", sleepMilliseconds: 5, message: "b-boom"),
+        ]
+        let store = try UsageStore(databaseURL: temporaryDatabaseURL())
+        let engine = CheckpointEngine(
+            sources: sources,
+            store: store,
+            resourceThrottle: IndexingResourceThrottle(budget: .background)
+        )
+
+        let result = await engine.run(trigger: "test-total-failure")
+
+        #expect(result.failure?.sourceName == "broken-a")
+        #expect(result.state.events.isEmpty)
+        #expect(result.state.lastRebuildError != nil)
+    }
+
+    @Test
     func slotThrottleSnapshotsMergeBackIntoParent() async throws {
         // Budgeted stub source reports a known amount of active time via
         // the throttle. With two such sources running through a parent
@@ -172,6 +221,21 @@ private struct SleepingStubSource: UsageEventSource {
             confidence: 1.0
         )
         return UsageSourceLoadResult(events: [event], warnings: [])
+    }
+}
+
+private struct EmptyStubSource: UsageEventSource {
+    let sourceName: String
+
+    func loadEvents(
+        since watermarks: [String: SourceWatermark],
+        referenceDate: Date,
+        calendar: Calendar
+    ) async throws -> UsageSourceLoadResult {
+        _ = watermarks
+        _ = referenceDate
+        _ = calendar
+        return UsageSourceLoadResult(events: [], warnings: [])
     }
 }
 

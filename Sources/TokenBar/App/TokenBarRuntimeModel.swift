@@ -180,6 +180,7 @@ final class TokenBarRuntimeModel: ObservableObject {
     private var hasBootstrapped = false
     private var lastAutomaticRefreshAt: Date?
     private var activeRefreshTrigger: String?
+    private var pendingRefreshTrigger: String?
     private var suppressSourceChangesUntil: Date?
     private var intervalRefreshTask: Task<Void, Never>?
     // CL-P0-026: scheduled to fire just after local midnight so the Today KPI
@@ -247,7 +248,6 @@ final class TokenBarRuntimeModel: ObservableObject {
         }
         hasBootstrapped = true
         isBootstrapping = true
-        defer { isBootstrapping = false }
         var stageStarted = Date()
         await loadPersistedSnapshot()
         TokenBarTelemetry.timing(
@@ -269,17 +269,19 @@ final class TokenBarRuntimeModel: ObservableObject {
         )
         if shouldRunInitialIndexing {
             startInitialIndexing(reason: "cold-start")
-        } else if refreshState != .idle {
+            // `indexingState` now drives the "still measuring" affordance;
+            // the bootstrap flag can clear.
+            isBootstrapping = false
+        } else {
+            // Always run an incremental bootstrap refresh so sources added
+            // since the last launch (no watermarks yet) get picked up — the
+            // FS watcher only fires on file *changes*, so brand-new sources
+            // would otherwise stay invisible until a file is touched.
             Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(750))
                 await self?.refresh(trigger: "bootstrap-background")
+                self?.isBootstrapping = false
             }
-        } else {
-            TokenBarTelemetry.event(
-                "runtime.bootstrap.background_refresh.skip_fresh",
-                metadata: "refresh_state=\(refreshState.rawValue) last_indexed=\(diagnostics.lastIndexedAt != nil)",
-                success: true
-            )
         }
     }
 
@@ -439,16 +441,26 @@ final class TokenBarRuntimeModel: ObservableObject {
             return
         }
         if let activeRefreshTrigger {
+            // Coalesce: keep the latest skipped trigger so it re-fires after
+            // the current one ends. Without this, a cold-start race against
+            // `wake` or `file-change` silently drops the bootstrap refresh.
+            pendingRefreshTrigger = trigger
             TokenBarTelemetry.event(
                 "runtime.refresh.skip_active",
-                metadata: "trigger=\(trigger) active=\(activeRefreshTrigger)",
+                metadata: "trigger=\(trigger) active=\(activeRefreshTrigger) coalesced=true",
                 success: true,
                 elapsed: Date().timeIntervalSince(started)
             )
             return
         }
         activeRefreshTrigger = trigger
-        defer { activeRefreshTrigger = nil }
+        defer {
+            activeRefreshTrigger = nil
+            if let pending = pendingRefreshTrigger {
+                pendingRefreshTrigger = nil
+                Task { [weak self] in await self?.refresh(trigger: pending) }
+            }
+        }
         TokenBarSignpost.event("refresh-start")
         defer { TokenBarSignpost.event("refresh-end") }
         refreshState = .refreshing
@@ -2059,14 +2071,18 @@ final class TokenBarRuntimeModel: ObservableObject {
             .filter(\.enabled)
             .map(\.directory)
         let watcher = RecursiveFSEventsWatcher(
-            paths: ["~/.codex/sessions", "~/.claude/projects", "~/.hermes", "~/.gemini", "~/.local/share/opencode"] + customPaths
+            paths: ["~/.codex/sessions", "~/.claude/projects", "~/.hermes", "~/.gemini", "~/.openclaw", "~/.local/share/opencode"] + customPaths
         ) { [weak self] in
             await self?.handleSourceChange()
         }
         fileWatcher = watcher
         let watcherStartedAt = Date()
         lastAutomaticRefreshAt = watcherStartedAt
-        suppressSourceChangesUntil = watcherStartedAt.addingTimeInterval(15)
+        // FSEvents already uses `kFSEventStreamEventIdSinceNow` and the watcher
+        // has its own 2 s debounce, so 2 s of app-level grace is enough to ride
+        // out any first-paint flurry without silencing the next 13 seconds of
+        // actual user activity.
+        suppressSourceChangesUntil = watcherStartedAt.addingTimeInterval(2)
         try? await watcher.start()
     }
 
@@ -2113,6 +2129,9 @@ final class TokenBarRuntimeModel: ObservableObject {
                 SampleUsageEventSource(),
             ]
             : [
+                // OpenClaw moved to front so first-time indexing surfaces
+                // quickly even when Codex (~5k files) is queued behind it.
+                OpenClawUsageEventSource(),
                 CodexUsageEventSource(),
                 ClaudeUsageEventSource(),
                 HermesUsageEventSource(),

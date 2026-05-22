@@ -133,6 +133,18 @@ enum TokenBarStyle {
                 dark: NSColor(red: 0.95, green: 0.45, blue: 0.68, alpha: 1),
                 light: NSColor(red: 0.70, green: 0.40, blue: 0.72, alpha: 1)
             )
+        case "OpenClaw":
+            return adaptiveColor(
+                "TokenBarOpenClaw",
+                dark: NSColor(red: 0.36, green: 0.82, blue: 0.66, alpha: 1),
+                light: NSColor(red: 0.20, green: 0.58, blue: 0.50, alpha: 1)
+            )
+        case "OpenCode":
+            return adaptiveColor(
+                "TokenBarOpenCode",
+                dark: NSColor(red: 0.98, green: 0.66, blue: 0.34, alpha: 1),
+                light: NSColor(red: 0.78, green: 0.46, blue: 0.18, alpha: 1)
+            )
         default:
             return muted
         }

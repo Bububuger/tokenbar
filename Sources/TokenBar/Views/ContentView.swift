@@ -702,14 +702,20 @@ private struct TokenBarSidebar: View {
             .frame(maxHeight: .infinity, alignment: .top)
 
             HStack(spacing: 8) {
+                // When we have not finished a first scan, render the dot as
+                // muted instead of the "idle = all good" green, so it does not
+                // implicitly tell the user that an empty database is healthy.
+                let dotColor: Color = lastIndexedAt == nil
+                    ? TokenBarStyle.muted
+                    : TokenBarStyle.statusColor(for: refreshState)
                 Circle()
-                    .fill(TokenBarStyle.statusColor(for: refreshState))
+                    .fill(dotColor)
                     .frame(width: 6, height: 6)
-                    .shadow(color: TokenBarStyle.statusColor(for: refreshState).opacity(0.55), radius: 5)
+                    .shadow(color: dotColor.opacity(0.55), radius: 5)
                 Text("v0.1.0")
                     .font(.system(size: 10.5, design: .monospaced))
                 Spacer()
-                Text(tokenbarRelativeTime(lastIndexedAt))
+                Text(lastIndexedAt == nil ? "first scan…" : tokenbarRelativeTime(lastIndexedAt))
                     .font(.system(size: 10.5, design: .monospaced))
             }
             .foregroundStyle(TokenBarStyle.faint)
@@ -891,7 +897,7 @@ private struct OverviewPage: View {
         ZStack(alignment: .topTrailing) {
             VStack(alignment: .leading, spacing: TokenBarStyle.sectionSpacing) {
                 pageHeader
-                if runtimeModel.indexingState.isVisible {
+                if runtimeModel.showsIndexingCard {
                     TokenBarIndexingStatusCard(
                         state: runtimeModel.indexingState,
                         onPause: { runtimeModel.pauseInitialIndexing() },
@@ -902,7 +908,7 @@ private struct OverviewPage: View {
                 // CL-P0-027: when no events and no custom sources, the user has
                 // pointed TokenBar at nothing — show onboarding instead of empty
                 // KPI/chart cards that look like data is broken.
-                if showIndexingOnly {
+                if showIndexingOnly || showCatchingUp {
                     EmptyView()
                 } else if showOnboarding {
                     OnboardingCard(onOpenSettings: { runtimeModel.navigate(to: .settings, source: "overview.onboarding") })
@@ -948,7 +954,7 @@ private struct OverviewPage: View {
                     )
                 }
             }
-            if isPageUpdating && !showIndexingOnly && !showOnboarding {
+            if isPageUpdating && !showIndexingOnly && !showCatchingUp && !showOnboarding {
                 TokenBarPageUpdatingOverlay(label: "updating \(tokenbarRangeShortLabel(selectedRange))")
             }
         }
@@ -966,11 +972,18 @@ private struct OverviewPage: View {
     }
 
     private var showOnboarding: Bool {
-        runtimeModel.events.isEmpty && runtimeModel.customSources.isEmpty && !runtimeModel.indexingState.isVisible && !runtimeModel.isBootstrapping
+        runtimeModel.events.isEmpty && runtimeModel.customSources.isEmpty && !runtimeModel.indexingState.isVisible && !runtimeModel.isMeasuringToday
     }
 
     private var showIndexingOnly: Bool {
         runtimeModel.events.isEmpty && runtimeModel.indexingState.isActive
+    }
+
+    /// Show only the indexing card (no KPI/chart cards) while a refresh on an
+    /// empty store is still running. Prevents confident-zero rendering on the
+    /// main page during the bootstrap-background window.
+    private var showCatchingUp: Bool {
+        runtimeModel.events.isEmpty && runtimeModel.isMeasuringToday && !runtimeModel.indexingState.isActive
     }
 
     private var pageHeader: some View {
@@ -991,6 +1004,7 @@ private struct OverviewPage: View {
                 todaySessions: runtimeModel.popoverSnapshot.todaySessionCount,
                 refreshState: runtimeModel.refreshState,
                 onRefresh: { Task { await runtimeModel.refresh() } },
+                measuring: runtimeModel.isMeasuringToday,
                 rangeLabel: tokenbarRangeShortLabel(selectedRange)
             )
             .layoutPriority(2)
@@ -1132,6 +1146,7 @@ struct TopRightCluster: View {
     let todaySessions: Int
     let refreshState: RefreshState
     let onRefresh: (() -> Void)?
+    var measuring: Bool = false
 
     @AppStorage("tokenbar.menuBarMirrorMode") private var mirrorModeRaw = MenuBarMirrorMode.off.rawValue
     @AppStorage("tokenbar.menuBarPaused") private var isPaused = false
@@ -1151,10 +1166,11 @@ struct TopRightCluster: View {
                 HStack(spacing: 4) {
                     Text("Today ~")
                         .foregroundStyle(TokenBarStyle.muted)
-                    Text(tokenbarCompactCurrency(todayCost))
+                    Text(measuring ? "—" : tokenbarCompactCurrency(todayCost))
                         .fontWeight(.semibold)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
+                        .tokenBarShimmer(active: measuring)
                 }
                 Divider().frame(height: 15).overlay(TokenBarStyle.line)
                 HStack(spacing: 4) {
@@ -1163,16 +1179,18 @@ struct TopRightCluster: View {
                         .foregroundStyle(TokenBarStyle.cache)
                     Text("\(rangeLabel) ~")
                         .foregroundStyle(TokenBarStyle.muted)
-                    Text(tokenbarCompactCurrency(rangeCost))
+                    Text(measuring ? "—" : tokenbarCompactCurrency(rangeCost))
                         .fontWeight(.semibold)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
+                        .tokenBarShimmer(active: measuring)
                     Text("·")
                         .foregroundStyle(TokenBarStyle.faint)
-                    Text(tokenbarCompactTokens(totalTokens))
+                    Text(measuring ? "—" : tokenbarCompactTokens(totalTokens))
                         .fontWeight(.semibold)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
+                        .tokenBarShimmer(active: measuring)
                 }
             }
             .font(.system(size: 12.5))
@@ -1185,8 +1203,8 @@ struct TopRightCluster: View {
             // CL-P2-006: clicking the cost capsule copies a human-readable
             // string to the pasteboard and shows a brief toast tooltip.
             .contentShape(Capsule())
-            .onTapGesture { copyCostSummary() }
-            .help("Click to copy today / \(rangeLabel) cost summary")
+            .onTapGesture { if !measuring { copyCostSummary() } }
+            .help(measuring ? "Catching up — totals will appear once indexing finishes" : "Click to copy today / \(rangeLabel) cost summary")
 
             Button {
                 showFlyout.toggle()

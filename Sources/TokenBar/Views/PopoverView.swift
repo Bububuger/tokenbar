@@ -49,7 +49,7 @@ struct PopoverView: View {
                 }
                 hero
                 Divider().padding(.vertical, 10)
-                if runtimeModel.indexingState.isVisible {
+                if runtimeModel.showsIndexingCard {
                     TokenBarIndexingStatusCard(
                         state: runtimeModel.indexingState,
                         compact: true,
@@ -112,7 +112,7 @@ struct PopoverView: View {
     }
 
     private var showIndexedPopoverSections: Bool {
-        !runtimeModel.indexingState.isActive || popover.eventsCount > 0
+        !runtimeModel.isMeasuringToday || popover.eventsCount > 0
     }
 
     private var hero: some View {
@@ -130,11 +130,14 @@ struct PopoverView: View {
             Spacer(minLength: 8)
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text(tokenbarCompactTokens(popover.today.totalTokens))
+                Text(runtimeModel.isMeasuringToday ? "—" : tokenbarCompactTokens(popover.today.totalTokens))
                     .font(.title3.weight(.semibold))
                     .monospacedDigit()
+                    .tokenBarShimmer(active: runtimeModel.isMeasuringToday)
                     .tbNumberTooltip(precise: popover.today.totalTokens, window: "today")
-                Text("\(popover.todaySessionCount) sessions · \(tokenbarCompactCurrency(popover.todayCost))")
+                Text(runtimeModel.isMeasuringToday
+                     ? "Catching up…"
+                     : "\(popover.todaySessionCount) sessions · \(tokenbarCompactCurrency(popover.todayCost))")
                     .font(.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -170,6 +173,9 @@ struct PopoverView: View {
         if runtimeModel.indexingState.isPartial {
             return "Building local index"
         }
+        if runtimeModel.isMeasuringToday {
+            return popover.lastIndexedAt == nil ? "First scan in progress…" : "Catching up…"
+        }
         return "Updated \(tokenbarRelativeTime(popover.lastIndexedAt))"
     }
 
@@ -201,23 +207,27 @@ struct PopoverView: View {
                     onClose: { withAnimation(.easeOut(duration: 0.18)) { self.expandedPopKPI = nil } }
                 )
             }
-            InputOutputCacheBar(summary: popover.today, height: 4)
+            if !runtimeModel.isMeasuringToday {
+                InputOutputCacheBar(summary: popover.today, height: 4)
+            }
         }
     }
 
     private func popKpiCard(_ title: String, value: Int, pct: String, color: Color) -> some View {
-        PopKPI(
+        let measuring = runtimeModel.isMeasuringToday
+        return PopKPI(
             title: title,
-            value: tokenbarCompactTokens(value),
-            pct: pct,
+            value: measuring ? "—" : tokenbarCompactTokens(value),
+            pct: measuring ? "—" : pct,
             color: color,
-            preciseValue: value,
-            onTap: {
+            preciseValue: measuring ? nil : value,
+            onTap: measuring ? nil : {
                 withAnimation(.easeOut(duration: 0.18)) {
                     expandedPopKPI = (expandedPopKPI == title) ? nil : title
                 }
             },
-            isExpanded: expandedPopKPI == title
+            isExpanded: !measuring && expandedPopKPI == title,
+            measuring: measuring
         )
     }
 
@@ -497,6 +507,7 @@ struct PopKPI: View {
     var preciseValue: Int? = nil
     var onTap: (() -> Void)? = nil
     var isExpanded: Bool = false
+    var measuring: Bool = false
 
     var body: some View {
         Group {
@@ -540,6 +551,7 @@ struct PopKPI: View {
             .monospacedDigit()
             .lineLimit(1)
             .minimumScaleFactor(0.7)
+            .tokenBarShimmer(active: measuring)
         }
         .padding(.vertical, 3)
         .frame(maxWidth: .infinity, alignment: .leading)

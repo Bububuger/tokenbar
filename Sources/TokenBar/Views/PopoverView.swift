@@ -76,6 +76,7 @@ struct PopoverView: View {
             .padding(.bottom, 10)
         }
         .frame(width: 372)
+        .background(PopoverWindowConfigurator())
         .foregroundStyle(TokenBarStyle.foreground)
         .onAppear {
             let started = Date()
@@ -112,7 +113,7 @@ struct PopoverView: View {
     }
 
     private var showIndexedPopoverSections: Bool {
-        !runtimeModel.isMeasuringToday || popover.eventsCount > 0
+        !runtimeModel.isInitialMeasurement || popover.eventsCount > 0
     }
 
     private var hero: some View {
@@ -133,7 +134,6 @@ struct PopoverView: View {
                 Text(runtimeModel.isMeasuringToday ? "—" : tokenbarCompactTokens(popover.today.totalTokens))
                     .font(.title3.weight(.semibold))
                     .monospacedDigit()
-                    .tokenBarShimmer(active: runtimeModel.isMeasuringToday)
                     .tbNumberTooltip(precise: popover.today.totalTokens, window: "today")
                 Text(runtimeModel.isMeasuringToday
                      ? "Catching up…"
@@ -207,9 +207,7 @@ struct PopoverView: View {
                     onClose: { withAnimation(.easeOut(duration: 0.18)) { self.expandedPopKPI = nil } }
                 )
             }
-            if !runtimeModel.isMeasuringToday {
-                InputOutputCacheBar(summary: popover.today, height: 4)
-            }
+            InputOutputCacheBar(summary: popover.today, height: 4)
         }
     }
 
@@ -226,8 +224,7 @@ struct PopoverView: View {
                     expandedPopKPI = (expandedPopKPI == title) ? nil : title
                 }
             },
-            isExpanded: !measuring && expandedPopKPI == title,
-            measuring: measuring
+            isExpanded: !measuring && expandedPopKPI == title
         )
     }
 
@@ -507,7 +504,6 @@ struct PopKPI: View {
     var preciseValue: Int? = nil
     var onTap: (() -> Void)? = nil
     var isExpanded: Bool = false
-    var measuring: Bool = false
 
     var body: some View {
         Group {
@@ -551,7 +547,6 @@ struct PopKPI: View {
             .monospacedDigit()
             .lineLimit(1)
             .minimumScaleFactor(0.7)
-            .tokenBarShimmer(active: measuring)
         }
         .padding(.vertical, 3)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -611,5 +606,69 @@ private struct PopoverFooterIconButton: View {
                 isHovering = hovering
             }
         }
+    }
+}
+
+/// `MenuBarExtra(.window)` exposes an underlying NSWindow whose styleMask may
+/// include `.resizable`, which makes the cursor flash the vertical resize
+/// glyph at the popover edges even though the popover doesn't actually
+/// resize. We strip the flag *and* paint an `.arrow` cursor rect over the
+/// whole popover so AppKit's edge tracking can't substitute a misleading
+/// resize affordance.
+private struct PopoverWindowConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = PopoverCursorOverrideView()
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            // Wipe every chrome flag that could plant a hidden titlebar /
+            // resize zone at the top edge. `MenuBarExtra(.window)` ships
+            // with a regular NSWindow style that still has implicit edge
+            // tracking — force-collapse it to `.borderless` and disable any
+            // cursor-rect machinery the window may run.
+            window.styleMask = [.borderless, .nonactivatingPanel, .fullSizeContentView]
+            window.isMovableByWindowBackground = false
+            window.isMovable = false
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.animationBehavior = .none
+            window.disableCursorRects()
+            window.invalidateCursorRects(for: window.contentView ?? view)
+            window.contentView?.discardCursorRects()
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+/// Transparent NSView that owns a tracking area covering its full bounds and
+/// returns `NSCursor.arrow` from `cursorUpdate(_:)`. Placed as a background
+/// behind the popover so any cursor the OS would otherwise show (resize,
+/// I-beam from descendant text views) is overridden to a plain arrow.
+private final class PopoverCursorOverrideView: NSView {
+    private var trackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.activeAlways, .cursorUpdate, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+        super.updateTrackingAreas()
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.arrow.set()
+    }
+
+    override func resetCursorRects() {
+        discardCursorRects()
+        addCursorRect(bounds, cursor: .arrow)
     }
 }

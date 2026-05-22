@@ -7,6 +7,11 @@ enum TokenBarIndexingPhase: String, Sendable, Hashable {
     case queued
     case discovering
     case indexing
+    /// Background refresh that wants to publish per-source progress (e.g. the
+    /// bootstrap-background pass). Distinct from `.indexing` so the
+    /// `isActive` skip guard in `refresh()` does not block the refresh that
+    /// just set this phase.
+    case refreshing
     case paused
     case completed
     case failed
@@ -80,6 +85,8 @@ struct TokenBarIndexingState: Sendable, Hashable {
             return 0
         case .completed:
             return 1
+        case .refreshing:
+            return Double(completedSourceCount) / Double(sources.count)
         default:
             return min(0.98, Double(completedSourceCount) / Double(sources.count))
         }
@@ -122,23 +129,30 @@ final class TokenBarRuntimeModel: ObservableObject {
     @Published private(set) var indexingState: TokenBarIndexingState = .idle
     @Published private(set) var isBootstrapping = true
 
-    /// True while we cannot vouch for today's numbers yet — either the
-    /// bootstrap refresh is in flight, initial indexing is running, or a
-    /// background refresh is touching an empty store. Numeric assertions in
-    /// the popover/main view should render as em-dash + shimmer while this is
-    /// true so the user doesn't read a confidently-styled "0" as ground truth.
-    var isMeasuringToday: Bool {
-        isBootstrapping
-            || indexingState.isActive
-            || (refreshState == .refreshing && eventCount == 0)
+    /// Stable "we have not finished the first measurement yet" signal. Flips
+    /// at most once per app lifetime (bootstrap completion or initial-index
+    /// completion). Use this for layout decisions — show/hide of cards and
+    /// sections — so the user does not see things slide in and out every
+    /// time a periodic refresh runs.
+    var isInitialMeasurement: Bool {
+        isBootstrapping || indexingState.isActive
     }
 
-    /// `TokenBarIndexingStatusCard` should appear during the legacy cold-cold
-    /// path (`indexingState.isVisible`) AND during any first/catch-up refresh
-    /// on an empty store. Broadens the card without minting a new
-    /// `IndexingPhase.catchingUp` case.
+    /// Volatile per-refresh signal. Also flips to true while a refresh is
+    /// running on an empty store, so each KPI/hero number can render an
+    /// em-dash + shimmer. Only safe to use on text-level renderings where the
+    /// transition animates smoothly via `tokenBarShimmer` — never as a gate
+    /// for whether a whole section appears in the layout.
+    var isMeasuringToday: Bool {
+        isInitialMeasurement || (refreshState == .refreshing && eventCount == 0)
+    }
+
+    /// `TokenBarIndexingStatusCard` appears during the legacy cold-cold path
+    /// (`indexingState.isVisible`) and during the bootstrap window. It does
+    /// NOT toggle on every refresh — that would slide the card in and out
+    /// repeatedly.
     var showsIndexingCard: Bool {
-        indexingState.isVisible || isMeasuringToday
+        indexingState.isVisible || isInitialMeasurement
     }
     @Published private(set) var archivedProjectNames: Set<String>
     @Published var mainRoute: TokenBarMainRoute = .today {
@@ -200,6 +214,11 @@ final class TokenBarRuntimeModel: ObservableObject {
     private var lastAutomaticRefreshAt: Date?
     private var activeRefreshTrigger: String?
     private var pendingRefreshTrigger: String?
+    /// Triggers whose next instance is already produced by an upstream
+    /// scheduler (file watcher / interval timer). When they collide with an
+    /// in-flight refresh, drop them rather than coalescing — the next periodic
+    /// run will pick up the same work.
+    private static let lossyRefreshTriggers: Set<String> = ["file-change", "interval"]
     private var suppressSourceChangesUntil: Date?
     private var intervalRefreshTask: Task<Void, Never>?
     // CL-P0-026: scheduled to fire just after local midnight so the Today KPI
@@ -451,22 +470,36 @@ final class TokenBarRuntimeModel: ObservableObject {
     func refresh(trigger: String = "manual") async {
         let started = Date()
         guard !indexingState.isActive else {
+            // Same coalesce rule as the `activeRefreshTrigger` skip below:
+            // periodic triggers drop, one-shot triggers (manual, wake,
+            // bootstrap-background, custom-source-*) re-fire after indexing
+            // ends so they aren't silently lost.
+            let coalesced = !Self.lossyRefreshTriggers.contains(trigger)
+            if coalesced {
+                pendingRefreshTrigger = trigger
+            }
             TokenBarTelemetry.event(
                 "runtime.refresh.skip_initial_index",
-                metadata: "trigger=\(trigger) phase=\(indexingState.phase.rawValue)",
+                metadata: "trigger=\(trigger) phase=\(indexingState.phase.rawValue) coalesced=\(coalesced)",
                 success: true,
                 elapsed: Date().timeIntervalSince(started)
             )
             return
         }
         if let activeRefreshTrigger {
-            // Coalesce: keep the latest skipped trigger so it re-fires after
-            // the current one ends. Without this, a cold-start race against
-            // `wake` or `file-change` silently drops the bootstrap refresh.
-            pendingRefreshTrigger = trigger
+            // Coalesce only for one-shot / user-initiated triggers. `file-change`
+            // and `interval` are inherently periodic — their next instance is
+            // already scheduled by `handleSourceChange` / `intervalRefreshTask`,
+            // so re-queuing them here just chains refreshes back-to-back while
+            // the user is actively writing to source files, which the popover
+            // sees as UI thrash.
+            let coalesced = !Self.lossyRefreshTriggers.contains(trigger)
+            if coalesced {
+                pendingRefreshTrigger = trigger
+            }
             TokenBarTelemetry.event(
                 "runtime.refresh.skip_active",
-                metadata: "trigger=\(trigger) active=\(activeRefreshTrigger) coalesced=true",
+                metadata: "trigger=\(trigger) active=\(activeRefreshTrigger) coalesced=\(coalesced)",
                 success: true,
                 elapsed: Date().timeIntervalSince(started)
             )
@@ -526,7 +559,25 @@ final class TokenBarRuntimeModel: ObservableObject {
             metadata: "trigger=\(trigger) background=\(backgroundThrottle != nil)"
         )
         stageStarted = Date()
-        let runResult = await engine.run(trigger: trigger, startedAt: now, referenceDate: now, calendar: Calendar(identifier: .gregorian))
+        // While we are visibly showing per-source progress, hop each engine
+        // completion back onto MainActor and flip that source row from
+        // `.scanning` → `.indexed` / `.failed`. The progress bar moves
+        // monotonically as TaskGroup children finish.
+        let progressHandler: CheckpointEngine.SourceProgressHandler?
+        if showIndexingProgress {
+            progressHandler = { @Sendable [weak self] sourceName, succeeded in
+                await MainActor.run { self?.markSourceProgress(name: sourceName, succeeded: succeeded) }
+            }
+        } else {
+            progressHandler = nil
+        }
+        let runResult = await engine.run(
+            trigger: trigger,
+            startedAt: now,
+            referenceDate: now,
+            calendar: Calendar(identifier: .gregorian),
+            onSourceProgress: progressHandler
+        )
         let throttleSnapshot = await backgroundThrottle?.snapshot()
         let throttleMetadata: String
         if let throttleSnapshot {
@@ -1804,8 +1855,13 @@ final class TokenBarRuntimeModel: ObservableObject {
                 message: sourceMessage(for: status)
             )
         }
+        // `bootstrap-background` is the non-cold-cold catch-up path; use
+        // `.refreshing` (not in `isActive`) so it doesn't accidentally block
+        // its own coalesced follow-ups and so the card reads "Catching up"
+        // instead of "Building local index".
+        let phase: TokenBarIndexingPhase = trigger == "bootstrap-background" ? .refreshing : .indexing
         indexingState = TokenBarIndexingState(
-            phase: .indexing,
+            phase: phase,
             sources: sourceStates,
             startedAt: startedAt,
             endedAt: nil,
@@ -1893,8 +1949,22 @@ final class TokenBarRuntimeModel: ObservableObject {
         }
     }
 
+    /// Update one source row of `indexingState` to reflect a TaskGroup child
+    /// that just finished. Called from the engine via
+    /// `CheckpointEngine.SourceProgressHandler` so the popover progress bar
+    /// moves while the refresh is still running.
+    private func markSourceProgress(name: String, succeeded: Bool) {
+        guard let index = indexingState.sources.firstIndex(where: { $0.sourceName == name }) else { return }
+        var sources = indexingState.sources
+        sources[index].phase = succeeded ? .indexed : .failed
+        indexingState.sources = sources
+        indexingState.activeSourceName = sources.first(where: { $0.phase == .scanning })?.sourceName
+    }
+
     private func shouldShowRefreshIndexingProgress(for trigger: String) -> Bool {
-        (trigger.hasPrefix("custom-source-") && trigger != "custom-source-remove") || trigger == "reparse-source"
+        (trigger.hasPrefix("custom-source-") && trigger != "custom-source-remove")
+            || trigger == "reparse-source"
+            || trigger == "bootstrap-background"
     }
 
     private func progressSources(

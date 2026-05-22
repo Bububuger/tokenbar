@@ -651,7 +651,7 @@ public struct UsageRepository: Sendable {
         referenceDate: Date,
         calendar: Calendar,
         days: Int = 30,
-        topCount: Int = 3
+        topCount: Int = 5
     ) throws -> UsageSnapshot {
         try database.queue.read { db in
             let todayStart = calendar.startOfDay(for: referenceDate)

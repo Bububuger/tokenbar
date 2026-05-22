@@ -369,27 +369,28 @@ struct PopoverView: View {
 
     private var footer: some View {
         HStack(spacing: 10) {
-            Button {
+            PopoverFooterIconButton(
+                systemImage: "rectangle.split.2x1",
+                tint: TokenBarStyle.accent,
+                help: "Open Details (⌘↩)",
+                keyEquivalent: .return,
+                modifiers: .command
+            ) {
                 openMain(route: .today)
-            } label: {
-                Label("Open Details", systemImage: "rectangle.split.2x1")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
 
             Spacer()
 
-            Button {
+            PopoverFooterIconButton(
+                systemImage: "power",
+                tint: TokenBarStyle.error,
+                help: "Quit TokenBar (⌘Q)",
+                keyEquivalent: "q",
+                modifiers: .command
+            ) {
                 TokenBarTelemetry.event("popover.quit.click", success: true)
                 NSApp.terminate(nil)
-            } label: {
-                Image(systemName: "power")
-                    .font(.system(size: 12, weight: .semibold))
             }
-            .buttonStyle(.borderless)
-            .keyboardShortcut("q", modifiers: .command)
-            .foregroundStyle(TokenBarStyle.error)
-            .help("Quit TokenBar (⌘Q)")
         }
     }
 
@@ -565,5 +566,38 @@ private struct TokenBarNativeStatusBadge: View {
                 .font(.caption)
         }
         .foregroundStyle(.secondary)
+    }
+}
+
+private struct PopoverFooterIconButton: View {
+    let systemImage: String
+    let tint: Color
+    let help: String
+    let keyEquivalent: KeyEquivalent
+    let modifiers: EventModifiers
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: 22, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(tint.opacity(isHovering ? 0.18 : 0))
+                )
+                .foregroundStyle(tint.opacity(isHovering ? 1.0 : 0.78))
+                .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+        }
+        .buttonStyle(.borderless)
+        .keyboardShortcut(keyEquivalent, modifiers: modifiers)
+        .help(help)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
     }
 }

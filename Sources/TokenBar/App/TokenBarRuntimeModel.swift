@@ -115,6 +115,7 @@ final class TokenBarRuntimeModel: ObservableObject {
     @Published private(set) var selectedProjectName: String?
     @Published private(set) var projectDetail: ProjectDetailSnapshot?
     @Published private(set) var customSources: [CustomSourceRecord]
+    @Published private(set) var savedPrompts: [SavedPrompt] = []
     @Published private(set) var events: [UsageEvent]
     @Published private(set) var sourceWarnings: [UsageSourceWarning]
     @Published private(set) var popoverSnapshot: TokenBarPopoverSnapshot
@@ -189,6 +190,7 @@ final class TokenBarRuntimeModel: ObservableObject {
     private var projectDetailTask: Task<Void, Never>?
     private var projectDetailCache: [String: CachedProjectDetail] = [:]
     private var initialIndexTask: Task<Void, Never>?
+    private let savedPromptCommandSync = SavedPromptCommandSync()
     @Published private(set) var dayChangedAt: Date?
 
     init(
@@ -333,6 +335,13 @@ final class TokenBarRuntimeModel: ObservableObject {
             "runtime.load_persisted.stage.custom_sources",
             startedAt: stageStarted,
             metadata: "count=\(customSources.count)"
+        )
+        stageStarted = Date()
+        savedPrompts = await loadSavedPrompts()
+        TokenBarTelemetry.timing(
+            "runtime.load_persisted.stage.saved_prompts",
+            startedAt: stageStarted,
+            metadata: "count=\(savedPrompts.count)"
         )
         stageStarted = Date()
         await applyRetention(referenceDate: now)
@@ -1123,8 +1132,13 @@ final class TokenBarRuntimeModel: ObservableObject {
             offset: offset,
             includeContent: includeContent,
             query: query,
-            kindFilter: kindFilter
+            kindFilter: kindFilter,
+            bookmarkedIds: savedPromptSourceIds
         )) ?? .empty(limit: limit, offset: offset)
+    }
+
+    var savedPromptSourceIds: Set<String> {
+        Set(savedPrompts.compactMap(\.sourcePromptId))
     }
 
     func projectPromptCountsByDay(
@@ -1967,6 +1981,32 @@ final class TokenBarRuntimeModel: ObservableObject {
 
     private func loadCustomSources() async -> [CustomSourceRecord] {
         (try? await usageStore.customSources()) ?? []
+    }
+
+    private func loadSavedPrompts() async -> [SavedPrompt] {
+        (try? await usageStore.allSavedPrompts()) ?? []
+    }
+
+    func applySavedPrompt(_ prompt: SavedPrompt, previousSlug: String?) async throws {
+        try await usageStore.upsertSavedPrompt(prompt)
+        try savedPromptCommandSync.apply(prompt, previousSlug: previousSlug)
+        savedPrompts = await loadSavedPrompts()
+        TokenBarTelemetry.event(
+            "saved_prompt.apply",
+            metadata: "slug=\(prompt.slug) renamed=\(previousSlug.map { $0 != prompt.slug } ?? false)",
+            success: true
+        )
+    }
+
+    func deleteSavedPrompt(_ prompt: SavedPrompt) async throws {
+        try await usageStore.deleteSavedPrompt(id: prompt.id)
+        try savedPromptCommandSync.remove(slug: prompt.slug)
+        savedPrompts = await loadSavedPrompts()
+        TokenBarTelemetry.event(
+            "saved_prompt.delete",
+            metadata: "slug=\(prompt.slug)",
+            success: true
+        )
     }
 
     private func activeSources() async -> [any InspectableUsageEventSource] {

@@ -29,6 +29,7 @@ struct ContentView: View {
                 onSelectOverview: { runtimeModel.navigate(to: .today, source: "sidebar.overview") },
                 onSelectDiagnostics: { runtimeModel.navigate(to: .diagnostics, source: "sidebar.diagnostics") },
                 onSelectSettings: { runtimeModel.navigate(to: .settings, source: "sidebar.settings") },
+                onSelectSavedPrompts: { runtimeModel.navigate(to: .savedPrompts, source: "sidebar.saved_prompts") },
                 onSelectProject: { runtimeModel.openProject(named: $0, source: "sidebar.project") },
                 onArchiveProject: { runtimeModel.archiveProject(named: $0, source: "sidebar.project_context") },
                 onRestoreProject: { runtimeModel.restoreProject(named: $0, source: "sidebar.project_context") }
@@ -44,6 +45,18 @@ struct ContentView: View {
                     SettingsView()
                         .environmentObject(runtimeModel)
                         .onAppear { recordRouteViewAppear(.settings) }
+                } else if runtimeModel.mainRoute == .savedPrompts {
+                    // CL-SAVED-1: rendered outside the shared
+                    // ScrollView+LazyVStack chassis. Nesting a single
+                    // switch-case inside that lazy container left this
+                    // route blank on first appearance until the user
+                    // scrolled to force a re-measure.
+                    ScrollView {
+                        SavedPromptsListView()
+                            .environmentObject(runtimeModel)
+                            .padding(TokenBarStyle.pagePadding)
+                            .onAppear { recordRouteViewAppear(.savedPrompts) }
+                    }
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: TokenBarStyle.sectionSpacing) {
@@ -61,6 +74,8 @@ struct ContentView: View {
                                     .environmentObject(runtimeModel)
                                     .onAppear { recordRouteViewAppear(.diagnostics) }
                             case .settings:
+                                EmptyView()
+                            case .savedPrompts:
                                 EmptyView()
                             case .project(let projectName):
                                 projectPage(projectName)
@@ -569,6 +584,7 @@ private struct TokenBarSidebar: View {
     let onSelectOverview: () -> Void
     let onSelectDiagnostics: () -> Void
     let onSelectSettings: () -> Void
+    let onSelectSavedPrompts: () -> Void
     let onSelectProject: (String) -> Void
     let onArchiveProject: (String) -> Void
     let onRestoreProject: (String) -> Void
@@ -586,6 +602,7 @@ private struct TokenBarSidebar: View {
 
                 VStack(spacing: 6) {
                     routeRow(icon: "square.grid.2x2", title: "Overview", value: "", selected: isOverview, action: onSelectOverview)
+                    routeRow(icon: "bookmark", title: "Prompt Templates", value: "", selected: isSavedPrompts, action: onSelectSavedPrompts)
                     routeRow(icon: "waveform.path.ecg", title: "Diagnostics", value: warnings > 0 ? "\(warnings)" : "", selected: isDiagnostics, action: onSelectDiagnostics)
                     routeRow(icon: "gearshape", title: "Settings", value: "", selected: isSettings, action: onSelectSettings)
                 }
@@ -694,6 +711,10 @@ private struct TokenBarSidebar: View {
 
     private var isSettings: Bool {
         activeRoute == .settings
+    }
+
+    private var isSavedPrompts: Bool {
+        activeRoute == .savedPrompts
     }
 
     private var activeProjects: [UsageBreakdown] {

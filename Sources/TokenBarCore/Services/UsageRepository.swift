@@ -291,29 +291,59 @@ public struct UsageRepository: Sendable {
         offset: Int,
         includeContent: Bool = false,
         query: String = "",
-        kindFilter: PromptHistoryKindFilter = .all
+        kindFilter: PromptHistoryKindFilter = .all,
+        bookmarkedIds: Set<String> = []
     ) throws -> PromptHistoryPage {
         let safeLimit = max(1, limit)
         let safeOffset = max(0, offset)
         return try database.queue.read { db in
             let contentSelection = includeContent ? "content" : "'' AS content"
             let baseFilter = promptBaseFilter(projectName: projectName, query: query)
-            let kindPredicate = promptKindPredicate(kindFilter)
-            let pageFilter = [baseFilter.sql, kindPredicate].compactMap { $0 }.joined(separator: " AND ")
-            var pageArguments = baseFilter.arguments
-            pageArguments += [safeLimit, safeOffset]
+            let kindClause = promptKindClause(filter: kindFilter, bookmarkedIds: bookmarkedIds)
+            let combinedSQL: String
+            var combinedArguments = baseFilter.arguments
+            if let kindClause {
+                combinedSQL = "\(baseFilter.sql) AND \(kindClause.sql)"
+                combinedArguments += kindClause.arguments
+            } else {
+                combinedSQL = baseFilter.sql
+            }
+
+            // Bookmarked filter with empty restrict-set yields zero results
+            // without touching the DB row set.
+            if kindFilter == .bookmarked && bookmarkedIds.isEmpty {
+                let kindCounts = try promptKindCounts(
+                    db: db,
+                    baseFilter: baseFilter,
+                    bookmarkedIds: bookmarkedIds
+                )
+                return PromptHistoryPage(
+                    prompts: [],
+                    totalCount: 0,
+                    kindCounts: kindCounts,
+                    limit: safeLimit,
+                    offset: safeOffset
+                )
+            }
 
             let totalCount = try Int.fetchOne(
                 db,
-                sql: "SELECT COUNT(*) FROM prompts WHERE \(pageFilter)",
-                arguments: baseFilter.arguments
+                sql: "SELECT COUNT(*) FROM prompts WHERE \(combinedSQL)",
+                arguments: combinedArguments
             ) ?? 0
-            let kindCounts = try promptKindCounts(db: db, baseFilter: baseFilter)
+            let kindCounts = try promptKindCounts(
+                db: db,
+                baseFilter: baseFilter,
+                bookmarkedIds: bookmarkedIds
+            )
+
+            var pageArguments = combinedArguments
+            pageArguments += [safeLimit, safeOffset]
             let rows = try Row.fetchAll(db, sql: """
                 SELECT id, event_id, agent, project_name, session_id, timestamp,
                        \(contentSelection), content_hash, source_path
                 FROM prompts
-                WHERE \(pageFilter)
+                WHERE \(combinedSQL)
                 ORDER BY timestamp DESC, id DESC
                 LIMIT ? OFFSET ?
                 """, arguments: pageArguments)
@@ -385,20 +415,40 @@ public struct UsageRepository: Sendable {
         return PromptSQLFilter(sql: sql, arguments: arguments)
     }
 
-    private func promptKindPredicate(_ filter: PromptHistoryKindFilter) -> String? {
+    private func promptKindClause(filter: PromptHistoryKindFilter, bookmarkedIds: Set<String>) -> PromptSQLFilter? {
         switch filter {
         case .all:
             return nil
         case .command:
-            return "(\(Self.promptCommandSQL))"
+            return PromptSQLFilter(sql: "(\(Self.promptCommandSQL))", arguments: [])
         case .subagent:
-            return "NOT (\(Self.promptCommandSQL)) AND (\(Self.promptSubagentSQL))"
+            return PromptSQLFilter(
+                sql: "NOT (\(Self.promptCommandSQL)) AND (\(Self.promptSubagentSQL))",
+                arguments: []
+            )
         case .human:
-            return "NOT (\(Self.promptCommandSQL)) AND NOT (\(Self.promptSubagentSQL))"
+            return PromptSQLFilter(
+                sql: "NOT (\(Self.promptCommandSQL)) AND NOT (\(Self.promptSubagentSQL))",
+                arguments: []
+            )
+        case .bookmarked:
+            guard !bookmarkedIds.isEmpty else {
+                return PromptSQLFilter(sql: "0", arguments: [])
+            }
+            let placeholders = Array(repeating: "?", count: bookmarkedIds.count).joined(separator: ", ")
+            var args = StatementArguments()
+            for id in bookmarkedIds {
+                args += [id]
+            }
+            return PromptSQLFilter(sql: "id IN (\(placeholders))", arguments: args)
         }
     }
 
-    private func promptKindCounts(db: Database, baseFilter: PromptSQLFilter) throws -> PromptHistoryKindCounts {
+    private func promptKindCounts(
+        db: Database,
+        baseFilter: PromptSQLFilter,
+        bookmarkedIds: Set<String>
+    ) throws -> PromptHistoryKindCounts {
         let row = try Row.fetchOne(db, sql: """
             SELECT
                 COALESCE(SUM(CASE WHEN \(Self.promptCommandSQL) THEN 1 ELSE 0 END), 0) AS command_count,
@@ -408,10 +458,27 @@ public struct UsageRepository: Sendable {
             WHERE \(baseFilter.sql)
             """, arguments: baseFilter.arguments)
 
+        let bookmarkedCount: Int
+        if bookmarkedIds.isEmpty {
+            bookmarkedCount = 0
+        } else {
+            let placeholders = Array(repeating: "?", count: bookmarkedIds.count).joined(separator: ", ")
+            var args = baseFilter.arguments
+            for id in bookmarkedIds {
+                args += [id]
+            }
+            bookmarkedCount = try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM prompts WHERE \(baseFilter.sql) AND id IN (\(placeholders))",
+                arguments: args
+            ) ?? 0
+        }
+
         return PromptHistoryKindCounts(
             humanCount: row?["human_count"] ?? 0,
             subagentCount: row?["subagent_count"] ?? 0,
-            commandCount: row?["command_count"] ?? 0
+            commandCount: row?["command_count"] ?? 0,
+            bookmarkedCount: bookmarkedCount
         )
     }
 
@@ -825,6 +892,75 @@ public struct UsageRepository: Sendable {
         try database.queue.write { db in
             try deleteCustomSourceData(id: id, db: db)
         }
+    }
+
+    public func allSavedPrompts() throws -> [SavedPrompt] {
+        try database.queue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+            SELECT id, slug, title, body, source_prompt_id, created_at, updated_at
+            FROM saved_prompts
+            ORDER BY updated_at DESC
+            """)
+            return rows.map(savedPrompt(from:))
+        }
+    }
+
+    public func savedPrompt(slug: String) throws -> SavedPrompt? {
+        try database.queue.read { db in
+            let row = try Row.fetchOne(
+                db,
+                sql: """
+                SELECT id, slug, title, body, source_prompt_id, created_at, updated_at
+                FROM saved_prompts WHERE slug = ?
+                """,
+                arguments: [slug]
+            )
+            return row.map(savedPrompt(from:))
+        }
+    }
+
+    public func upsertSavedPrompt(_ prompt: SavedPrompt) throws {
+        try database.queue.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO saved_prompts (id, slug, title, body, source_prompt_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    slug = excluded.slug,
+                    title = excluded.title,
+                    body = excluded.body,
+                    source_prompt_id = excluded.source_prompt_id,
+                    updated_at = excluded.updated_at
+                """,
+                arguments: [
+                    prompt.id,
+                    prompt.slug,
+                    prompt.title,
+                    prompt.body,
+                    prompt.sourcePromptId,
+                    prompt.createdAt.tokenBarMillisecondsSince1970,
+                    prompt.updatedAt.tokenBarMillisecondsSince1970,
+                ]
+            )
+        }
+    }
+
+    public func deleteSavedPrompt(id: String) throws {
+        try database.queue.write { db in
+            try db.execute(sql: "DELETE FROM saved_prompts WHERE id = ?", arguments: [id])
+        }
+    }
+
+    private func savedPrompt(from row: Row) -> SavedPrompt {
+        SavedPrompt(
+            id: row["id"],
+            slug: row["slug"],
+            title: row["title"],
+            body: row["body"],
+            sourcePromptId: row["source_prompt_id"],
+            createdAt: Date.tokenBarDate(millisecondsSince1970: row["created_at"]),
+            updatedAt: Date.tokenBarDate(millisecondsSince1970: row["updated_at"])
+        )
     }
 
     private func deleteCustomSourceData(id: String, db: Database) throws {

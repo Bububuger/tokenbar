@@ -128,6 +128,22 @@ public actor UsageStore {
         try repository.deleteCustomSourceData(id: id)
     }
 
+    public func allSavedPrompts() throws -> [SavedPrompt] {
+        try repository.allSavedPrompts()
+    }
+
+    public func savedPrompt(slug: String) throws -> SavedPrompt? {
+        try repository.savedPrompt(slug: slug)
+    }
+
+    public func upsertSavedPrompt(_ prompt: SavedPrompt) throws {
+        try repository.upsertSavedPrompt(prompt)
+    }
+
+    public func deleteSavedPrompt(id: String) throws {
+        try repository.deleteSavedPrompt(id: id)
+    }
+
     public func watermarks() throws -> [String: SourceWatermark] {
         try repository.watermarks()
     }
@@ -259,7 +275,8 @@ public actor UsageStore {
         offset: Int,
         includeContent: Bool = false,
         query: String = "",
-        kindFilter: PromptHistoryKindFilter = .all
+        kindFilter: PromptHistoryKindFilter = .all,
+        bookmarkedIds: Set<String> = []
     ) throws -> PromptHistoryPage {
         try repository.projectPromptHistoryPage(
             projectName: projectName,
@@ -267,7 +284,8 @@ public actor UsageStore {
             offset: offset,
             includeContent: includeContent,
             query: query,
-            kindFilter: kindFilter
+            kindFilter: kindFilter,
+            bookmarkedIds: bookmarkedIds
         )
     }
 

@@ -449,29 +449,60 @@ public struct PromptRecord: Identifiable, Sendable, Hashable {
     }
 }
 
+public struct SavedPrompt: Identifiable, Sendable, Hashable {
+    public let id: String
+    public var slug: String
+    public var title: String
+    public var body: String
+    public var sourcePromptId: String?
+    public let createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        id: String,
+        slug: String,
+        title: String,
+        body: String,
+        sourcePromptId: String?,
+        createdAt: Date,
+        updatedAt: Date
+    ) {
+        self.id = id
+        self.slug = slug
+        self.title = title
+        self.body = body
+        self.sourcePromptId = sourcePromptId
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
 public enum PromptHistoryKindFilter: String, CaseIterable, Sendable, Hashable {
     case all
     case human
     case subagent
     case command
+    case bookmarked
 }
 
 public struct PromptHistoryKindCounts: Sendable, Hashable {
     public let humanCount: Int
     public let subagentCount: Int
     public let commandCount: Int
+    public let bookmarkedCount: Int
 
     public var totalCount: Int {
         humanCount + subagentCount + commandCount
     }
 
-    public init(humanCount: Int, subagentCount: Int, commandCount: Int) {
+    public init(humanCount: Int, subagentCount: Int, commandCount: Int, bookmarkedCount: Int = 0) {
         self.humanCount = humanCount
         self.subagentCount = subagentCount
         self.commandCount = commandCount
+        self.bookmarkedCount = bookmarkedCount
     }
 
-    public static let zero = PromptHistoryKindCounts(humanCount: 0, subagentCount: 0, commandCount: 0)
+    public static let zero = PromptHistoryKindCounts(humanCount: 0, subagentCount: 0, commandCount: 0, bookmarkedCount: 0)
 }
 
 public struct PromptHistoryPage: Sendable, Hashable {

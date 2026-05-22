@@ -2059,7 +2059,7 @@ final class TokenBarRuntimeModel: ObservableObject {
             .filter(\.enabled)
             .map(\.directory)
         let watcher = RecursiveFSEventsWatcher(
-            paths: ["~/.codex/sessions", "~/.claude/projects", "~/.hermes", "~/.gemini"] + customPaths
+            paths: ["~/.codex/sessions", "~/.claude/projects", "~/.hermes", "~/.gemini", "~/.local/share/opencode"] + customPaths
         ) { [weak self] in
             await self?.handleSourceChange()
         }
@@ -2117,6 +2117,7 @@ final class TokenBarRuntimeModel: ObservableObject {
                 ClaudeUsageEventSource(),
                 HermesUsageEventSource(),
                 GeminiUsageEventSource(),
+                OpenCodeUsageEventSource(),
             ]
         return TokenBarRuntimeModel(
             settingsStore: settingsStore,

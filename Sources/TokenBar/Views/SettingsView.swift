@@ -1147,6 +1147,8 @@ private struct AddCustomSourceOverlay: View {
             "~/.hermes/state.db or ~/.hermes"
         case .gemini:
             "~/.gemini/tmp or **/chats/*.json"
+        case .openCode:
+            "~/.local/share/opencode/opencode.db or ~/.local/share/opencode"
         }
     }
 

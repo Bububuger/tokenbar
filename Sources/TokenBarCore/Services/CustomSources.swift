@@ -239,6 +239,17 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
                     )
                 )
             }
+        case .openCode:
+            for file in files {
+                let result = try OpenCodeUsageParser.parse(databaseURL: file, watermark: watermarks[file.path])
+                events.append(contentsOf: result.events.map { customEvent($0) })
+                nextWatermarks.append(contentsOf: result.nextWatermarks.map {
+                    customWatermark(from: $0, lastEventId: $0.lastEventId)
+                })
+                warnings.append(contentsOf: result.warnings.map {
+                    UsageSourceWarning(sourceName: sourceName, sourcePath: $0.sourcePath, lineNumber: $0.lineNumber, message: $0.message)
+                })
+            }
         }
 
         return UsageSourceLoadResult(events: events, prompts: prompts, nextWatermarks: nextWatermarks, warnings: warnings)
@@ -263,6 +274,12 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
     private func discoverFiles() throws -> [URL] {
         if record.engine == .hermes {
             return discoverHermesDatabases()
+        }
+        if record.engine == .openCode {
+            return OpenCodeDataSource.discoverDatabases(
+                rootPath: record.directory,
+                fileManager: fileManager
+            )
         }
 
         let root = URL(fileURLWithPath: expandedDirectory, isDirectory: true)

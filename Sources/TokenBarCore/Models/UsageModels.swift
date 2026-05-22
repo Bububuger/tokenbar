@@ -226,6 +226,56 @@ public struct UsageBreakdown: Identifiable, Sendable, Hashable {
     }
 }
 
+public struct UsageEventTimeBounds: Sendable, Hashable {
+    public let earliest: Date?
+    public let latest: Date?
+    public let eventCount: Int
+
+    public init(earliest: Date?, latest: Date?, eventCount: Int) {
+        self.earliest = earliest
+        self.latest = latest
+        self.eventCount = eventCount
+    }
+}
+
+public struct UsageRangeAggregateRow: Sendable, Hashable {
+    public let projectName: String
+    public let agent: AgentKind
+    public let modelName: String?
+    public let summary: UsageSummary
+
+    public init(projectName: String, agent: AgentKind, modelName: String?, summary: UsageSummary) {
+        self.projectName = projectName
+        self.agent = agent
+        self.modelName = modelName
+        self.summary = summary
+    }
+}
+
+public struct UsageRangeAggregate: Sendable, Hashable {
+    public let start: Date
+    public let end: Date
+    public let days: [UsageDay]
+    public let rows: [UsageRangeAggregateRow]
+
+    public var summary: UsageSummary {
+        rows.reduce(UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0)) { total, row in
+            UsageSummary(
+                inputTokens: total.inputTokens + row.summary.inputTokens,
+                outputTokens: total.outputTokens + row.summary.outputTokens,
+                cacheTokens: total.cacheTokens + row.summary.cacheTokens
+            )
+        }
+    }
+
+    public init(start: Date, end: Date, days: [UsageDay], rows: [UsageRangeAggregateRow]) {
+        self.start = start
+        self.end = end
+        self.days = days
+        self.rows = rows
+    }
+}
+
 public struct UsageHour: Identifiable, Sendable, Hashable {
     public let start: Date
     public let hourOfDay: Int
@@ -396,6 +446,57 @@ public struct PromptRecord: Identifiable, Sendable, Hashable {
         self.content = content
         self.contentHash = contentHash
         self.sourcePath = sourcePath
+    }
+}
+
+public enum PromptHistoryKindFilter: String, CaseIterable, Sendable, Hashable {
+    case all
+    case human
+    case subagent
+    case command
+}
+
+public struct PromptHistoryKindCounts: Sendable, Hashable {
+    public let humanCount: Int
+    public let subagentCount: Int
+    public let commandCount: Int
+
+    public var totalCount: Int {
+        humanCount + subagentCount + commandCount
+    }
+
+    public init(humanCount: Int, subagentCount: Int, commandCount: Int) {
+        self.humanCount = humanCount
+        self.subagentCount = subagentCount
+        self.commandCount = commandCount
+    }
+
+    public static let zero = PromptHistoryKindCounts(humanCount: 0, subagentCount: 0, commandCount: 0)
+}
+
+public struct PromptHistoryPage: Sendable, Hashable {
+    public let prompts: [PromptRecord]
+    public let totalCount: Int
+    public let kindCounts: PromptHistoryKindCounts
+    public let limit: Int
+    public let offset: Int
+
+    public init(
+        prompts: [PromptRecord],
+        totalCount: Int,
+        kindCounts: PromptHistoryKindCounts,
+        limit: Int,
+        offset: Int
+    ) {
+        self.prompts = prompts
+        self.totalCount = totalCount
+        self.kindCounts = kindCounts
+        self.limit = limit
+        self.offset = offset
+    }
+
+    public static func empty(limit: Int, offset: Int) -> PromptHistoryPage {
+        PromptHistoryPage(prompts: [], totalCount: 0, kindCounts: .zero, limit: limit, offset: offset)
     }
 }
 

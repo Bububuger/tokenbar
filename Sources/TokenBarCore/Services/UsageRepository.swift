@@ -285,9 +285,248 @@ public struct UsageRepository: Sendable {
         }
     }
 
+    public func projectPromptHistoryPage(
+        projectName: String,
+        limit: Int,
+        offset: Int,
+        includeContent: Bool = false,
+        query: String = "",
+        kindFilter: PromptHistoryKindFilter = .all
+    ) throws -> PromptHistoryPage {
+        let safeLimit = max(1, limit)
+        let safeOffset = max(0, offset)
+        return try database.queue.read { db in
+            let contentSelection = includeContent ? "content" : "'' AS content"
+            let baseFilter = promptBaseFilter(projectName: projectName, query: query)
+            let kindPredicate = promptKindPredicate(kindFilter)
+            let pageFilter = [baseFilter.sql, kindPredicate].compactMap { $0 }.joined(separator: " AND ")
+            var pageArguments = baseFilter.arguments
+            pageArguments += [safeLimit, safeOffset]
+
+            let totalCount = try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM prompts WHERE \(pageFilter)",
+                arguments: baseFilter.arguments
+            ) ?? 0
+            let kindCounts = try promptKindCounts(db: db, baseFilter: baseFilter)
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT id, event_id, agent, project_name, session_id, timestamp,
+                       \(contentSelection), content_hash, source_path
+                FROM prompts
+                WHERE \(pageFilter)
+                ORDER BY timestamp DESC, id DESC
+                LIMIT ? OFFSET ?
+                """, arguments: pageArguments)
+
+            return PromptHistoryPage(
+                prompts: rows.compactMap(prompt(from:)),
+                totalCount: totalCount,
+                kindCounts: kindCounts,
+                limit: safeLimit,
+                offset: safeOffset
+            )
+        }
+    }
+
+    public func projectPromptCountsByDay(
+        projectName: String,
+        start: Date,
+        end: Date,
+        calendar: Calendar
+    ) throws -> [Date: Int] {
+        try database.queue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT timestamp
+                FROM prompts
+                WHERE project_name = ?
+                  AND timestamp >= ?
+                  AND timestamp < ?
+                """, arguments: [
+                    projectName,
+                    start.tokenBarMillisecondsSince1970,
+                    end.tokenBarMillisecondsSince1970,
+                ])
+
+            var counts: [Date: Int] = [:]
+            counts.reserveCapacity(rows.count)
+            for row in rows {
+                let timestampMillis: Int64 = row["timestamp"]
+                let day = calendar.startOfDay(for: .tokenBarDate(millisecondsSince1970: timestampMillis))
+                counts[day, default: 0] += 1
+            }
+            return counts
+        }
+    }
+
+    private struct PromptSQLFilter {
+        let sql: String
+        let arguments: StatementArguments
+    }
+
+    private func promptBaseFilter(projectName: String, query: String) -> PromptSQLFilter {
+        var sql = "project_name = ?"
+        var arguments = StatementArguments()
+        arguments += [projectName]
+
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedQuery.isEmpty {
+            let pattern = "%\(trimmedQuery.lowercased())%"
+            sql += """
+             AND (
+                LOWER(content) LIKE ?
+                OR LOWER(session_id) LIKE ?
+                OR LOWER(agent) LIKE ?
+                OR LOWER(source_path) LIKE ?
+             )
+            """
+            arguments += [pattern, pattern, pattern, pattern]
+        }
+
+        return PromptSQLFilter(sql: sql, arguments: arguments)
+    }
+
+    private func promptKindPredicate(_ filter: PromptHistoryKindFilter) -> String? {
+        switch filter {
+        case .all:
+            return nil
+        case .command:
+            return "(\(Self.promptCommandSQL))"
+        case .subagent:
+            return "NOT (\(Self.promptCommandSQL)) AND (\(Self.promptSubagentSQL))"
+        case .human:
+            return "NOT (\(Self.promptCommandSQL)) AND NOT (\(Self.promptSubagentSQL))"
+        }
+    }
+
+    private func promptKindCounts(db: Database, baseFilter: PromptSQLFilter) throws -> PromptHistoryKindCounts {
+        let row = try Row.fetchOne(db, sql: """
+            SELECT
+                COALESCE(SUM(CASE WHEN \(Self.promptCommandSQL) THEN 1 ELSE 0 END), 0) AS command_count,
+                COALESCE(SUM(CASE WHEN NOT (\(Self.promptCommandSQL)) AND (\(Self.promptSubagentSQL)) THEN 1 ELSE 0 END), 0) AS subagent_count,
+                COALESCE(SUM(CASE WHEN NOT (\(Self.promptCommandSQL)) AND NOT (\(Self.promptSubagentSQL)) THEN 1 ELSE 0 END), 0) AS human_count
+            FROM prompts
+            WHERE \(baseFilter.sql)
+            """, arguments: baseFilter.arguments)
+
+        return PromptHistoryKindCounts(
+            humanCount: row?["human_count"] ?? 0,
+            subagentCount: row?["subagent_count"] ?? 0,
+            commandCount: row?["command_count"] ?? 0
+        )
+    }
+
+    private static var promptCommandSQL: String {
+        let firstToken = promptFirstTokenSQL
+        return """
+        LENGTH(\(firstToken)) > 1
+        AND \(firstToken) GLOB '/[A-Za-z0-9_-]*'
+        AND SUBSTR(\(firstToken), 2) NOT GLOB '*[^A-Za-z0-9_-]*'
+        """
+    }
+
+    private static var promptFirstTokenSQL: String {
+        let normalized = promptNormalizedContentSQL
+        return """
+        CASE
+            WHEN INSTR(\(normalized), ' ') > 0
+            THEN SUBSTR(\(normalized), 1, INSTR(\(normalized), ' ') - 1)
+            ELSE \(normalized)
+        END
+        """
+    }
+
+    private static var promptNormalizedContentSQL: String {
+        "TRIM(REPLACE(REPLACE(REPLACE(content, CHAR(10), ' '), CHAR(13), ' '), CHAR(9), ' '))"
+    }
+
+    private static let promptSubagentSQL = """
+    LOWER(source_path) LIKE '%/subagents/%'
+    OR LOWER(content) LIKE '%subagent%'
+    OR LOWER(content) LIKE '%sub-agent%'
+    OR LOWER(content) LIKE '%mainagent%'
+    OR LOWER(content) LIKE '%main agent%'
+    OR LOWER(content) LIKE '%assigned task%'
+    OR LOWER(content) LIKE '%you are not alone in the codebase%'
+    """
+
     public func projectSummary(projectName: String) throws -> UsageSummary {
         try database.queue.read { db in
             try summary(db: db, start: nil, end: nil, projectName: projectName)
+        }
+    }
+
+    public func eventTimeBounds() throws -> UsageEventTimeBounds {
+        try database.queue.read { db in
+            let row = try Row.fetchOne(db, sql: """
+            SELECT MIN(timestamp) AS min_timestamp,
+                   MAX(timestamp) AS max_timestamp,
+                   COUNT(*) AS event_count
+            FROM usage_events
+            """)
+            let minTimestamp: Int64? = row?["min_timestamp"]
+            let maxTimestamp: Int64? = row?["max_timestamp"]
+            return UsageEventTimeBounds(
+                earliest: minTimestamp.map(Date.tokenBarDate(millisecondsSince1970:)),
+                latest: maxTimestamp.map(Date.tokenBarDate(millisecondsSince1970:)),
+                eventCount: row?["event_count"] ?? 0
+            )
+        }
+    }
+
+    public func projectBreakdowns(
+        start: Date,
+        end: Date,
+        topCount: Int? = nil
+    ) throws -> [UsageBreakdown] {
+        try database.queue.read { db in
+            try projectBreakdowns(db: db, start: start, end: end, topCount: topCount)
+        }
+    }
+
+    public func rangeAggregate(
+        start: Date,
+        end: Date,
+        calendar: Calendar
+    ) throws -> UsageRangeAggregate {
+        try database.queue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+            SELECT project_name,
+                   agent,
+                   COALESCE(model_name, '') AS model_name,
+                   SUM(input_tokens) AS input_tokens,
+                   SUM(output_tokens) AS output_tokens,
+                   SUM(cache_tokens) AS cache_tokens
+            FROM usage_events
+            WHERE timestamp >= ? AND timestamp < ?
+            GROUP BY project_name, agent, COALESCE(model_name, '')
+            """, arguments: [
+                start.tokenBarMillisecondsSince1970,
+                end.tokenBarMillisecondsSince1970,
+            ])
+
+            let aggregateRows = rows.compactMap { row -> UsageRangeAggregateRow? in
+                guard let agent = AgentKind(rawValue: row["agent"] as String) else {
+                    return nil
+                }
+                let rawModelName = row["model_name"] as String
+                return UsageRangeAggregateRow(
+                    projectName: row["project_name"],
+                    agent: agent,
+                    modelName: rawModelName.isEmpty ? nil : rawModelName,
+                    summary: UsageSummary(
+                        inputTokens: row["input_tokens"],
+                        outputTokens: row["output_tokens"],
+                        cacheTokens: row["cache_tokens"]
+                    )
+                )
+            }
+
+            return UsageRangeAggregate(
+                start: start,
+                end: end,
+                days: try usageDays(db: db, start: start, end: end, calendar: calendar, projectName: nil),
+                rows: aggregateRows
+            )
         }
     }
 
@@ -723,6 +962,126 @@ public struct UsageRepository: Sendable {
             outputTokens: row?["output_tokens"] ?? 0,
             cacheTokens: row?["cache_tokens"] ?? 0
         )
+    }
+
+    private func usageDays(
+        db: Database,
+        start: Date,
+        end: Date,
+        calendar: Calendar,
+        projectName: String?
+    ) throws -> [UsageDay] {
+        var dayRanges: [(date: Date, end: Date)] = []
+        var cursor = start
+        while cursor < end {
+            let next = calendar.date(byAdding: .day, value: 1, to: cursor) ?? end
+            dayRanges.append((date: cursor, end: min(next, end)))
+            cursor = next
+        }
+        guard !dayRanges.isEmpty else {
+            return []
+        }
+
+        var arguments = StatementArguments()
+        let valuesSQL = dayRanges.enumerated().map { index, range in
+            arguments += [
+                index,
+                range.date.tokenBarMillisecondsSince1970,
+                range.end.tokenBarMillisecondsSince1970,
+            ]
+            return "(?, ?, ?)"
+        }.joined(separator: ", ")
+        let projectJoinClause: String
+        if let projectName {
+            projectJoinClause = "AND usage_events.project_name = ?"
+            arguments += [projectName]
+        } else {
+            projectJoinClause = ""
+        }
+
+        let rows = try Row.fetchAll(db, sql: """
+        WITH days(day_index, start_ms, end_ms) AS (
+            VALUES \(valuesSQL)
+        )
+        SELECT days.day_index AS day_index,
+               COALESCE(SUM(usage_events.input_tokens), 0) AS input_tokens,
+               COALESCE(SUM(usage_events.output_tokens), 0) AS output_tokens,
+               COALESCE(SUM(usage_events.cache_tokens), 0) AS cache_tokens
+        FROM days
+        LEFT JOIN usage_events
+          ON usage_events.timestamp >= days.start_ms
+         AND usage_events.timestamp < days.end_ms
+         \(projectJoinClause)
+        GROUP BY days.day_index
+        ORDER BY days.day_index ASC
+        """, arguments: arguments)
+
+        var summariesByIndex: [Int: UsageSummary] = [:]
+        summariesByIndex.reserveCapacity(rows.count)
+        for row in rows {
+            summariesByIndex[row["day_index"] as Int] = UsageSummary(
+                inputTokens: row["input_tokens"],
+                outputTokens: row["output_tokens"],
+                cacheTokens: row["cache_tokens"]
+            )
+        }
+
+        let days = dayRanges.enumerated().map { index, range in
+            UsageDay(
+                date: range.date,
+                summary: summariesByIndex[index] ?? UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0),
+                intensity: 0
+            )
+        }
+
+        let maxTotal = Double(days.map(\.summary.totalTokens).max() ?? 0)
+        return days.map { day in
+            UsageDay(
+                date: day.date,
+                summary: day.summary,
+                intensity: maxTotal > 0 ? Double(day.summary.totalTokens) / maxTotal : 0
+            )
+        }
+    }
+
+    private func projectBreakdowns(
+        db: Database,
+        start: Date,
+        end: Date,
+        topCount: Int?
+    ) throws -> [UsageBreakdown] {
+        var arguments: StatementArguments = [
+            start.tokenBarMillisecondsSince1970,
+            end.tokenBarMillisecondsSince1970,
+        ]
+        let limitSQL: String
+        if let topCount {
+            limitSQL = "LIMIT ?"
+            arguments += [topCount]
+        } else {
+            limitSQL = ""
+        }
+        let rows = try Row.fetchAll(db, sql: """
+        SELECT project_name AS name,
+               SUM(input_tokens) AS input_tokens,
+               SUM(output_tokens) AS output_tokens,
+               SUM(cache_tokens) AS cache_tokens
+        FROM usage_events
+        WHERE timestamp >= ? AND timestamp < ?
+        GROUP BY project_name
+        ORDER BY (SUM(input_tokens) + SUM(output_tokens) + SUM(cache_tokens)) DESC, name ASC
+        \(limitSQL)
+        """, arguments: arguments)
+        return rows.map { row in
+            UsageBreakdown(
+                name: row["name"] as String,
+                summary: UsageSummary(
+                    inputTokens: row["input_tokens"],
+                    outputTokens: row["output_tokens"],
+                    cacheTokens: row["cache_tokens"]
+                )
+            )
+        }
     }
 
     private func costProjection(

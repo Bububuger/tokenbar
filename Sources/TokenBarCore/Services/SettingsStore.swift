@@ -7,6 +7,7 @@ public final class SettingsStore: @unchecked Sendable {
         static let storePromptTextInClearText = "tokenbar.storePromptTextInClearText"
         static let usePromptFingerprintsByDefault = "tokenbar.usePromptFingerprintsByDefault"
         static let retentionWindow = "tokenbar.retentionWindow"
+        static let archivedProjectNames = "tokenbar.archivedProjectNames"
     }
 
     private let userDefaults: UserDefaults
@@ -46,13 +47,23 @@ public final class SettingsStore: @unchecked Sendable {
         set { userDefaults.set(newValue, forKey: Keys.retentionWindow) }
     }
 
+    public var archivedProjectNames: Set<String> {
+        get {
+            Set(userDefaults.stringArray(forKey: Keys.archivedProjectNames) ?? [])
+        }
+        set {
+            userDefaults.set(Array(newValue).sorted(), forKey: Keys.archivedProjectNames)
+        }
+    }
+
     private func registerDefaults() {
         userDefaults.register(defaults: [
             Keys.refreshInterval: RefreshIntervalOption.fiveMinutes.rawValue,
             Keys.keepDataOnThisMac: true,
-            Keys.storePromptTextInClearText: false,
+            Keys.storePromptTextInClearText: true,
             Keys.usePromptFingerprintsByDefault: true,
             Keys.retentionWindow: "Forever",
+            Keys.archivedProjectNames: [] as [String],
         ])
     }
 }

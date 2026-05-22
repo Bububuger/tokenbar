@@ -15,6 +15,7 @@ struct SettingsStoreTests {
         writer.storePromptTextInClearText = false
         writer.usePromptFingerprintsByDefault = true
         writer.retentionWindow = "90d"
+        writer.archivedProjectNames = ["my-cli-tool", "tokenbar"]
 
         let reader = SettingsStore(userDefaults: defaults)
 
@@ -23,6 +24,7 @@ struct SettingsStoreTests {
         #expect(!reader.storePromptTextInClearText)
         #expect(reader.usePromptFingerprintsByDefault)
         #expect(reader.retentionWindow == "90d")
+        #expect(reader.archivedProjectNames == Set(["my-cli-tool", "tokenbar"]))
     }
 
     @Test
@@ -35,8 +37,9 @@ struct SettingsStoreTests {
 
         #expect(store.refreshInterval == .fiveMinutes)
         #expect(store.keepDataOnThisMac)
-        #expect(!store.storePromptTextInClearText)
+        #expect(store.storePromptTextInClearText)
         #expect(store.usePromptFingerprintsByDefault)
         #expect(store.retentionWindow == "Forever")
+        #expect(store.archivedProjectNames.isEmpty)
     }
 }

@@ -93,6 +93,47 @@ struct Sprint8StorageTests {
     }
 
     @Test
+    func rangeAggregateUsesSQLiteWindowAndGroupedRows() throws {
+        let dbURL = temporaryDatabaseURL()
+        let repository = try UsageRepository(databaseURL: dbURL)
+        let calendar = Calendar(identifier: .gregorian)
+        let referenceDate = fixedDate()
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: referenceDate)!
+        let oldDate = calendar.date(byAdding: .day, value: -40, to: referenceDate)!
+        let start = calendar.startOfDay(for: yesterday)
+        let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: referenceDate))!
+
+        _ = try repository.insertCheckpoint(
+            trigger: "range-aggregate-test",
+            startedAt: referenceDate,
+            endedAt: referenceDate,
+            events: [
+                dbEvent(id: "codex-a", agent: .codex, projectName: "tokenbar", sessionId: "a", timestamp: referenceDate, inputTokens: 10, outputTokens: 5, cacheTokens: 5, modelName: "gpt-5-codex"),
+                dbEvent(id: "claude-a", agent: .claudeCode, projectName: "tokenbar", sessionId: "b", timestamp: yesterday, inputTokens: 20, outputTokens: 5, cacheTokens: 0, modelName: "claude-sonnet-4.5"),
+                dbEvent(id: "codex-b", agent: .codex, projectName: "my-app", sessionId: "c", timestamp: yesterday, inputTokens: 3, outputTokens: 2, cacheTokens: 1),
+                dbEvent(id: "old", agent: .codex, projectName: "old", sessionId: "d", timestamp: oldDate, inputTokens: 100, outputTokens: 100, cacheTokens: 100),
+            ],
+            prompts: [],
+            nextWatermarks: [],
+            warnings: [],
+            error: nil
+        )
+
+        let bounds = try repository.eventTimeBounds()
+        let aggregate = try repository.rangeAggregate(start: start, end: end, calendar: calendar)
+        let projects = try repository.projectBreakdowns(start: start, end: end, topCount: nil)
+
+        #expect(bounds.eventCount == 4)
+        #expect(bounds.earliest == oldDate)
+        #expect(aggregate.summary.totalTokens == 51)
+        #expect(aggregate.days.count == 2)
+        #expect(aggregate.days.map(\.summary.totalTokens) == [31, 20])
+        #expect(aggregate.rows.count == 3)
+        #expect(projects.map(\.name) == ["tokenbar", "my-app"])
+        #expect(projects.map { $0.summary.totalTokens } == [45, 6])
+    }
+
+    @Test
     func deleteRecordsBeforeCutoffPrunesEventsAndPrompts() throws {
         let dbURL = temporaryDatabaseURL()
         let repository = try UsageRepository(databaseURL: dbURL)
@@ -551,6 +592,113 @@ struct Sprint8StorageTests {
     }
 
     @Test
+    func projectPromptHistoryPagePaginatesAndFiltersInSQLite() throws {
+        let dbURL = temporaryDatabaseURL()
+        let repository = try UsageRepository(databaseURL: dbURL)
+        let referenceDate = fixedDate()
+        let calendar = Calendar(identifier: .gregorian)
+        let oldest = calendar.date(byAdding: .minute, value: -4, to: referenceDate)!
+        let older = calendar.date(byAdding: .minute, value: -3, to: referenceDate)!
+        let middle = calendar.date(byAdding: .minute, value: -2, to: referenceDate)!
+        let newer = calendar.date(byAdding: .minute, value: -1, to: referenceDate)!
+
+        _ = try repository.insertCheckpoint(
+            trigger: "sqlite-prompt-page-test",
+            startedAt: referenceDate,
+            endedAt: referenceDate,
+            events: [],
+            prompts: [
+                PromptRecord(
+                    id: "prompt-human-old",
+                    eventId: nil,
+                    agent: .codex,
+                    projectName: "tokenbar",
+                    sessionId: "session-human-old",
+                    timestamp: older,
+                    content: "build the project page",
+                    contentHash: "human-old-hash",
+                    sourcePath: "/tmp/source.jsonl"
+                ),
+                PromptRecord(
+                    id: "prompt-endpoint",
+                    eventId: nil,
+                    agent: .codex,
+                    projectName: "tokenbar",
+                    sessionId: "session-endpoint",
+                    timestamp: oldest,
+                    content: "/v1/query/sql keep backend-service API style",
+                    contentHash: "endpoint-hash",
+                    sourcePath: "/tmp/source.jsonl"
+                ),
+                PromptRecord(
+                    id: "prompt-command",
+                    eventId: nil,
+                    agent: .codex,
+                    projectName: "tokenbar",
+                    sessionId: "session-command",
+                    timestamp: middle,
+                    content: "/review current diff",
+                    contentHash: "command-hash",
+                    sourcePath: "/tmp/source.jsonl"
+                ),
+                PromptRecord(
+                    id: "prompt-subagent",
+                    eventId: nil,
+                    agent: .codex,
+                    projectName: "tokenbar",
+                    sessionId: "session-subagent",
+                    timestamp: newer,
+                    content: "Assigned task: inspect prompt paging",
+                    contentHash: "subagent-hash",
+                    sourcePath: "/tmp/subagents/worker.jsonl"
+                ),
+                PromptRecord(
+                    id: "prompt-other",
+                    eventId: nil,
+                    agent: .codex,
+                    projectName: "other",
+                    sessionId: "session-other",
+                    timestamp: referenceDate,
+                    content: "other project prompt",
+                    contentHash: "other-hash",
+                    sourcePath: "/tmp/source.jsonl"
+                ),
+            ],
+            nextWatermarks: [],
+            warnings: [],
+            error: nil
+        )
+
+        let firstPage = try repository.projectPromptHistoryPage(projectName: "tokenbar", limit: 2, offset: 0, includeContent: true)
+        #expect(firstPage.totalCount == 4)
+        #expect(firstPage.prompts.map(\.id) == ["prompt-subagent", "prompt-command"])
+        #expect(firstPage.prompts.first?.content == "Assigned task: inspect prompt paging")
+        #expect(firstPage.kindCounts.humanCount == 2)
+        #expect(firstPage.kindCounts.subagentCount == 1)
+        #expect(firstPage.kindCounts.commandCount == 1)
+
+        let secondPage = try repository.projectPromptHistoryPage(projectName: "tokenbar", limit: 2, offset: 2, includeContent: true)
+        #expect(secondPage.prompts.map(\.id) == ["prompt-human-old", "prompt-endpoint"])
+
+        let searchPage = try repository.projectPromptHistoryPage(projectName: "tokenbar", limit: 10, offset: 0, includeContent: true, query: "build")
+        #expect(searchPage.totalCount == 1)
+        #expect(searchPage.prompts.map(\.id) == ["prompt-human-old"])
+
+        let commandPage = try repository.projectPromptHistoryPage(projectName: "tokenbar", limit: 10, offset: 0, includeContent: true, kindFilter: .command)
+        #expect(commandPage.totalCount == 1)
+        #expect(commandPage.prompts.map(\.id) == ["prompt-command"])
+
+        let humanPage = try repository.projectPromptHistoryPage(projectName: "tokenbar", limit: 10, offset: 0, includeContent: true, kindFilter: .human)
+        #expect(humanPage.totalCount == 2)
+        #expect(humanPage.prompts.map(\.id) == ["prompt-human-old", "prompt-endpoint"])
+
+        let day = calendar.startOfDay(for: older)
+        let dayEnd = calendar.date(byAdding: .day, value: 1, to: day)!
+        let dayCounts = try repository.projectPromptCountsByDay(projectName: "tokenbar", start: day, end: dayEnd, calendar: calendar)
+        #expect(dayCounts[day] == 4)
+    }
+
+    @Test
     func collectionSignaturesExposeCountsWithoutLoadingPromptContent() throws {
         let dbURL = temporaryDatabaseURL()
         let repository = try UsageRepository(databaseURL: dbURL)
@@ -903,6 +1051,42 @@ struct Sprint8StorageTests {
         #expect(event.inputTokens == 12)
         #expect(event.outputTokens == 34)
         #expect(event.cacheTokens == 56)
+    }
+
+    @Test
+    func customSourceDiscoversNestedClaudeProjectsRecursively() async throws {
+        let directory = temporaryDirectory()
+        let nested = directory
+            .appendingPathComponent("-Users-dev-Projects-tokenbar")
+            .appendingPathComponent("session-1")
+            .appendingPathComponent("subagents")
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        let eventFile = nested.appendingPathComponent("agent-a123.jsonl")
+        try ([
+            #"{"sessionId":"codefuse-session","timestamp":"2026-05-18T10:11:12.000Z","cwd":"/tmp/tokenbar","message":{"model":"claude-model","usage":{"input_tokens":12,"output_tokens":34,"cache_creation_input_tokens":0,"cache_read_input_tokens":56}}}"#,
+        ].joined(separator: "\n") + "\n").write(to: eventFile, atomically: true, encoding: .utf8)
+
+        let record = CustomSourceRecord(
+            id: "codefuse-claude-source",
+            name: "CodeFuse Claude",
+            engine: .claudeCode,
+            directory: directory.path,
+            globPattern: "**/*.jsonl",
+            format: .claudeCodeJSONL,
+            displayAgent: "Claude Code",
+            createdAt: fixedDate()
+        )
+        let source = CustomUsageEventSource(record: record)
+        let status = await source.status(referenceDate: fixedDate(), calendar: Calendar(identifier: .gregorian))
+        let result = try await source.loadEvents(
+            since: [:],
+            referenceDate: fixedDate(),
+            calendar: Calendar(identifier: .gregorian)
+        )
+
+        #expect(status.discoveredFileCount == 1)
+        #expect(result.events.count == 1)
+        #expect(result.events.first?.sessionId == "codefuse-session")
     }
 
     @Test

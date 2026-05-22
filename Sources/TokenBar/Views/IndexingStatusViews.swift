@@ -125,6 +125,8 @@ struct TokenBarIndexingStatusCard: View {
         switch state.phase {
         case .idle:
             "Local index"
+        case .queued:
+            "Indexing queued"
         case .discovering, .indexing:
             "Building local index"
         case .paused:
@@ -137,14 +139,19 @@ struct TokenBarIndexingStatusCard: View {
     }
 
     private var subtitle: String {
+        if let message = state.message, state.isActive || state.phase == .queued {
+            return message
+        }
         if let active = state.activeSourceName, state.isActive {
             return "Scanning \(active). Token totals are partial until indexing finishes."
         }
         switch state.phase {
+        case .queued:
+            return "Waiting for the current refresh to finish before scanning this source."
         case .paused:
             return "Resume when you want TokenBar to continue reading local agent history."
         case .completed:
-            return "Indexed \(state.eventsIndexed.formatted()) events from default local sources."
+            return state.message ?? "Indexed \(state.eventsIndexed.formatted()) events from default local sources."
         case .failed:
             return state.message ?? "Some sources could not be read. Details are in Diagnostics."
         default:

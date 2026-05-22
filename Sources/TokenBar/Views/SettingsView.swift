@@ -101,8 +101,8 @@ struct SettingsView: View {
             summary: .init(
                 todayTotalTokens: runtimeModel.snapshot.today.totalTokens,
                 last30TotalTokens: runtimeModel.snapshot.last30Summary.totalTokens,
-                estimatedCostToday: tokenbarEstimatedCost(events: runtimeModel.events, days: 1),
-                estimatedCostLast30: tokenbarEstimatedCost(events: runtimeModel.events, days: 30)
+                estimatedCostToday: runtimeModel.popoverSnapshot.todayCost,
+                estimatedCostLast30: runtimeModel.popoverSnapshot.last30Cost
             ),
             customSources: runtimeModel.customSources.map {
                 .init(
@@ -237,11 +237,11 @@ struct SettingsView: View {
             }
             Spacer()
             TopRightCluster(
-                todayCost: tokenbarEstimatedCost(events: runtimeModel.events, days: 1),
-                rangeCost: tokenbarEstimatedCost(events: runtimeModel.events, days: 30),
+                todayCost: runtimeModel.popoverSnapshot.todayCost,
+                rangeCost: runtimeModel.popoverSnapshot.last30Cost,
                 todayTokens: runtimeModel.snapshot.today.totalTokens,
                 totalTokens: runtimeModel.snapshot.last30Summary.totalTokens,
-                todaySessions: tokenbarSessionCount(runtimeModel.events),
+                todaySessions: runtimeModel.popoverSnapshot.todaySessionCount,
                 refreshState: runtimeModel.refreshState,
                 onRefresh: { Task { await runtimeModel.refresh() } }
             )
@@ -266,7 +266,7 @@ struct SettingsView: View {
     private var promptSection: some View {
         settingsSection(
             title: "Prompt Capture",
-            subtitle: "Stores user-only prompts locally. UI masks by default; reveal per project."
+            subtitle: "Stores user-only prompts locally. Project history reveals text by default."
         ) {
             HStack(spacing: 5) {
                 pill("Off", selected: !runtimeModel.storePromptTextInClearText) {
@@ -401,6 +401,9 @@ struct SettingsView: View {
             title: "Custom Sources",
             subtitle: "Point TokenBar at any agent that writes JSONL or sqlite locally."
         ) {
+            if runtimeModel.indexingState.isVisible {
+                SettingsIndexingProgressStrip(state: runtimeModel.indexingState)
+            }
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                 customSourceTile(name: "Codex", path: "~/.codex/sessions", color: TokenBarStyle.input, enabled: true)
                 customSourceTile(name: "Claude Code", path: "~/.claude/projects", color: TokenBarStyle.output, enabled: true)
@@ -526,7 +529,7 @@ struct SettingsView: View {
     }
 
     private var oldestRecordLabel: String {
-        guard let oldest = runtimeModel.events.map(\.timestamp).min() else {
+        guard let oldest = runtimeModel.events.first?.timestamp else {
             return "no records"
         }
         return tokenbarRelativeTime(oldest)
@@ -655,6 +658,106 @@ struct SettingsView: View {
             .frame(width: width, alignment: .leading)
     }
 
+}
+
+private struct SettingsIndexingProgressStrip: View {
+    let state: TokenBarIndexingState
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: iconName)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(iconColor)
+                .frame(width: 18, height: 18)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .lineLimit(1)
+                Text(summary)
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(TokenBarStyle.faint)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            ProgressView(value: state.progress)
+                .progressViewStyle(.linear)
+                .tint(TokenBarStyle.accent)
+                .frame(width: 118)
+
+            Text("\(Int((state.progress * 100).rounded()))%")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .monospacedDigit()
+                .foregroundStyle(TokenBarStyle.faint)
+                .frame(width: 34, alignment: .trailing)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 44)
+        .background(TokenBarStyle.surface.opacity(0.55), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(TokenBarStyle.line.opacity(0.85), lineWidth: 1))
+    }
+
+    private var title: String {
+        switch state.phase {
+        case .completed:
+            return "Index ready"
+        case .failed:
+            return "Index needs attention"
+        case .paused:
+            return "Indexing paused"
+        default:
+            return state.activeSourceName.map { "Indexing \($0)" } ?? "Indexing sources"
+        }
+    }
+
+    private var summary: String {
+        var parts = [
+            "\(state.checkedFiles.formatted()) files",
+            "\(state.eventsIndexed.formatted()) events",
+        ]
+        if let cpuBudgetPercent = state.cpuBudgetPercent {
+            parts.append("~\(formatCPU(cpuBudgetPercent)) CPU")
+        }
+        if let message = state.message {
+            parts.append(message)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var iconName: String {
+        switch state.phase {
+        case .completed:
+            "checkmark.circle"
+        case .failed:
+            "exclamationmark.triangle"
+        case .paused:
+            "pause.circle"
+        default:
+            "arrow.triangle.2.circlepath"
+        }
+    }
+
+    private var iconColor: Color {
+        switch state.phase {
+        case .completed:
+            TokenBarStyle.cache
+        case .failed:
+            TokenBarStyle.error
+        case .paused:
+            TokenBarStyle.warn
+        default:
+            TokenBarStyle.accent
+        }
+    }
+
+    private func formatCPU(_ value: Double) -> String {
+        if value.rounded() == value {
+            return "\(Int(value))%"
+        }
+        return String(format: "%.1f%%", value)
+    }
 }
 
 private struct ThemeChoiceGrid: View {
@@ -867,6 +970,7 @@ private struct AddCustomSourceOverlay: View {
     @State private var detectionState: SourceDetectionState = .idle
     @State private var isSaving = false
     @State private var saveError: String?
+    nonisolated private static let detectionSampleLimit = 100
 
     init(
         isPresented: Binding<Bool>,
@@ -1310,7 +1414,7 @@ private struct AddCustomSourceOverlay: View {
         let split = splitPathGlob(rawPathGlob, defaultGlob: engine.defaultGlobPattern)
         let files = discoverFiles(directory: split.directory, globPattern: split.glob, engine: engine)
         guard let sample = files.first else {
-            return .failure("No readable files matched this path.")
+            return .failure("No readable files matched this path. Use ~/ for home directories, or browse to the folder.")
         }
 
         if engine == .hermes {
@@ -1322,17 +1426,21 @@ private struct AddCustomSourceOverlay: View {
             }
         }
 
-        let detected = SourceFormatDetector.detect(fileURL: sample)
-        if engine == .claudeCode, detected == .claudeCodeJSONL {
-            return .success(detected, "\(engine.displayName) JSONL · \(files.count) file(s) matched.")
+        let samples = Array(files.prefix(detectionSampleLimit))
+        for sample in samples {
+            let detected = SourceFormatDetector.detect(fileURL: sample)
+            if engine == .claudeCode, detected == .claudeCodeJSONL {
+                return .success(detected, "\(engine.displayName) JSONL · \(files.count) file(s) matched.")
+            }
+            if engine == .codex, detected == .codexJSONL {
+                return .success(detected, "\(engine.displayName) rollout JSONL · \(files.count) file(s) matched.")
+            }
         }
-        if engine == .codex, detected == .codexJSONL {
-            return .success(detected, "\(engine.displayName) rollout JSONL · \(files.count) file(s) matched.")
-        }
-        if detected == .unknown, mappedJSONLooksValid(fileURL: sample, mapping: fieldMapping) {
+
+        if samples.contains(where: { mappedJSONLooksValid(fileURL: $0, mapping: fieldMapping) }) {
             return .failure("The sample is mapped JSONL, but only Claude Code, Codex, and Hermes engines are supported here.")
         }
-        return .failure("Selected \(engine.displayName) engine does not match the sample file.")
+        return .failure("Selected \(engine.displayName) engine did not match any of \(samples.count) sampled file(s).")
     }
 
     nonisolated private static func discoverFiles(directory: String, globPattern: String, engine: CustomSourceEngine) -> [URL] {
@@ -1373,8 +1481,9 @@ private struct AddCustomSourceOverlay: View {
                 guard matcher(url) else { return nil }
                 return url
             }
-            .prefix(25)
             .sorted { $0.path < $1.path }
+            .prefix(detectionSampleLimit)
+            .map { $0 }
         }
 
         return ((try? FileManager.default.contentsOfDirectory(
@@ -1383,8 +1492,9 @@ private struct AddCustomSourceOverlay: View {
             options: [.skipsHiddenFiles]
         )) ?? [])
         .filter { matcher($0) }
-        .prefix(25)
         .sorted { $0.path < $1.path }
+        .prefix(detectionSampleLimit)
+        .map { $0 }
     }
 
     nonisolated private static func mappedJSONLooksValid(fileURL: URL, mapping: CustomSourceFieldMapping) -> Bool {

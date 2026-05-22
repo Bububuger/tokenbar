@@ -59,14 +59,24 @@ public enum CodexDataSource {
     }
 
     public static func expandHome(in path: String) -> String {
-        guard path.hasPrefix("~/") else {
-            return path
+        if path.hasPrefix("~/") {
+            let suffix = String(path.dropFirst(2))
+            return URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+                .appendingPathComponent(suffix)
+                .path
         }
 
-        let suffix = String(path.dropFirst(2))
-        return URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-            .appendingPathComponent(suffix)
-            .path
+        if path.hasPrefix("/."), !FileManager.default.fileExists(atPath: path) {
+            let suffix = String(path.dropFirst())
+            let homeCandidate = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+                .appendingPathComponent(suffix)
+                .path
+            if FileManager.default.fileExists(atPath: homeCandidate) {
+                return homeCandidate
+            }
+        }
+
+        return path
     }
 
     private static func contentsOfRolloutFiles(in urls: [URL]) -> [URL] {

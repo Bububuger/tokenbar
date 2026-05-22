@@ -360,11 +360,25 @@ func tokenbarRangeWindow(
     referenceDate: Date = Date(),
     calendar: Calendar = Calendar(identifier: .gregorian)
 ) -> TokenBarRangeWindow {
+    tokenbarRangeWindow(
+        selection: selection,
+        earliestEventDate: events.map(\.timestamp).min(),
+        referenceDate: referenceDate,
+        calendar: calendar
+    )
+}
+
+func tokenbarRangeWindow(
+    selection: String,
+    earliestEventDate: Date?,
+    referenceDate: Date = Date(),
+    calendar: Calendar = Calendar(identifier: .gregorian)
+) -> TokenBarRangeWindow {
     let todayStart = calendar.startOfDay(for: referenceDate)
     let tomorrowStart = calendar.date(byAdding: .day, value: 1, to: todayStart) ?? referenceDate
 
     if selection == "All" {
-        let earliest = events.map(\.timestamp).min().map { calendar.startOfDay(for: $0) }
+        let earliest = earliestEventDate.map { calendar.startOfDay(for: $0) }
             ?? calendar.date(byAdding: .day, value: -29, to: todayStart)
             ?? todayStart
         return TokenBarRangeWindow(selection: selection, start: earliest, end: tomorrowStart, requestedDays: nil, isAllTime: true)
@@ -376,7 +390,7 @@ func tokenbarRangeWindow(
 
     let days = tokenbarDaysForRange(selection) ?? 30
     let requestedStart = calendar.date(byAdding: .day, value: -(days - 1), to: todayStart) ?? todayStart
-    let earliestIndexedDay = events.map(\.timestamp).min().map { calendar.startOfDay(for: $0) }
+    let earliestIndexedDay = earliestEventDate.map { calendar.startOfDay(for: $0) }
     let start = earliestIndexedDay.map { max(requestedStart, $0) } ?? requestedStart
     return TokenBarRangeWindow(selection: selection, start: start, end: tomorrowStart, requestedDays: days, isAllTime: false)
 }
@@ -540,6 +554,15 @@ func tokenbarRangeAvailabilityNote(
     calendar: Calendar = Calendar(identifier: .gregorian)
 ) -> String {
     let window = tokenbarRangeWindow(selection: selection, events: events, referenceDate: referenceDate, calendar: calendar)
+    return tokenbarRangeAvailabilityNote(selection: selection, days: days, window: window, calendar: calendar)
+}
+
+func tokenbarRangeAvailabilityNote(
+    selection: String,
+    days: [UsageDay],
+    window: TokenBarRangeWindow,
+    calendar: Calendar = Calendar(identifier: .gregorian)
+) -> String {
     let activeDays = days.filter { $0.summary.totalTokens > 0 }.count
     let start = window.start.formatted(.dateTime.month(.abbreviated).day().year())
     let endDate = calendar.date(byAdding: .day, value: -1, to: window.end) ?? window.end
@@ -640,6 +663,170 @@ struct TokenBarOverviewRangeMetrics: Sendable, Hashable {
             )
         )
     }
+
+    static func make(
+        aggregate: UsageRangeAggregate,
+        selection: String,
+        window: TokenBarRangeWindow,
+        calendar: Calendar = Calendar(identifier: .gregorian)
+    ) -> TokenBarOverviewRangeMetrics {
+        struct ModelAccumulator {
+            var inputTokens = 0
+            var outputTokens = 0
+            var cacheTokens = 0
+            var cost = 0.0
+            var agentTokens: [String: Int] = [:]
+
+            var summary: UsageSummary {
+                UsageSummary(inputTokens: inputTokens, outputTokens: outputTokens, cacheTokens: cacheTokens)
+            }
+        }
+
+        let pricing = TokenBarPricingLookup()
+        var projectSummaries: [String: UsageSummary] = [:]
+        var projectCosts: [String: Double] = [:]
+        var projectAgentTokens: [String: [String: Int]] = [:]
+        var agentSummaries: [String: UsageSummary] = [:]
+        var agentCosts: [String: Double] = [:]
+        var agentProjectTokens: [String: [String: Int]] = [:]
+        var modelTotals: [String: ModelAccumulator] = [:]
+
+        for row in aggregate.rows {
+            let projectName = row.projectName
+            let agentName = row.agent.displayName
+            let modelName = row.modelName?.isEmpty == false ? row.modelName! : agentName
+            let tokens = row.summary.totalTokens
+            let cost = tokenbarEstimatedCost(
+                summary: row.summary,
+                modelName: row.modelName,
+                agent: row.agent,
+                pricing: pricing
+            )
+
+            projectSummaries[projectName] = tokenbarAdd(projectSummaries[projectName], row.summary)
+            projectCosts[projectName, default: 0] += cost
+            projectAgentTokens[projectName, default: [:]][agentName, default: 0] += tokens
+
+            agentSummaries[agentName] = tokenbarAdd(agentSummaries[agentName], row.summary)
+            agentCosts[agentName, default: 0] += cost
+            agentProjectTokens[agentName, default: [:]][projectName, default: 0] += tokens
+
+            var model = modelTotals[modelName] ?? ModelAccumulator()
+            model.inputTokens += row.summary.inputTokens
+            model.outputTokens += row.summary.outputTokens
+            model.cacheTokens += row.summary.cacheTokens
+            model.cost += cost
+            model.agentTokens[agentName, default: 0] += tokens
+            modelTotals[modelName] = model
+        }
+
+        let projectBreakdowns = sortedBreakdowns(projectSummaries)
+        let agentBreakdowns = sortedBreakdowns(agentSummaries)
+        let totalModelTokens = modelTotals.values.reduce(0) { $0 + $1.summary.totalTokens }
+        let modelRows = modelTotals.map { name, model in
+            let summary = model.summary
+            return TokenBarModelBreakdown(
+                name: name,
+                agentName: topName(model.agentTokens, fallback: "Local"),
+                summary: summary,
+                cost: model.cost,
+                percentage: totalModelTokens > 0 ? Double(summary.totalTokens) / Double(totalModelTokens) : 0
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.summary.totalTokens == rhs.summary.totalTokens {
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
+            return lhs.summary.totalTokens > rhs.summary.totalTokens
+        }
+
+        return TokenBarOverviewRangeMetrics(
+            selection: selection,
+            days: aggregate.days,
+            summary: aggregate.summary,
+            cost: modelTotals.values.reduce(0) { $0 + $1.cost },
+            projectRows: rankingRows(
+                breakdowns: Array(projectBreakdowns.prefix(5)),
+                costs: projectCosts,
+                subtitles: projectAgentTokens,
+                fallback: "local indexed project"
+            ),
+            agentRows: rankingRows(
+                breakdowns: Array(agentBreakdowns.prefix(5)),
+                costs: agentCosts,
+                subtitles: agentProjectTokens,
+                fallback: "agent share"
+            ),
+            modelRows: modelRows,
+            projectCount: projectSummaries.count,
+            agentCount: agentSummaries.count,
+            availabilityNote: tokenbarRangeAvailabilityNote(
+                selection: selection,
+                days: aggregate.days,
+                window: window,
+                calendar: calendar
+            )
+        )
+    }
+}
+
+private func tokenbarAdd(_ lhs: UsageSummary?, _ rhs: UsageSummary) -> UsageSummary {
+    let lhs = lhs ?? UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0)
+    return UsageSummary(
+        inputTokens: lhs.inputTokens + rhs.inputTokens,
+        outputTokens: lhs.outputTokens + rhs.outputTokens,
+        cacheTokens: lhs.cacheTokens + rhs.cacheTokens
+    )
+}
+
+private func sortedBreakdowns(_ summaries: [String: UsageSummary]) -> [UsageBreakdown] {
+    summaries.map { UsageBreakdown(name: $0.key, summary: $0.value) }
+        .filter { $0.summary.totalTokens > 0 }
+        .sorted { lhs, rhs in
+            if lhs.summary.totalTokens == rhs.summary.totalTokens {
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
+            return lhs.summary.totalTokens > rhs.summary.totalTokens
+        }
+}
+
+private func rankingRows(
+    breakdowns: [UsageBreakdown],
+    costs: [String: Double],
+    subtitles: [String: [String: Int]],
+    fallback: String
+) -> [TokenBarRankingRow] {
+    breakdowns.map { row in
+        TokenBarRankingRow(
+            name: row.name,
+            summary: row.summary,
+            totalTokens: row.summary.totalTokens,
+            subtitle: rankedNames(subtitles[row.name], fallback: fallback),
+            cost: costs[row.name] ?? 0
+        )
+    }
+}
+
+private func rankedNames(_ totals: [String: Int]?, fallback: String, max: Int = 3) -> String {
+    let names = (totals ?? [:])
+        .sorted {
+            if $0.value == $1.value {
+                return $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending
+            }
+            return $0.value > $1.value
+        }
+        .prefix(max)
+        .map(\.key)
+    return names.isEmpty ? fallback : names.joined(separator: " · ")
+}
+
+private func topName(_ totals: [String: Int], fallback: String) -> String {
+    totals.max {
+        if $0.value == $1.value {
+            return $0.key > $1.key
+        }
+        return $0.value < $1.value
+    }?.key ?? fallback
 }
 
 private func tokenbarCustomRangeDays(defaults: UserDefaults = .standard) -> Int {
@@ -765,6 +952,26 @@ private func tokenbarPricingValues(for modelName: String, defaults: UserDefaults
 
 func tokenbarEstimatedCost(for event: UsageEvent, defaults: UserDefaults = .standard) -> Double {
     TokenBarPricingLookup(defaults: defaults).estimatedCost(for: event)
+}
+
+func tokenbarEstimatedCost(
+    summary: UsageSummary,
+    modelName: String?,
+    agent: AgentKind,
+    pricing: TokenBarPricingLookup = TokenBarPricingLookup()
+) -> Double {
+    let effectiveModelName = modelName?.isEmpty == false ? modelName! : agent.displayName
+    if let values = pricing.values(for: effectiveModelName),
+       let inputRate = Double(values.input),
+       let outputRate = Double(values.output),
+       let cacheRate = Double(values.cache) {
+        return (
+            Double(summary.inputTokens) * inputRate
+                + Double(summary.outputTokens) * outputRate
+                + Double(summary.cacheTokens) * cacheRate
+        ) / 1_000_000
+    }
+    return Double(summary.totalTokens) * agent.defaultCostPerMillionTokens / 1_000_000
 }
 
 func tokenbarEstimatedCost(
@@ -1179,35 +1386,116 @@ struct TokenBarCard<Content: View>: View {
 
 typealias TokenBarGlassCard = TokenBarCard
 
+/// Brand mark used in the sidebar hero, popover hero, settings preview, and
+/// anywhere else the product needs to identify itself. The geometry, palette,
+/// and corner-cursor are kept in lockstep with the macOS app icon
+/// (`Assets.xcassets/AppIcon.appiconset` rendered by `script/render_app_icon.swift`)
+/// and with the design canvas (`docs/design-prd/tokenbar/shell.jsx` TBMark).
 struct TokenBarBrandGlyph: View {
     var size: CGFloat = 30
-    var boxed = true
+    /// Legacy parameter retained for source-compat with existing call-sites.
+    /// The mark always draws its own ink panel; toggling this is now a no-op.
+    var boxed: Bool = true
+
+    // Brand palette — fixed hex (does NOT adapt to system appearance) so the
+    // mark looks identical on light and dark surfaces, per BrandMarkBoard.
+    private static let inkTop = Color(red: 24/255, green: 49/255, blue: 61/255)    // #18313D
+    private static let inkBot = Color(red: 11/255, green: 26/255, blue: 34/255)    // #0B1A22
+    private static let teal   = Color(red: 34/255, green:199/255, blue:198/255)    // #22C7C6
+    private static let lime   = Color(red:212/255, green:247/255, blue:106/255)    // #D4F76A
+    private static let tealDk = Color(red: 31/255, green:138/255, blue:138/255)    // #1F8A8A
 
     var body: some View {
-        VStack(spacing: size * 0.10) {
-            // CL-P0-007 / CL-P0-010: bars use brand accent + lime + a deeper
-            // accent shade so they stay distinct from system semantic colors.
-            glyphBar(width: size * 0.42, color: TokenBarStyle.accent)
-            glyphBar(width: size * 0.66, color: TokenBarStyle.lime)
-            glyphBar(width: size * 0.50, color: TokenBarStyle.accent.opacity(0.55))
-        }
-        .frame(width: size, height: size)
-        .background {
-            if boxed {
-                RoundedRectangle(cornerRadius: size * 0.25, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: size * 0.25, style: .continuous)
-                            .stroke(TokenBarStyle.line, lineWidth: 1)
+        // Ratios pulled from .tb-mark CSS (30px reference): radius 8/30,
+        // inner glyph 18/30, cursor 2×5 with 5,5 inset.
+        let cornerR     = size * (8.0 / 30.0)
+        let glyphSide   = size * (18.0 / 30.0)
+        let cursorW     = max(1.5, size * (2.0 / 30.0))
+        let cursorH     = max(3.5, size * (5.0 / 30.0))
+        let cursorInset = size * (5.0 / 30.0)
+        // 1.05s period, 2-step blink — matches @keyframes tbMarkBlink.
+        let period: TimeInterval = 1.05
+
+        ZStack {
+            // 1. Ink gradient base.
+            RoundedRectangle(cornerRadius: cornerR, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Self.inkTop, Self.inkBot],
+                        startPoint: .top,
+                        endPoint: .bottom
                     )
+                )
+
+            // 2. Soft lime radial highlight at lower-right (CSS
+            //    `radial-gradient(140% 90% at 70% 110%, rgba(212,247,106,0.18))`).
+            RoundedRectangle(cornerRadius: cornerR, style: .continuous)
+                .fill(
+                    RadialGradient(
+                        gradient: Gradient(colors: [
+                            Self.lime.opacity(0.18),
+                            Color.clear
+                        ]),
+                        center: UnitPoint(x: 0.70, y: 1.10),
+                        startRadius: 0,
+                        endRadius: size * 0.95
+                    )
+                )
+
+            // 3. Inner 1px stroke (glass affordance).
+            RoundedRectangle(cornerRadius: cornerR, style: .continuous)
+                .stroke(Color.white.opacity(0.06), lineWidth: 1)
+
+            // 4. 3-bar histogram glyph — same proportions as the app icon.
+            TokenBarBrandBars(size: glyphSide, top: Self.teal, mid: Self.lime, bot: Self.tealDk)
+
+            // 5. Lime "cursor" blink, bottom-right corner.
+            TimelineView(.periodic(from: .now, by: period / 2)) { context in
+                let elapsed = context.date.timeIntervalSinceReferenceDate
+                let isOn = Int((elapsed / (period / 2)).rounded(.down)) % 2 == 0
+                RoundedRectangle(cornerRadius: cursorW * 0.25, style: .continuous)
+                    .fill(Self.lime)
+                    .frame(width: cursorW, height: cursorH)
+                    .shadow(color: Self.lime.opacity(0.55), radius: max(1.5, size * 0.10))
+                    .opacity(isOn ? 1 : 0)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(.trailing, cursorInset)
+                    .padding(.bottom, cursorInset)
             }
         }
+        .frame(width: size, height: size)
+        .shadow(color: .black.opacity(0.35), radius: size * 0.18, x: 0, y: size * 0.12)
+        // Keep `boxed` referenced so the parameter is not flagged as unused.
+        .opacity(boxed ? 1 : 1)
+    }
+}
+
+private struct TokenBarBrandBars: View {
+    let size: CGFloat
+    let top: Color
+    let mid: Color
+    let bot: Color
+
+    var body: some View {
+        // Glyph SVG viewBox = 16; rows at y = 3.5 / 6.95 / 10.4 with h = 2.1.
+        // Bar widths 6 / 10 / 7.5 → ratios 0.60 / 1.00 / 0.75.
+        let unit = size / 16
+        let barH = 2.1 * unit
+        let radius = 0.6 * unit
+        let gap = 1.35 * unit
+
+        VStack(alignment: .leading, spacing: gap) {
+            bar(width: 6.0 * unit, height: barH, radius: radius, color: top)
+            bar(width: 10.0 * unit, height: barH, radius: radius, color: mid)
+            bar(width: 7.5 * unit, height: barH, radius: radius, color: bot)
+        }
+        .frame(width: size, height: size)
     }
 
-    private func glyphBar(width: CGFloat, color: Color) -> some View {
-        RoundedRectangle(cornerRadius: max(1, size * 0.04), style: .continuous)
+    private func bar(width: CGFloat, height: CGFloat, radius: CGFloat, color: Color) -> some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
             .fill(color)
-            .frame(width: width, height: max(2, size * 0.12))
+            .frame(width: width, height: height)
     }
 }
 
@@ -1216,10 +1504,13 @@ struct TokenBarStatusGlyph: View {
     var paused = false
 
     var body: some View {
+        // Bar widths come from docs/design-prd/tokenbar/menubar.jsx
+        // (viewBox 16: top 5.5, mid 9, bot 7) so the ordering — top shortest,
+        // mid longest, bot medium — matches the app icon and brand mark.
         VStack(spacing: 1.6) {
-            bar(width: 10.5, color: TokenBarStyle.muted)
-            bar(width: 14, color: middleColor)
-            bar(width: 9, color: TokenBarStyle.accent.opacity(0.95))
+            bar(width: 5.5, color: TokenBarStyle.muted)
+            bar(width: 9, color: middleColor)
+            bar(width: 7, color: TokenBarStyle.muted)
         }
         .frame(width: 16, height: 16)
         .overlay(alignment: .topTrailing) {
@@ -1279,18 +1570,27 @@ enum TokenBarMenuBarGlyphImage {
         let pixelSize = NSSize(width: size, height: size)
         let image = NSImage(size: pixelSize, flipped: false) { rect in
             NSColor.black.setFill()
-            let widths: [CGFloat] = [10.5, 14, 9]
-            let barHeight: CGFloat = 2.1
-            let spacing: CGFloat = 1.6
-            let total = barHeight * 3 + spacing * 2
+            // viewBox 16 → top 5.5, mid 9, bot 7 (menubar.jsx). Ordering
+            // (top shortest, mid longest, bot medium) matches the app icon.
+            // Bars are left-aligned with a 2.5/16 inset, matching the design.
+            let widths: [CGFloat] = [5.5, 9, 7]
+            let barHeight: CGFloat = 1.9
+            let spacing: CGFloat = 1.55
+            let unit = rect.width / 16
+            let total = barHeight * unit * 3 + spacing * unit * 2
             let startY = (rect.height - total) / 2
+            let leftInset = 2.5 * unit
             for (idx, w) in widths.enumerated() {
-                let y = startY + CGFloat(2 - idx) * (barHeight + spacing)
-                let x = (rect.width - w) / 2
+                let y = startY + CGFloat(2 - idx) * (barHeight + spacing) * unit
                 let path = NSBezierPath(
-                    roundedRect: NSRect(x: x, y: y, width: w, height: barHeight),
-                    xRadius: 1.1,
-                    yRadius: 1.1
+                    roundedRect: NSRect(
+                        x: leftInset,
+                        y: y,
+                        width: w * unit,
+                        height: barHeight * unit
+                    ),
+                    xRadius: 0.5 * unit,
+                    yRadius: 0.5 * unit
                 )
                 path.fill()
             }
@@ -2011,8 +2311,7 @@ struct TokenBarPageUpdatingOverlay: View {
         GeometryReader { proxy in
             ZStack(alignment: .topTrailing) {
                 Rectangle()
-                    .fill(TokenBarStyle.appBackground.opacity(0.18))
-                    .background(.ultraThinMaterial)
+                    .fill(TokenBarStyle.appBackground.opacity(0.06))
 
                 LinearGradient(
                     colors: [
@@ -2039,7 +2338,7 @@ struct TokenBarPageUpdatingOverlay: View {
                 }
                 .padding(.horizontal, 11)
                 .padding(.vertical, 6)
-                .background(TokenBarStyle.surfaceRaised, in: Capsule())
+                .background(TokenBarStyle.surfaceRaised.opacity(0.78), in: Capsule())
                 .overlay(Capsule().stroke(TokenBarStyle.line, lineWidth: 1))
                 .padding(.top, 6)
                 .padding(.trailing, 8)

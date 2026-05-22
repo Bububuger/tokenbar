@@ -8,7 +8,9 @@ public struct IndexingResourceBudget: Sendable, Hashable {
     }
 
     public static let backgroundCPUPercent: Double = 3
+    public static let initialIndexCPUPercent: Double = 20
     public static let background = IndexingResourceBudget(cpuPercent: backgroundCPUPercent)
+    public static let initialIndex = IndexingResourceBudget(cpuPercent: initialIndexCPUPercent)
 
     var activeRatio: Double {
         cpuPercent / 100

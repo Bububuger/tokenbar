@@ -78,6 +78,7 @@ targets:
     platform: macOS
     sources:
       - path: Sources/TokenBar
+      - path: Resources/Assets.xcassets
     dependencies:
       - target: TokenBarCore
     settings:

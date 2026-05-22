@@ -11,6 +11,10 @@ struct ContentView: View {
     @State private var overviewRangeMetrics = TokenBarOverviewRangeMetrics.empty
     @State private var isOverviewRangeUpdating = false
     @State private var projectPageData: ProjectPageData?
+    @State private var routeTransitionStartedAt: Date?
+    @State private var routeTransitionFrom = "none"
+    @State private var routeTransitionTo = "none"
+    @State private var routeTransitionSequence = 0
     @AppStorage("tokenbar.pricingOverrides") private var pricingOverridesJSON = "{}"
 
     var body: some View {
@@ -18,13 +22,16 @@ struct ContentView: View {
             TokenBarSidebar(
                 activeRoute: runtimeModel.mainRoute,
                 projects: sidebarProjects,
+                archivedProjectNames: runtimeModel.archivedProjectNames,
                 warnings: warningCount,
                 refreshState: runtimeModel.refreshState,
                 lastIndexedAt: runtimeModel.diagnostics.lastIndexedAt,
                 onSelectOverview: { runtimeModel.navigate(to: .today, source: "sidebar.overview") },
                 onSelectDiagnostics: { runtimeModel.navigate(to: .diagnostics, source: "sidebar.diagnostics") },
                 onSelectSettings: { runtimeModel.navigate(to: .settings, source: "sidebar.settings") },
-                onSelectProject: { runtimeModel.openProject(named: $0, source: "sidebar.project") }
+                onSelectProject: { runtimeModel.openProject(named: $0, source: "sidebar.project") },
+                onArchiveProject: { runtimeModel.archiveProject(named: $0, source: "sidebar.project_context") },
+                onRestoreProject: { runtimeModel.restoreProject(named: $0, source: "sidebar.project_context") }
             )
             .frame(width: TokenBarStyle.sidebarWidth)
 
@@ -80,6 +87,7 @@ struct ContentView: View {
             recordRouteRender(runtimeModel.mainRoute, previous: nil, reason: "appear")
         }
         .onChange(of: runtimeModel.mainRoute) { oldValue, newValue in
+            beginRouteTransition(from: oldValue, to: newValue)
             recordRouteRender(newValue, previous: oldValue, reason: "change")
         }
     }
@@ -112,30 +120,34 @@ struct ContentView: View {
             projectName,
             selectedRange,
             runtimeModel.eventSignature,
-            runtimeModel.promptSignature,
             pricingOverridesJSON,
         ].joined(separator: "|")
     }
 
     @MainActor
     private func rebuildSidebarProjects(reason: String) async {
-        let events = runtimeModel.events
         let selection = selectedRange
         let started = Date()
         isSidebarProjectsLoading = true
         TokenBarTelemetry.event(
             "main.sidebar.projects.compute.begin",
-            metadata: "reason=\(reason) range=\(selection) events=\(events.count)",
+            metadata: "reason=\(reason) range=\(selection) events=\(runtimeModel.eventCount)",
             success: true
         )
-        let rows = await Task.detached(priority: .utility) {
-            tokenbarBreakdowns(
-                events: events,
-                selection: selection,
-                kind: .project,
-                topCount: nil
-            )
-        }.value
+        let rows: [UsageBreakdown]
+        if let dbRows = await runtimeModel.projectBreakdowns(selection: selection) {
+            rows = dbRows
+        } else {
+            let events = runtimeModel.events
+            rows = await Task.detached(priority: .utility) {
+                tokenbarBreakdowns(
+                    events: events,
+                    selection: selection,
+                    kind: .project,
+                    topCount: nil
+                )
+            }.value
+        }
         guard selection == selectedRange else { return }
         sidebarProjectsCache = rows
         hasSidebarProjectsLoaded = true
@@ -143,23 +155,32 @@ struct ContentView: View {
         TokenBarTelemetry.timing(
             "main.sidebar.projects.compute",
             startedAt: started,
-            metadata: "range=\(selection) rows=\(rows.count) events=\(events.count)"
+            metadata: "range=\(selection) rows=\(rows.count) events=\(runtimeModel.eventCount)"
         )
     }
 
     @MainActor
     private func rebuildOverviewRangeMetrics(reason: String) async {
-        let events = runtimeModel.events
         let selection = selectedRange
         let started = Date()
         TokenBarTelemetry.event(
             "main.overview.range.compute.begin",
-            metadata: "reason=\(reason) range=\(selection) events=\(events.count)",
+            metadata: "reason=\(reason) range=\(selection) events=\(runtimeModel.eventCount)",
             success: true
         )
-        let metrics = await Task.detached(priority: .userInitiated) {
-            TokenBarOverviewRangeMetrics.make(events: events, selection: selection)
-        }.value
+        let metrics: TokenBarOverviewRangeMetrics
+        if let rangeData = await runtimeModel.overviewRangeData(selection: selection) {
+            metrics = TokenBarOverviewRangeMetrics.make(
+                aggregate: rangeData.aggregate,
+                selection: selection,
+                window: rangeData.window
+            )
+        } else {
+            let events = runtimeModel.events
+            metrics = await Task.detached(priority: .userInitiated) {
+                TokenBarOverviewRangeMetrics.make(events: events, selection: selection)
+            }.value
+        }
         guard !Task.isCancelled, selection == selectedRange else { return }
         overviewRangeMetrics = metrics
         TokenBarTelemetry.timing(
@@ -181,12 +202,10 @@ struct ContentView: View {
         let selection = selectedRange
         let pricingOverrides = pricingOverridesJSON
         let eventSignature = runtimeModel.eventSignature
-        let promptSignature = runtimeModel.promptSignature
         if projectPageData?.isCurrent(
             projectName: projectName,
             selection: selection,
             eventSignature: eventSignature,
-            promptSignature: promptSignature,
             pricingOverridesJSON: pricingOverrides
         ) == true {
             return
@@ -199,14 +218,13 @@ struct ContentView: View {
             success: true
         )
         let projectEvents = await runtimeModel.projectEvents(for: projectName)
-        let projectPrompts = await runtimeModel.projectPromptHistory(for: projectName, includeContent: true)
         guard !Task.isCancelled else { return }
         let data = await Task.detached(priority: .userInitiated) {
             ProjectPageData.make(
                 projectName: projectName,
                 selection: selection,
                 events: projectEvents,
-                prompts: projectPrompts,
+                eventSignature: eventSignature,
                 pricingOverridesJSON: pricingOverrides
             )
         }.value
@@ -215,7 +233,6 @@ struct ContentView: View {
               currentProjectName == projectName,
               selectedRange == selection,
               runtimeModel.eventSignature == eventSignature,
-              runtimeModel.promptSignature == promptSignature,
               pricingOverridesJSON == pricingOverrides else {
             return
         }
@@ -223,7 +240,7 @@ struct ContentView: View {
         TokenBarTelemetry.timing(
             "main.project.page_data.compute",
             startedAt: started,
-            metadata: "project=\(projectName) range=\(selection) project_events=\(data.events.count) prompts=\(data.prompts.count)"
+            metadata: "project=\(projectName) range=\(selection) project_events=\(data.events.count)"
         )
     }
 
@@ -234,7 +251,6 @@ struct ContentView: View {
                 projectName: projectName,
                 selection: selectedRange,
                 eventSignature: runtimeModel.eventSignature,
-                promptSignature: runtimeModel.promptSignature,
                 pricingOverridesJSON: pricingOverridesJSON
             ) == true
                 ? projectPageData
@@ -244,7 +260,6 @@ struct ContentView: View {
                 projectPath: pageData?.projectPath,
                 allTimeSummary: pageData?.allTimeSummary ?? detail.summary,
                 allTimeCost: pageData?.allTimeCost ?? detail.estimatedCost,
-                prompts: pageData?.prompts ?? [],
                 events: pageData?.events ?? [],
                 selectedRange: $selectedRange,
                 refreshState: runtimeModel.refreshState,
@@ -271,12 +286,36 @@ struct ContentView: View {
         }
     }
 
+    private func beginRouteTransition(from previous: TokenBarMainRoute, to route: TokenBarMainRoute) {
+        routeTransitionStartedAt = Date()
+        routeTransitionFrom = previous.telemetryName
+        routeTransitionTo = route.telemetryName
+        routeTransitionSequence += 1
+        TokenBarSignpost.event("route-switch-start", "\(previous.telemetryName)->\(route.telemetryName)")
+        TokenBarTelemetry.event(
+            "main.route.switch.begin",
+            metadata: routeTelemetryMetadata(
+                route: route,
+                previous: previous.telemetryName,
+                sequence: routeTransitionSequence,
+                extra: "range=\(selectedRange)"
+            ),
+            success: true
+        )
+    }
+
     private func recordRouteRender(_ route: TokenBarMainRoute, previous: TokenBarMainRoute?, reason: String) {
         let started = Date()
         let previousText = previous?.telemetryName ?? "none"
+        let sequence = routeTransitionSequence
         TokenBarTelemetry.event(
             "main.route.render.begin",
-            metadata: "reason=\(reason) previous=\(previousText) route=\(route.telemetryName) range=\(selectedRange) events=\(runtimeModel.eventCount) sidebar_rows=\(sidebarProjects.count) sidebar_loading=\(isSidebarProjectsLoading)",
+            metadata: routeTelemetryMetadata(
+                route: route,
+                previous: previousText,
+                sequence: sequence,
+                extra: "reason=\(reason) range=\(selectedRange) sidebar_rows=\(sidebarProjects.count) sidebar_loading=\(isSidebarProjectsLoading)"
+            ),
             success: true
         )
         Task { @MainActor in
@@ -284,29 +323,102 @@ struct ContentView: View {
             TokenBarTelemetry.timing(
                 "main.route.render.first_runloop",
                 startedAt: started,
-                metadata: "route=\(route.telemetryName)"
+                metadata: routeTelemetryMetadata(route: route, previous: previousText, sequence: sequence)
             )
             try? await Task.sleep(for: .milliseconds(16))
             TokenBarTelemetry.timing(
                 "main.route.render.first_frame_16ms",
                 startedAt: started,
-                metadata: "route=\(route.telemetryName)"
+                metadata: routeTelemetryMetadata(route: route, previous: previousText, sequence: sequence)
             )
             try? await Task.sleep(for: .milliseconds(100))
             TokenBarTelemetry.timing(
                 "main.route.render.settled_100ms",
                 startedAt: started,
-                metadata: "route=\(route.telemetryName)"
+                metadata: routeTelemetryMetadata(route: route, previous: previousText, sequence: sequence)
+            )
+            try? await Task.sleep(for: .milliseconds(400))
+            TokenBarTelemetry.timing(
+                "main.route.render.settled_500ms",
+                startedAt: started,
+                metadata: routeTelemetryMetadata(route: route, previous: previousText, sequence: sequence)
             )
         }
     }
 
     private func recordRouteViewAppear(_ route: TokenBarMainRoute) {
+        let transitionStarted = routeTransitionTo == route.telemetryName ? routeTransitionStartedAt : nil
+        let sequence = routeTransitionSequence
+        let previous = routeTransitionFrom
         TokenBarTelemetry.event(
             "main.route.view.appear",
-            metadata: "route=\(route.telemetryName) events=\(runtimeModel.eventCount) warnings=\(runtimeModel.snapshot.warningCount)",
-            success: true
+            metadata: routeTelemetryMetadata(route: route, previous: previous, sequence: sequence),
+            success: true,
+            elapsed: transitionStarted.map { Date().timeIntervalSince($0) }
         )
+        if let transitionStarted {
+            TokenBarSignpost.event("route-switch-view-appear", "\(previous)->\(route.telemetryName)")
+            recordRouteSwitchMilestones(
+                route: route,
+                previous: previous,
+                sequence: sequence,
+                startedAt: transitionStarted
+            )
+        }
+    }
+
+    private func recordRouteSwitchMilestones(
+        route: TokenBarMainRoute,
+        previous: String,
+        sequence: Int,
+        startedAt: Date
+    ) {
+        Task { @MainActor in
+            await Task.yield()
+            TokenBarTelemetry.timing(
+                "main.route.switch.first_runloop",
+                startedAt: startedAt,
+                metadata: routeTelemetryMetadata(route: route, previous: previous, sequence: sequence)
+            )
+            try? await Task.sleep(for: .milliseconds(16))
+            TokenBarTelemetry.timing(
+                "main.route.switch.first_frame_16ms",
+                startedAt: startedAt,
+                metadata: routeTelemetryMetadata(route: route, previous: previous, sequence: sequence)
+            )
+            try? await Task.sleep(for: .milliseconds(100))
+            TokenBarTelemetry.timing(
+                "main.route.switch.settled_100ms",
+                startedAt: startedAt,
+                metadata: routeTelemetryMetadata(route: route, previous: previous, sequence: sequence)
+            )
+            try? await Task.sleep(for: .milliseconds(400))
+            TokenBarTelemetry.timing(
+                "main.route.switch.settled_500ms",
+                startedAt: startedAt,
+                metadata: routeTelemetryMetadata(route: route, previous: previous, sequence: sequence)
+            )
+        }
+    }
+
+    private func routeTelemetryMetadata(
+        route: TokenBarMainRoute,
+        previous: String,
+        sequence: Int,
+        extra: String = ""
+    ) -> String {
+        [
+            "seq=\(sequence)",
+            "previous=\(previous)",
+            "route=\(route.telemetryName)",
+            "events=\(runtimeModel.eventCount)",
+            "prompts=\(runtimeModel.promptCount)",
+            "warnings=\(runtimeModel.snapshot.warningCount)",
+            "refresh_state=\(runtimeModel.refreshState.rawValue)",
+            extra,
+        ]
+        .filter { !$0.isEmpty }
+        .joined(separator: " ")
     }
 
 }
@@ -315,12 +427,10 @@ private struct ProjectPageData: Sendable {
     let projectName: String
     let selection: String
     let eventSignature: String
-    let promptSignature: String
     let pricingOverridesJSON: String
     let projectPath: String?
     let allTimeSummary: UsageSummary
     let allTimeCost: UsageCostProjection
-    let prompts: [PromptRecord]
     let events: [UsageEvent]
     let todayCost: Double
     let rangeCost: Double
@@ -332,21 +442,15 @@ private struct ProjectPageData: Sendable {
         "\(events.count)|\(events.last?.id ?? "none")"
     }
 
-    static func promptsSignature(_ prompts: [PromptRecord]) -> String {
-        "\(prompts.count)|\(prompts.last?.id ?? "none")"
-    }
-
     func isCurrent(
         projectName: String,
         selection: String,
         eventSignature: String,
-        promptSignature: String,
         pricingOverridesJSON: String
     ) -> Bool {
         self.projectName == projectName
             && self.selection == selection
             && self.eventSignature == eventSignature
-            && self.promptSignature == promptSignature
             && self.pricingOverridesJSON == pricingOverridesJSON
     }
 
@@ -359,12 +463,10 @@ private struct ProjectPageData: Sendable {
             projectName: projectName,
             selection: selection,
             eventSignature: "placeholder",
-            promptSignature: "placeholder",
             pricingOverridesJSON: "",
             projectPath: nil,
             allTimeSummary: detail.summary,
             allTimeCost: detail.estimatedCost,
-            prompts: [],
             events: [],
             todayCost: 0,
             rangeCost: detail.estimatedCost.totalCost,
@@ -378,7 +480,7 @@ private struct ProjectPageData: Sendable {
         projectName: String,
         selection: String,
         events: [UsageEvent],
-        prompts: [PromptRecord],
+        eventSignature: String,
         pricingOverridesJSON: String
     ) -> ProjectPageData {
         var projectEvents: [UsageEvent] = []
@@ -402,14 +504,6 @@ private struct ProjectPageData: Sendable {
             }
         }
 
-        let projectPrompts = prompts
-            .filter { $0.projectName == projectName }
-            .sorted { lhs, rhs in
-                if lhs.timestamp == rhs.timestamp {
-                    return lhs.content.count > rhs.content.count
-                }
-                return lhs.timestamp > rhs.timestamp
-            }
         let allTimeSummary = UsageSummary(
             inputTokens: inputTokens,
             outputTokens: outputTokens,
@@ -422,13 +516,11 @@ private struct ProjectPageData: Sendable {
         return ProjectPageData(
             projectName: projectName,
             selection: selection,
-            eventSignature: eventsSignature(events),
-            promptSignature: promptsSignature(prompts),
+            eventSignature: eventSignature,
             pricingOverridesJSON: pricingOverridesJSON,
             projectPath: latestPath,
             allTimeSummary: allTimeSummary,
             allTimeCost: tokenbarCostProjection(events: projectEvents),
-            prompts: projectPrompts,
             events: projectEvents,
             todayCost: tokenbarEstimatedCost(events: todayEvents),
             rangeCost: tokenbarEstimatedCost(events: rangeEvents),
@@ -462,9 +554,15 @@ private struct ProjectDetailPendingView: View {
     }
 }
 
+private enum ProjectArchiveMode: String, CaseIterable {
+    case active = "Active"
+    case archived = "Archived"
+}
+
 private struct TokenBarSidebar: View {
     let activeRoute: TokenBarMainRoute
     let projects: [UsageBreakdown]
+    let archivedProjectNames: Set<String>
     let warnings: Int
     let refreshState: RefreshState
     let lastIndexedAt: Date?
@@ -472,7 +570,10 @@ private struct TokenBarSidebar: View {
     let onSelectDiagnostics: () -> Void
     let onSelectSettings: () -> Void
     let onSelectProject: (String) -> Void
+    let onArchiveProject: (String) -> Void
+    let onRestoreProject: (String) -> Void
     @State private var projectSearchText = ""
+    @State private var projectArchiveMode: ProjectArchiveMode = .active
 
     var body: some View {
         VStack(spacing: 0) {
@@ -507,6 +608,8 @@ private struct TokenBarSidebar: View {
                 .foregroundStyle(TokenBarStyle.faint)
                 .textCase(.uppercase)
 
+                projectArchivePicker
+
                 sidebarSearchField
 
                 // CL-P1-012: scroll once project count exceeds the visible
@@ -514,7 +617,7 @@ private struct TokenBarSidebar: View {
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: 1) {
                         if filteredProjects.isEmpty {
-                            Text("No matching projects")
+                            Text(emptyProjectsMessage)
                                 .font(.caption)
                                 .foregroundStyle(TokenBarStyle.faint)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -548,6 +651,9 @@ private struct TokenBarSidebar: View {
                             .buttonStyle(.plain)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .foregroundStyle(selectedProject(project.name) ? TokenBarStyle.foreground : TokenBarStyle.muted)
+                            .contextMenu {
+                                projectContextMenu(for: project)
+                            }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -590,18 +696,53 @@ private struct TokenBarSidebar: View {
         activeRoute == .settings
     }
 
+    private var activeProjects: [UsageBreakdown] {
+        projects.filter { !archivedProjectNames.contains($0.name) }
+    }
+
+    private var archivedProjects: [UsageBreakdown] {
+        projects.filter { archivedProjectNames.contains($0.name) }
+    }
+
+    private var scopedProjects: [UsageBreakdown] {
+        switch projectArchiveMode {
+        case .active:
+            return activeProjects
+        case .archived:
+            return archivedProjects
+        }
+    }
+
     private var filteredProjects: [UsageBreakdown] {
         let query = projectSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return projects }
-        return projects.filter { project in
+        guard !query.isEmpty else { return scopedProjects }
+        return scopedProjects.filter { project in
             project.name.localizedCaseInsensitiveContains(query)
         }
     }
 
     private var projectCountLabel: String {
         projectSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "\(projects.count)"
-            : "\(filteredProjects.count)/\(projects.count)"
+            ? "\(scopedProjects.count)"
+            : "\(filteredProjects.count)/\(scopedProjects.count)"
+    }
+
+    private var emptyProjectsMessage: String {
+        if projectSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return projectArchiveMode == .active ? "No active projects" : "No archived projects"
+        }
+        return "No matching projects"
+    }
+
+    private var projectArchivePicker: some View {
+        Picker("Project list", selection: $projectArchiveMode) {
+            ForEach(ProjectArchiveMode.allCases, id: \.self) { mode in
+                Text(mode.rawValue).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.small)
     }
 
     private var sidebarSearchField: some View {
@@ -634,6 +775,24 @@ private struct TokenBarSidebar: View {
             return projectName == name
         }
         return false
+    }
+
+    @ViewBuilder
+    private func projectContextMenu(for project: UsageBreakdown) -> some View {
+        if archivedProjectNames.contains(project.name) {
+            Button {
+                onRestoreProject(project.name)
+                projectArchiveMode = .active
+            } label: {
+                Label("Restore Project", systemImage: "tray.and.arrow.up")
+            }
+        } else {
+            Button {
+                onArchiveProject(project.name)
+            } label: {
+                Label("Archive Project", systemImage: "archivebox")
+            }
+        }
     }
 
     private func routeRow(icon: String, title: String, value: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -789,7 +948,7 @@ private struct OverviewPage: View {
                 rangeCost: rangeMetrics.cost,
                 todayTokens: runtimeModel.snapshot.today.totalTokens,
                 totalTokens: rangeMetrics.summary.totalTokens,
-                todaySessions: tokenbarSessionCount(runtimeModel.events),
+                todaySessions: runtimeModel.popoverSnapshot.todaySessionCount,
                 refreshState: runtimeModel.refreshState,
                 onRefresh: { Task { await runtimeModel.refresh() } },
                 rangeLabel: tokenbarRangeShortLabel(selectedRange)
@@ -809,7 +968,7 @@ private struct OverviewPage: View {
     }
 
     private var todayCost: Double {
-        tokenbarEstimatedCost(events: runtimeModel.events, days: 1)
+        runtimeModel.popoverSnapshot.todayCost
     }
 
     private var kpiRow: some View {
@@ -901,7 +1060,7 @@ private struct OverviewPage: View {
     }
 
     private var hourly: HourlyUsageSnapshot {
-        UsageAggregator.makeHourlySnapshot(from: runtimeModel.events, referenceDate: Date(), days: 1)
+        runtimeModel.popoverSnapshot.hourly
     }
 
     private var hourlyIdleText: String {

@@ -169,8 +169,8 @@ private struct TokenBarStatusItem: View {
         tokenbarMirrorValue(
             mode: mirrorMode,
             todayTokens: runtimeModel.snapshot.today.totalTokens,
-            todayCost: tokenbarEstimatedCost(events: runtimeModel.events, days: 1),
-            todaySessions: tokenbarSessionCount(runtimeModel.events)
+            todayCost: runtimeModel.popoverSnapshot.todayCost,
+            todaySessions: runtimeModel.popoverSnapshot.todaySessionCount
         )
     }
 

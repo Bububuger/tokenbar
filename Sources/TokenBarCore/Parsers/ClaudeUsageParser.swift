@@ -110,18 +110,18 @@ public enum ClaudeUsageParser {
             let cacheReadTokens = cacheReadClamp.value
             let modelName = message["model"] as? String
 
-            let projectPath = object["cwd"] as? String
-            let projectName = projectPath
-                .map { URL(fileURLWithPath: $0).lastPathComponent }
-                .flatMap { $0.isEmpty ? nil : $0 }
-                ?? ClaudeDataSource.readableProjectName(fromSlug: fallbackProjectSlug)
+            let project = projectIdentity(
+                cwd: object["cwd"] as? String,
+                fallbackProjectSlug: fallbackProjectSlug,
+                sourcePath: sourcePath
+            )
 
             events.append(
                 UsageEvent(
                     id: "\(sourcePath)#\(lineNumber)",
                     agent: .claudeCode,
-                    projectPath: projectPath,
-                    projectName: projectName,
+                    projectPath: project.path,
+                    projectName: project.name,
                     sessionId: object["sessionId"] as? String ?? fileURL.deletingPathExtension().lastPathComponent,
                     timestamp: parseTimestamp(object["timestamp"] as? String) ?? .distantPast,
                     inputTokens: inputTokens,
@@ -195,18 +195,18 @@ public enum ClaudeUsageParser {
                     warnings.append(ClaudeParseWarning(sourcePath: sourcePath, lineNumber: lineNumber, message: "negative token count clamped to 0"))
                 }
                 let modelName = message["model"] as? String
-                let projectPath = object["cwd"] as? String
-                let projectName = projectPath
-                    .map { URL(fileURLWithPath: $0).lastPathComponent }
-                    .flatMap { $0.isEmpty ? nil : $0 }
-                    ?? ClaudeDataSource.readableProjectName(fromSlug: fallbackProjectSlug)
+                let project = projectIdentity(
+                    cwd: object["cwd"] as? String,
+                    fallbackProjectSlug: fallbackProjectSlug,
+                    sourcePath: sourcePath
+                )
 
                 events.append(
                     UsageEvent(
                         id: "\(sourcePath)#\(lineNumber)",
                         agent: .claudeCode,
-                        projectPath: projectPath,
-                        projectName: projectName,
+                        projectPath: project.path,
+                        projectName: project.name,
                         sessionId: object["sessionId"] as? String ?? fileURL.deletingPathExtension().lastPathComponent,
                         timestamp: parseTimestamp(object["timestamp"] as? String) ?? .distantPast,
                         inputTokens: inputClamp.value,
@@ -268,11 +268,11 @@ public enum ClaudeUsageParser {
             return nil
         }
 
-        let projectPath = object["cwd"] as? String
-        let projectName = projectPath
-            .map { URL(fileURLWithPath: $0).lastPathComponent }
-            .flatMap { $0.isEmpty ? nil : $0 }
-            ?? ClaudeDataSource.readableProjectName(fromSlug: fallbackProjectSlug)
+        let project = projectIdentity(
+            cwd: object["cwd"] as? String,
+            fallbackProjectSlug: fallbackProjectSlug,
+            sourcePath: sourcePath
+        )
         let timestamp = parseTimestamp(object["timestamp"] as? String) ?? .distantPast
         let contentHash = PromptExtraction.hash(content)
 
@@ -280,13 +280,60 @@ public enum ClaudeUsageParser {
             id: "\(sourcePath)#prompt#\(lineNumber)#\(contentHash)",
             eventId: nil,
             agent: .claudeCode,
-            projectName: projectName,
+            projectName: project.name,
             sessionId: object["sessionId"] as? String ?? fileURL.deletingPathExtension().lastPathComponent,
             timestamp: timestamp,
             content: content,
             contentHash: contentHash,
             sourcePath: sourcePath
         )
+    }
+
+    private static func projectIdentity(
+        cwd: String?,
+        fallbackProjectSlug: String,
+        sourcePath: String
+    ) -> (path: String?, name: String) {
+        let fallbackName = ClaudeDataSource.readableProjectName(fromSlug: fallbackProjectSlug)
+        let isSubagentFile = URL(fileURLWithPath: sourcePath).pathComponents.contains("subagents")
+
+        if let cwd,
+           let parentPath = generatedAgentWorktreeParentPath(cwd) {
+            return (parentPath, fallbackName)
+        }
+
+        guard isSubagentFile else {
+            let name = cwd
+                .map { URL(fileURLWithPath: $0).lastPathComponent }
+                .flatMap { $0.isEmpty ? nil : $0 }
+                ?? fallbackName
+            return (cwd, name)
+        }
+
+        let usablePath = cwd.flatMap { path -> String? in
+            let name = URL(fileURLWithPath: path).lastPathComponent
+            guard name == fallbackName else {
+                return nil
+            }
+            return path
+        }
+        return (usablePath, fallbackName)
+    }
+
+    private static func generatedAgentWorktreeParentPath(_ cwd: String) -> String? {
+        let url = URL(fileURLWithPath: cwd).standardizedFileURL
+        let components = url.pathComponents
+        guard let claudeIndex = components.lastIndex(of: ".claude"),
+              components.indices.contains(claudeIndex + 2),
+              components[claudeIndex + 1] == "worktrees",
+              components[claudeIndex + 2].hasPrefix("agent-") else {
+            return nil
+        }
+        let parentComponents = components[..<claudeIndex]
+        guard !parentComponents.isEmpty else {
+            return nil
+        }
+        return NSString.path(withComponents: Array(parentComponents))
     }
 
     static func parseTimestamp(_ value: String?) -> Date? {

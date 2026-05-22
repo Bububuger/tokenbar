@@ -14,6 +14,7 @@
 		29B9B765267E0C66E7F96CE6 /* IndexingResourceThrottle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A21A75E49D97E2D9072E96CF /* IndexingResourceThrottle.swift */; };
 		2B7F4275BB72666AD129AB27 /* claude-session-unicode-cwd.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = 6777696CA6F3021A247FD109 /* claude-session-unicode-cwd.jsonl */; };
 		2C0A567C4F523E5E6C22B9F5 /* TokenBarCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = CE68C5C4D63519C0D1AA1A2F /* TokenBarCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		2DB3031F751A8CD8A7860D01 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 88E72B0E28BA176B815BA2C9 /* Assets.xcassets */; };
 		2F1BF4057039E60E24D49CEF /* TokenBarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E0D668C114B1D19E73AFBD1 /* TokenBarApp.swift */; };
 		3756E6C4F045CE0B2B42B087 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4928DC72DB17512B06F60B6F /* AppDelegate.swift */; };
 		384B7FC2DF12C17712ECE7E2 /* CheckpointEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 214AE80317DD881CA7F55270 /* CheckpointEngine.swift */; };
@@ -191,6 +192,7 @@
 		85496493F2FFE8F42441C1F6 /* TokenBarMainRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenBarMainRoute.swift; sourceTree = "<group>"; };
 		858A48189BE5DDF327B3EDD0 /* session-malformed.jsonl */ = {isa = PBXFileReference; path = "session-malformed.jsonl"; sourceTree = "<group>"; };
 		8621DA3B89F27B97A415C272 /* Sprint10PerfTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sprint10PerfTests.swift; sourceTree = "<group>"; };
+		88E72B0E28BA176B815BA2C9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8B2E4D0610C08E69AEB81F10 /* claude-session-zero.jsonl */ = {isa = PBXFileReference; path = "claude-session-zero.jsonl"; sourceTree = "<group>"; };
 		8BBC62FE5D2214DAA868B40E /* session-model-context.jsonl */ = {isa = PBXFileReference; path = "session-model-context.jsonl"; sourceTree = "<group>"; };
 		90055EE0D8035B3D256EE361 /* Sprint8StorageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sprint8StorageTests.swift; sourceTree = "<group>"; };
@@ -442,6 +444,7 @@
 			isa = PBXGroup;
 			children = (
 				A7852218F65306D6397AA28F /* Sources */,
+				D303FA16BD45F410EA5CE7A3 /* Resources */,
 				3412DA2B9C58161A36FA1FA1 /* Tests */,
 				FFB84DA4E38E744D734B034A /* Products */,
 			);
@@ -460,6 +463,14 @@
 				8B2E4D0610C08E69AEB81F10 /* claude-session-zero.jsonl */,
 			);
 			path = Claude;
+			sourceTree = "<group>";
+		};
+		D303FA16BD45F410EA5CE7A3 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				88E72B0E28BA176B815BA2C9 /* Assets.xcassets */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 		DA7899D2B2D634598DF1C25F /* App */ = {
@@ -663,6 +674,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2DB3031F751A8CD8A7860D01 /* Assets.xcassets in Resources */,
 				29895282DA84CF98BA945E18 /* Localizable.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -243,11 +243,18 @@ struct TokenBarCLI {
         let resourceThrottle = options.background || options.cpuPercent != nil
             ? IndexingResourceThrottle(budget: IndexingResourceBudget(cpuPercent: options.cpuPercent ?? IndexingResourceBudget.backgroundCPUPercent))
             : nil
-        let sources: [any InspectableUsageEventSource] = [
+        let builtInSources: [any InspectableUsageEventSource] = [
             CodexUsageEventSource(daysBack: nil),
             ClaudeUsageEventSource(daysBack: nil),
             HermesUsageEventSource(),
         ]
+        let customSources = (try? await store.customSources())
+            .map { records in
+                records
+                    .filter(\.enabled)
+                    .map { CustomUsageEventSource(record: $0) as any InspectableUsageEventSource }
+            } ?? []
+        let sources = builtInSources + customSources
         let calendar = Calendar(identifier: .gregorian)
 
         try await store.reparseAll()

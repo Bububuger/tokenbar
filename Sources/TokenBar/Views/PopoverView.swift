@@ -29,8 +29,8 @@ struct PopoverView: View {
 
     var body: some View {
         ZStack {
-            TokenBarGlassBackground()
-            VStack(alignment: .leading, spacing: 10) {
+            TokenBarPopoverBackground()
+            VStack(alignment: .leading, spacing: 0) {
                 // CL-P0-026: brief banner shown when the runtime fires its
                 // post-midnight refresh. Auto-hides after 1.5s.
                 if let changed = runtimeModel.dayChangedAt,
@@ -44,17 +44,24 @@ struct PopoverView: View {
                     }
                     .padding(.horizontal, 8).padding(.vertical, 4)
                     .background(TokenBarStyle.accent.opacity(0.12), in: Capsule())
+                    .padding(.bottom, 8)
                     .transition(.opacity)
                 }
                 hero
+                Divider().padding(.vertical, 10)
                 todayBreakdown
+                Divider().padding(.vertical, 10)
                 activity
+                Divider().padding(.vertical, 10)
                 rankings
+                Divider().padding(.vertical, 8)
                 footer
             }
-            .padding(12)
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
         }
-        .frame(width: 360)
+        .frame(width: 372)
         .foregroundStyle(TokenBarStyle.foreground)
         .onAppear {
             let started = Date()
@@ -91,97 +98,65 @@ struct PopoverView: View {
     }
 
     private var hero: some View {
-        TokenBarCard(padding: 13) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Today")
-                        .font(.caption2)
-                        .foregroundStyle(TokenBarStyle.muted)
-                    // CL-P1-004: split unit suffix into 13pt faint glyph.
-                    HStack(alignment: .firstTextBaseline, spacing: 1) {
-                        let split = tokenbarSplitStagedTokens(popover.today.totalTokens)
-                        Text(split.number)
-                            .font(.system(size: 26, weight: .semibold, design: .rounded))
-                            .monospacedDigit()
-                        if !split.suffix.isEmpty {
-                            Text(split.suffix)
-                                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                .foregroundStyle(TokenBarStyle.faint)
-                                .baselineOffset(4)
-                        }
-                    }
+        HStack(alignment: .center, spacing: 10) {
+            TokenBarBrandGlyph(size: 22)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("TokenBar")
+                    .font(.headline)
+                Text("Updated \(tokenbarRelativeTime(popover.lastIndexedAt))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(tokenbarCompactTokens(popover.today.totalTokens))
+                    .font(.title3.weight(.semibold))
+                    .monospacedDigit()
                     .tbNumberTooltip(precise: popover.today.totalTokens, window: "today")
-                    Text("\(popover.todaySessionCount) sessions")
-                        .font(.caption2)
-                        .monospacedDigit()
-                        .foregroundStyle(TokenBarStyle.faint)
-                }
+                Text("\(popover.todaySessionCount) sessions · \(tokenbarCompactCurrency(popover.todayCost))")
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .tbNumberTooltip(precise: popover.todayCost, window: "today (est.)")
+            }
 
-                HStack(spacing: 9) {
-                    TokenBarBrandGlyph(size: 24)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("TokenBar")
-                            .font(.system(size: 13.5, weight: .semibold))
-                        Text("Updated \(tokenbarRelativeTime(popover.lastIndexedAt))")
-                            .font(.caption2)
-                            .foregroundStyle(TokenBarStyle.muted)
-                        HStack(spacing: 3) {
-                            Text(tokenbarCompactCurrency(popover.todayCost))
-                                .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
-                                .monospacedDigit()
-                                .foregroundStyle(TokenBarStyle.cost)
-                                .tbNumberTooltip(precise: popover.todayCost, window: "today (est.)")
-                            Text("est.")
-                                .font(.system(size: 10))
-                                .foregroundStyle(TokenBarStyle.faint)
-                        }
-                    }
-                }
+            VStack(alignment: .trailing, spacing: 6) {
+                TokenBarNativeStatusBadge(
+                    text: isPaused ? "Paused" : runtimeModel.refreshState.rawValue.capitalized,
+                    color: isPaused ? TokenBarStyle.warn : TokenBarStyle.statusColor(for: runtimeModel.refreshState)
+                )
 
-                Spacer()
-
-                VStack(alignment: .trailing, spacing: 7) {
-                    // CL-P0-004: when paused, the pill overrides the refresh
-                    // state badge so the whole Popover surface visibly reflects
-                    // the user's pause toggle (menubar ❘❘ + Hero PAUSED).
-                    if isPaused {
-                        TokenBarStatusPill(text: "PAUSED", color: TokenBarStyle.warn)
-                    } else {
-                        TokenBarStatusPill(text: runtimeModel.refreshState.rawValue, color: TokenBarStyle.statusColor(for: runtimeModel.refreshState))
-                    }
-                    Button {
-                        TokenBarTelemetry.event("popover.refresh.click", success: true)
-                        Task { await runtimeModel.refresh() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 11, weight: .semibold))
-                            .frame(width: 22, height: 22)
-                            .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
-                            .rotationEffect(.degrees(runtimeModel.refreshState == .refreshing ? 360 : 0))
-                            .animation(runtimeModel.refreshState == .refreshing
-                                       ? .linear(duration: 1.2).repeatForever(autoreverses: false)
-                                       : .default,
-                                       value: runtimeModel.refreshState)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isPaused)
-                    .help(isPaused ? "Paused — resume from the menubar to refresh" : "Refresh now")
+                Button {
+                    TokenBarTelemetry.event("popover.refresh.click", success: true)
+                    Task { await runtimeModel.refresh() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12, weight: .medium))
                 }
+                .buttonStyle(.borderless)
+                .disabled(isPaused)
+                .rotationEffect(.degrees(runtimeModel.refreshState == .refreshing ? 360 : 0))
+                .animation(runtimeModel.refreshState == .refreshing
+                           ? .linear(duration: 1.2).repeatForever(autoreverses: false)
+                           : .default,
+                           value: runtimeModel.refreshState)
+                .help(isPaused ? "Paused — resume from the menubar to refresh" : "Refresh now")
             }
         }
     }
 
     private var todayBreakdown: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Today Breakdown")
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(TokenBarStyle.muted)
+                Text("Today")
+                    .font(.subheadline.weight(.semibold))
                 Spacer()
                 Text(popover.yesterdayDeltaText)
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(popover.yesterdayDeltaText.contains("+") ? TokenBarStyle.cache : TokenBarStyle.faint)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
             HStack(spacing: 6) {
                 popKpiCard("In", value: popover.today.inputTokens, pct: popover.inputShare, color: TokenBarStyle.input)
@@ -255,21 +230,22 @@ struct PopoverView: View {
     private var activity: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("By hour")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .tracking(0.7)
-                    .foregroundStyle(TokenBarStyle.faint)
+                Text("Activity")
+                    .font(.subheadline.weight(.semibold))
                 Spacer()
                 Text(popover.hourlyActivityText)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(TokenBarStyle.cache)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
+            Text("By hour")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             HourlyHeatmapView(hours: popover.hourly.hoursOfDay, showAxis: false)
 
             HStack {
                 Text("Last 30 days")
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(TokenBarStyle.muted)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 HeatLegend()
             }
@@ -290,10 +266,20 @@ struct PopoverView: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack {
                 Text("Rankings · 30d")
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(TokenBarStyle.muted)
+                    .font(.subheadline.weight(.semibold))
                 Spacer()
-                rankingTabPicker
+                Picker("Ranking", selection: $selectedTab) {
+                    ForEach(PopoverTab.allCases) { tab in
+                        Text(tab.rawValue).tag(tab)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .controlSize(.small)
+                .frame(width: 205)
+                .onChange(of: selectedTab) { _, tab in
+                    TokenBarTelemetry.event("popover.ranking_tab.change", metadata: "tab=\(tab.rawValue)", success: true)
+                }
             }
 
             VStack(spacing: 0) {
@@ -354,8 +340,6 @@ struct PopoverView: View {
                 }
             }
         }
-        .padding(.top, 2)
-        .overlay(Divider().overlay(TokenBarStyle.line), alignment: .top)
     }
 
     private var footer: some View {
@@ -364,13 +348,9 @@ struct PopoverView: View {
                 openMain(route: .today)
             } label: {
                 Label("Open Details", systemImage: "rectangle.split.2x1")
-                    .font(.system(size: 12.5, weight: .medium))
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
 
             Spacer()
 
@@ -391,25 +371,14 @@ struct PopoverView: View {
                     .foregroundStyle(Color(nsColor: .quaternaryLabelColor))
                 } else {
                     Button { openMain(route: .diagnostics) } label: {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(TokenBarStyle.warn)
-                                .frame(width: 6, height: 6)
-                                .shadow(color: TokenBarStyle.warn.opacity(0.55), radius: 5)
-                            Text("\(popover.warningCount)")
-                                .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
-                            Text("warnings")
-                                .font(.caption)
-                                .foregroundStyle(TokenBarStyle.muted)
-                        }
+                        Label("\(popover.warningCount) warnings", systemImage: "exclamationmark.triangle")
+                            .font(.caption)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
                     .foregroundStyle(TokenBarStyle.warn)
                 }
             }
         }
-        .padding(.top, 8)
-        .overlay(Divider().overlay(TokenBarStyle.line), alignment: .top)
     }
 
     private func openMain(route: TokenBarMainRoute) {
@@ -438,23 +407,21 @@ struct PopoverView: View {
         color: Color,
         action: (() -> Void)?
     ) -> some View {
-        let badgeColor = popoverRankColor(index: index, fallback: color)
         return Button {
             action?()
         } label: {
             HStack(spacing: 8) {
                 Text("\(index + 1)")
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(badgeColor)
+                    .foregroundStyle(.secondary)
                     .frame(width: 18, height: 18)
-                    .background(badgeColor.opacity(0.20), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(name)
-                        .font(.system(size: 12.5, weight: .medium))
+                        .font(.system(size: 12.5, weight: .regular))
                         .lineLimit(1)
                     Text(subtitle)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(TokenBarStyle.faint)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -499,49 +466,14 @@ struct PopoverView: View {
             }
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .allowsHitTesting(action != nil)
-        .overlay(Divider().overlay(TokenBarStyle.line.opacity(0.55)), alignment: .bottom)
+        .overlay(Divider(), alignment: .bottom)
         .help("\(name)\n\(subtitle)")
     }
 
-    private func popoverRankColor(index: Int, fallback: Color) -> Color {
-        switch index {
-        case 0: TokenBarStyle.accent
-        case 1: TokenBarStyle.output
-        case 2: TokenBarStyle.cache
-        case 3: Color(nsColor: .systemPurple)
-        default: fallback.opacity(0.75)
-        }
-    }
-
-    private var rankingTabPicker: some View {
-        HStack(spacing: 1) {
-            ForEach(PopoverTab.allCases) { tab in
-                Button {
-                    withAnimation(.easeOut(duration: 0.16)) {
-                        selectedTab = tab
-                    }
-                    TokenBarTelemetry.event("popover.ranking_tab.change", metadata: "tab=\(tab.rawValue)", success: true)
-                } label: {
-                    let selected = selectedTab == tab
-                    Text(tab.rawValue)
-                        .font(.system(size: 10.5, weight: selected ? .semibold : .medium, design: .rounded))
-                        .foregroundStyle(selected ? Color.white : TokenBarStyle.muted)
-                        .frame(width: 58, height: 24)
-                        .background(
-                            selected ? TokenBarStyle.selectionBlue : Color.clear,
-                            in: Capsule()
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(3)
-        .background(TokenBarStyle.surfaceRaised.opacity(0.82), in: Capsule())
-        .overlay(Capsule().stroke(TokenBarStyle.line, lineWidth: 1))
-    }
 }
 
 struct PopKPI: View {
@@ -596,13 +528,30 @@ struct PopKPI: View {
             .lineLimit(1)
             .minimumScaleFactor(0.7)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.vertical, 3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(
-            isExpanded ? TokenBarStyle.accent.opacity(0.55) : TokenBarStyle.line,
-            lineWidth: isExpanded ? 1.5 : 1
-        ))
+        .overlay(alignment: .bottom) {
+            if isExpanded {
+                Rectangle()
+                    .fill(TokenBarStyle.accent.opacity(0.55))
+                    .frame(height: 1)
+            }
+        }
+    }
+}
+
+private struct TokenBarNativeStatusBadge: View {
+    let text: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+            Text(text)
+                .font(.caption)
+        }
+        .foregroundStyle(.secondary)
     }
 }

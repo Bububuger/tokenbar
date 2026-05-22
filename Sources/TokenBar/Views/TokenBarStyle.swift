@@ -760,6 +760,37 @@ struct TokenBarGlassBackground: View {
     }
 }
 
+/// Menubar popover background. Keep light mode close to a native menu card:
+/// opaque white paper with a neutral edge, so data colors do not tint the
+/// whole popover green/cyan.
+struct TokenBarPopoverBackground: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        if colorScheme == .light {
+            ZStack {
+                Color.white
+                Color(red: 0.992, green: 0.992, blue: 0.992)
+                if !reduceTransparency {
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.92),
+                            Color(red: 0.985, green: 0.986, blue: 0.988).opacity(0.12),
+                            Color(red: 1.0, green: 0.992, blue: 0.996).opacity(0.05),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                }
+            }
+            .ignoresSafeArea()
+        } else {
+            TokenBarGlassBackground()
+        }
+    }
+}
+
 /// Sidebar background (CL-P0-008). `.bar` material renders a SwiftUI surface
 /// equivalent to NSVisualEffectView with `.sidebar` material; falls back to a
 /// flat semantic color when transparency is reduced.

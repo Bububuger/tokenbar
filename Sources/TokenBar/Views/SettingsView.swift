@@ -402,9 +402,12 @@ struct SettingsView: View {
                 SettingsIndexingProgressStrip(state: runtimeModel.indexingState)
             }
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                customSourceTile(name: "Codex", path: "~/.codex/sessions", color: TokenBarStyle.input, enabled: true)
-                customSourceTile(name: "Claude Code", path: "~/.claude/projects", color: TokenBarStyle.output, enabled: true)
-                customSourceTile(name: "Hermes", path: "~/.hermes/state.db", color: TokenBarStyle.output, enabled: true)
+                customSourceTile(name: "Codex", path: "~/.codex/sessions", color: TokenBarStyle.agentColor("Codex"), enabled: true)
+                customSourceTile(name: "Claude Code", path: "~/.claude/projects", color: TokenBarStyle.agentColor("Claude Code"), enabled: true)
+                customSourceTile(name: "Hermes", path: "~/.hermes/state.db", color: TokenBarStyle.agentColor("Hermes"), enabled: true)
+                customSourceTile(name: "Gemini CLI", path: "~/.gemini/tmp/**/chats/*.json", color: TokenBarStyle.agentColor("Gemini CLI"), enabled: true)
+                customSourceTile(name: "OpenClaw", path: "~/.openclaw/agents/**/sessions/*.jsonl", color: TokenBarStyle.agentColor("OpenClaw"), enabled: true)
+                customSourceTile(name: "OpenCode", path: "~/.local/share/opencode/opencode.db", color: TokenBarStyle.agentColor("OpenCode"), enabled: true)
                 ForEach(runtimeModel.customSources) { source in
                     editableCustomSourceTile(source: source)
                 }

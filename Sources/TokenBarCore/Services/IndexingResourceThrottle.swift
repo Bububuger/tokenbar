@@ -30,7 +30,7 @@ public struct IndexingResourceSnapshot: Codable, Sendable, Hashable {
 }
 
 public actor IndexingResourceThrottle {
-    private let budget: IndexingResourceBudget
+    public nonisolated let budget: IndexingResourceBudget
     private var activeSeconds: TimeInterval = 0
     private var sleepSeconds: TimeInterval = 0
 
@@ -61,6 +61,14 @@ public actor IndexingResourceThrottle {
             activeSeconds: activeSeconds,
             sleepSeconds: sleepSeconds
         )
+    }
+
+    /// Add another throttle's accumulated counters into this one. Used to fold
+    /// per-slot throttles back into a single caller-visible throttle after a
+    /// parallel run so external `.snapshot()` reflects total work.
+    public func merge(_ other: IndexingResourceSnapshot) {
+        activeSeconds += other.activeSeconds
+        sleepSeconds += other.sleepSeconds
     }
 }
 

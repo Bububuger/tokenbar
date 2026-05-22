@@ -85,44 +85,117 @@ public actor CheckpointEngine {
         return CheckpointRunResult(state: state, failure: nil, checkpoint: state.lastCheckpoint)
     }
 
+    private struct PerSourceOutcome: Sendable {
+        let sourceIndex: Int
+        let slotIndex: Int
+        let sourceName: String
+        let result: UsageSourceLoadResult?
+        let failureMessage: String?
+    }
+
+    /// Concurrency degree for `execute`. Fixed mapping (Decision A in
+    /// docs/work-items/2026-05-23-tokenbar-parallel-refresh-and-throttle.md):
+    /// no budget → serial; `.initialIndex` (≥ 20% CPU) → 3 slots; else 2.
+    nonisolated static func parallelSlotCount(for throttle: IndexingResourceThrottle?) -> Int {
+        guard let throttle else { return 1 }
+        return throttle.budget.cpuPercent >= IndexingResourceBudget.initialIndexCPUPercent ? 3 : 2
+    }
+
     private func execute(
         trigger: String,
         startedAt: Date,
         referenceDate: Date,
         calendar: Calendar
     ) async -> CheckpointRunResult {
+        let watermarks = (try? await store.watermarks()) ?? [:]
+        let slotCount = Self.parallelSlotCount(for: resourceThrottle)
+
+        // Per-slot throttles preserve single-timeline accounting within each
+        // slot. Decision B: orchestrator owns the slot throttles; sources never
+        // share. After the run we fold each slot's snapshot back into the
+        // caller-visible parent throttle so external `.snapshot()` stays
+        // meaningful.
+        let slotThrottles: [IndexingResourceThrottle?] = if let parent = resourceThrottle {
+            (0..<slotCount).map { _ in IndexingResourceThrottle(budget: parent.budget) }
+        } else {
+            Array(repeating: nil, count: slotCount)
+        }
+
+        var outcomes: [PerSourceOutcome] = []
+        outcomes.reserveCapacity(sources.count)
+
+        await withTaskGroup(of: PerSourceOutcome.self) { group in
+            var nextSourceIndex = 0
+            let prime = min(slotCount, sources.count)
+            for slot in 0..<prime {
+                let i = nextSourceIndex
+                nextSourceIndex += 1
+                let source = sources[i]
+                let throttle = slotThrottles[slot]
+                group.addTask {
+                    await Self.loadOne(
+                        source: source,
+                        sourceIndex: i,
+                        slotIndex: slot,
+                        watermarks: watermarks,
+                        referenceDate: referenceDate,
+                        calendar: calendar,
+                        throttle: throttle
+                    )
+                }
+            }
+
+            while let outcome = await group.next() {
+                outcomes.append(outcome)
+                if nextSourceIndex < sources.count {
+                    let i = nextSourceIndex
+                    nextSourceIndex += 1
+                    let source = sources[i]
+                    let slot = outcome.slotIndex
+                    let throttle = slotThrottles[slot]
+                    group.addTask {
+                        await Self.loadOne(
+                            source: source,
+                            sourceIndex: i,
+                            slotIndex: slot,
+                            watermarks: watermarks,
+                            referenceDate: referenceDate,
+                            calendar: calendar,
+                            throttle: throttle
+                        )
+                    }
+                }
+            }
+        }
+
+        // Deterministic order regardless of completion order.
+        outcomes.sort { $0.sourceIndex < $1.sourceIndex }
+
         var allEvents: [UsageEvent] = []
         var allPrompts: [PromptRecord] = []
         var allNextWatermarks: [SourceWatermark] = []
         var allWarnings: [UsageSourceWarning] = []
         var failures: [IndexRebuildFailure] = []
-        let watermarks = (try? await store.watermarks()) ?? [:]
 
-        for source in sources {
-            do {
-                let sourceStartedAt = Date()
-                let result: UsageSourceLoadResult
-                if let budgetedSource = source as? any ResourceBudgetedUsageEventSource {
-                    result = try await budgetedSource.loadEvents(
-                        since: watermarks,
-                        referenceDate: referenceDate,
-                        calendar: calendar,
-                        resourceThrottle: resourceThrottle
-                    )
-                } else {
-                    result = try await source.loadEvents(since: watermarks, referenceDate: referenceDate, calendar: calendar)
-                    if let resourceThrottle {
-                        await resourceThrottle.rest(afterActive: Date().timeIntervalSince(sourceStartedAt))
-                    }
-                }
+        for outcome in outcomes {
+            if let result = outcome.result {
                 allEvents.append(contentsOf: result.events)
                 allPrompts.append(contentsOf: result.prompts)
                 allNextWatermarks.append(contentsOf: result.nextWatermarks)
                 allWarnings.append(contentsOf: result.warnings)
-            } catch {
+            } else if let message = outcome.failureMessage {
                 failures.append(
-                    IndexRebuildFailure(sourceName: source.sourceName, message: describe(error))
+                    IndexRebuildFailure(sourceName: outcome.sourceName, message: message)
                 )
+            }
+        }
+
+        if let parent = resourceThrottle {
+            for slotThrottle in slotThrottles {
+                if let slotThrottle {
+                    let snapshot = await slotThrottle.snapshot()
+                    await parent.merge(snapshot)
+                }
             }
         }
 
@@ -149,7 +222,50 @@ public actor CheckpointEngine {
         return CheckpointRunResult(state: state, failure: failures.first, checkpoint: state.lastCheckpoint)
     }
 
-    private func describe(_ error: Error) -> String {
+    private static func loadOne(
+        source: any UsageEventSource,
+        sourceIndex: Int,
+        slotIndex: Int,
+        watermarks: [String: SourceWatermark],
+        referenceDate: Date,
+        calendar: Calendar,
+        throttle: IndexingResourceThrottle?
+    ) async -> PerSourceOutcome {
+        do {
+            let result: UsageSourceLoadResult
+            if let budgeted = source as? any ResourceBudgetedUsageEventSource {
+                result = try await budgeted.loadEvents(
+                    since: watermarks,
+                    referenceDate: referenceDate,
+                    calendar: calendar,
+                    resourceThrottle: throttle
+                )
+            } else {
+                result = try await source.loadEvents(
+                    since: watermarks,
+                    referenceDate: referenceDate,
+                    calendar: calendar
+                )
+            }
+            return PerSourceOutcome(
+                sourceIndex: sourceIndex,
+                slotIndex: slotIndex,
+                sourceName: source.sourceName,
+                result: result,
+                failureMessage: nil
+            )
+        } catch {
+            return PerSourceOutcome(
+                sourceIndex: sourceIndex,
+                slotIndex: slotIndex,
+                sourceName: source.sourceName,
+                result: nil,
+                failureMessage: describe(error)
+            )
+        }
+    }
+
+    private static func describe(_ error: Error) -> String {
         if let localized = error as? LocalizedError, let description = localized.errorDescription {
             return description
         }

@@ -121,6 +121,25 @@ final class TokenBarRuntimeModel: ObservableObject {
     @Published private(set) var popoverSnapshot: TokenBarPopoverSnapshot
     @Published private(set) var indexingState: TokenBarIndexingState = .idle
     @Published private(set) var isBootstrapping = true
+
+    /// True while we cannot vouch for today's numbers yet — either the
+    /// bootstrap refresh is in flight, initial indexing is running, or a
+    /// background refresh is touching an empty store. Numeric assertions in
+    /// the popover/main view should render as em-dash + shimmer while this is
+    /// true so the user doesn't read a confidently-styled "0" as ground truth.
+    var isMeasuringToday: Bool {
+        isBootstrapping
+            || indexingState.isActive
+            || (refreshState == .refreshing && eventCount == 0)
+    }
+
+    /// `TokenBarIndexingStatusCard` should appear during the legacy cold-cold
+    /// path (`indexingState.isVisible`) AND during any first/catch-up refresh
+    /// on an empty store. Broadens the card without minting a new
+    /// `IndexingPhase.catchingUp` case.
+    var showsIndexingCard: Bool {
+        indexingState.isVisible || isMeasuringToday
+    }
     @Published private(set) var archivedProjectNames: Set<String>
     @Published var mainRoute: TokenBarMainRoute = .today {
         didSet {

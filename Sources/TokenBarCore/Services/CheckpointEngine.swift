@@ -200,7 +200,14 @@ public actor CheckpointEngine {
         }
 
         let errorSummary = failures.isEmpty ? nil : failures.map { "\($0.sourceName): \($0.message)" }.joined(separator: " | ")
-        if allEvents.isEmpty, allPrompts.isEmpty, let firstFailure = failures.first {
+        // Only fall through to `recordFailure` when *every* source failed and
+        // produced nothing. A partial failure (one source throws while others
+        // return empty results at-watermark) is the parallel-path steady
+        // state — applying the checkpoint advances the surviving sources'
+        // watermarks and records `lastRebuildError` for the failing one.
+        if failures.count == sources.count, !sources.isEmpty,
+           allEvents.isEmpty, allPrompts.isEmpty,
+           let firstFailure = failures.first {
             let state = await store.recordFailure(errorSummary ?? firstFailure.message, referenceDate: referenceDate, calendar: calendar)
             return CheckpointRunResult(state: state, failure: firstFailure, checkpoint: state.lastCheckpoint)
         }

@@ -17,7 +17,7 @@ let tokenbarDefaultPricingRows: [PricingRow] = [
 struct SettingsView: View {
     @EnvironmentObject private var runtimeModel: TokenBarRuntimeModel
     @State private var showAddSource = false
-    @AppStorage("tokenbar.theme") private var theme = "System"
+    @AppStorage("tokenbar.theme") private var theme = "Dark"
     @State private var editingSource: CustomSourceRecord?
     // CL-P0-017 / CL-P0-018: per-row overrides persisted as JSON in
     // UserDefaults. Reset to Defaults wipes the dict.
@@ -29,7 +29,7 @@ struct SettingsView: View {
     @State private var resetAck = ""                // CL-P1-019: type "RESET"
     @State private var sourceSaveMessage: String?
     @State private var sourcePendingDelete: CustomSourceRecord?
-    private let themeOptions = ["System", "Light", "Dark"]
+    private let themeOptions = ["Dark", "Light"]
     private let pricingColumns: [CGFloat] = [208, 96, 96, 96, 95, 128]
 
     static let defaultPricingRows = tokenbarDefaultPricingRows
@@ -181,9 +181,6 @@ struct SettingsView: View {
                 }
             }
         }
-        // CL-P0-020: previously the onAppear forced theme back to "Dark" to
-        // hide the WIP Light/System modes. Now that the entire style layer is
-        // backed by semantic colors, all three options round-trip correctly.
         .onChange(of: showAddSource) { _, newValue in
             if !newValue {
                 editingSource = nil
@@ -282,7 +279,7 @@ struct SettingsView: View {
     private var themeSection: some View {
         settingsSection(
             title: "Theme",
-            subtitle: "System tracks the OS appearance; Light and Dark force an override."
+            subtitle: "Dark is the default — switch to Light for daylight reading."
         ) {
             ThemeChoiceGrid(selection: $theme, options: themeOptions)
         }
@@ -839,8 +836,6 @@ private struct ThemeChoiceTile: View {
 
     private var subtitle: String {
         switch option {
-        case "System":
-            "match macOS appearance"
         case "Light":
             "paper · for daylight"
         default:
@@ -853,17 +848,9 @@ private struct ThemePreview: View {
     let option: String
 
     var body: some View {
-        ZStack {
-            preview(mode: option == "Light" ? .light : .dark)
-            if option == "System" {
-                preview(mode: .light)
-                    .clipShape(ThemePreviewDiagonal())
-                ThemePreviewDiagonal()
-                    .stroke(Color.white.opacity(0.22), lineWidth: 1)
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(TokenBarStyle.line.opacity(0.8), lineWidth: 1))
+        preview(mode: option == "Light" ? .light : .dark)
+            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(TokenBarStyle.line.opacity(0.8), lineWidth: 1))
     }
 
     private enum Mode {
@@ -938,17 +925,6 @@ private struct ThemePreview: View {
     private func previewBarHeight(_ index: Int) -> CGFloat {
         let heights: [CGFloat] = [24, 34, 18, 48, 29, 62, 40, 52, 25, 74, 36, 31, 22, 54, 34]
         return heights[index % heights.count]
-    }
-}
-
-private struct ThemePreviewDiagonal: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: rect.origin)
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.closeSubpath()
-        return path
     }
 }
 

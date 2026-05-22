@@ -6,7 +6,7 @@ public enum UsageAggregator {
         referenceDate: Date = Date(),
         calendar: Calendar = Calendar(identifier: .gregorian),
         days: Int = 30,
-        topCount: Int = 3
+        topCount: Int = 5
     ) -> UsageSnapshot {
         let todayStart = calendar.startOfDay(for: referenceDate)
         let allBuckets = bucketedByDay(events, calendar: calendar)

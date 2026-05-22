@@ -1125,6 +1125,8 @@ private struct AddCustomSourceOverlay: View {
             "~/.gemini/tmp or **/chats/*.json"
         case .openCode:
             "~/.local/share/opencode/opencode.db or ~/.local/share/opencode"
+        case .openclaw:
+            "~/.openclaw/agents or **/sessions/*.jsonl"
         }
     }
 

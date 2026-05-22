@@ -379,30 +379,17 @@ struct PopoverView: View {
 
             Spacer()
 
-            // CL-P2-003: when there are zero warnings, the footer chip
-            // collapses to a `quaternaryLabel` color and is no longer
-            // clickable — avoids drawing attention to a healthy state.
-            Group {
-                if popover.warningCount == 0 {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(Color(nsColor: .quaternaryLabelColor))
-                            .frame(width: 6, height: 6)
-                        Text("0")
-                            .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
-                        Text("warnings")
-                            .font(.caption)
-                    }
-                    .foregroundStyle(Color(nsColor: .quaternaryLabelColor))
-                } else {
-                    Button { openMain(route: .diagnostics) } label: {
-                        Label("\(popover.warningCount) warnings", systemImage: "exclamationmark.triangle")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(TokenBarStyle.warn)
-                }
+            Button {
+                TokenBarTelemetry.event("popover.quit.click", success: true)
+                NSApp.terminate(nil)
+            } label: {
+                Image(systemName: "power")
+                    .font(.system(size: 12, weight: .semibold))
             }
+            .buttonStyle(.borderless)
+            .keyboardShortcut("q", modifiers: .command)
+            .foregroundStyle(TokenBarStyle.error)
+            .help("Quit TokenBar (⌘Q)")
         }
     }
 

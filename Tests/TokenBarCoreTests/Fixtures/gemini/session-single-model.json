@@ -1,0 +1,33 @@
+{
+  "sessionId": "session-single",
+  "projectHash": "slug-single",
+  "startTime": "2026-03-29T13:33:33.020Z",
+  "lastUpdated": "2026-03-29T13:41:55.267Z",
+  "messages": [
+    {
+      "id": "m-user-1",
+      "timestamp": "2026-03-29T13:33:35.020Z",
+      "type": "user",
+      "content": [
+        {
+          "text": "hello"
+        }
+      ]
+    },
+    {
+      "id": "m-gemini-1",
+      "timestamp": "2026-03-29T13:34:35.020Z",
+      "type": "gemini",
+      "model": "gemini-3-flash-preview",
+      "tokens": {
+        "input": 120,
+        "output": 10,
+        "cached": 5,
+        "thoughts": 2,
+        "tool": 3,
+        "total": 140
+      },
+      "content": "ok"
+    }
+  ]
+}

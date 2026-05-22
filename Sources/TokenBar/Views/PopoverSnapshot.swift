@@ -105,29 +105,37 @@ struct TokenBarPopoverSnapshot: Sendable, Hashable {
         }
 
         let last30Total = snapshot.last30Summary.totalTokens
-        let projectRows = snapshot.topProjects.prefix(5).map { row in
-            TokenBarPopoverRankingRow(
-                kind: .project,
-                name: row.name,
-                subtitle: rankedNames(projectAgentTokens[row.name], fallback: "local indexed project"),
-                summary: row.summary,
-                cost: projectCosts[row.name] ?? 0,
-                badge: nil,
-                agentName: nil
-            )
-        }
-        let agentRows = snapshot.topAgents.prefix(5).map { row in
-            TokenBarPopoverRankingRow(
-                kind: .agent,
-                name: row.name,
-                subtitle: rankedNames(agentModelTokens[row.name], fallback: "agent share"),
-                summary: row.summary,
-                cost: agentCosts[row.name] ?? 0,
-                badge: shareText(row.summary.totalTokens, total: last30Total),
-                agentName: row.name
-            )
-        }
-        let modelRows = modelTotals.map { name, model in
+        let projectRows = snapshot.topProjects
+            .filter { $0.summary.totalTokens > 0 }
+            .prefix(5)
+            .map { row in
+                TokenBarPopoverRankingRow(
+                    kind: .project,
+                    name: row.name,
+                    subtitle: rankedNames(projectAgentTokens[row.name], fallback: "local indexed project"),
+                    summary: row.summary,
+                    cost: projectCosts[row.name] ?? 0,
+                    badge: nil,
+                    agentName: nil
+                )
+            }
+        let agentRows = snapshot.topAgents
+            .filter { $0.summary.totalTokens > 0 }
+            .prefix(5)
+            .map { row in
+                TokenBarPopoverRankingRow(
+                    kind: .agent,
+                    name: row.name,
+                    subtitle: rankedNames(agentModelTokens[row.name], fallback: "agent share"),
+                    summary: row.summary,
+                    cost: agentCosts[row.name] ?? 0,
+                    badge: shareText(row.summary.totalTokens, total: last30Total),
+                    agentName: row.name
+                )
+            }
+        let modelRows = modelTotals
+            .filter { $0.value.totalTokens > 0 }
+            .map { name, model in
             let summary = UsageSummary(
                 inputTokens: model.inputTokens,
                 outputTokens: model.outputTokens,

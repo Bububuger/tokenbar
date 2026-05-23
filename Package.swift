@@ -17,11 +17,7 @@ let package = Package(
             targets: ["TokenBarProbe"]
         ),
         .executable(
-            name: "tokenbarctl",
-            targets: ["TokenBarCLI"]
-        ),
-        .executable(
-            name: "tb",
+            name: "tbar",
             targets: ["TokenBarCLI"]
         ),
         .library(
@@ -57,6 +53,15 @@ let package = Package(
             name: "TokenBarCLI",
             dependencies: ["TokenBarCore"],
             path: "Sources/TokenBarCLI"
+        ),
+        .testTarget(
+            name: "TokenBarCLITests",
+            dependencies: [
+                "TokenBarCLI",
+                "TokenBarCore",
+                .product(name: "Testing", package: "swift-testing"),
+            ],
+            path: "Tests/TokenBarCLITests"
         ),
         .target(
             name: "TokenBarCore",

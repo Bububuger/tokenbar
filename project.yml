@@ -47,13 +47,7 @@ schemes:
     build:
       targets:
         TokenBarProbe: all
-  tokenbarctl:
-    build:
-      targets:
-        TokenBarCLI: all
-    run:
-      config: Debug
-  tb:
+  tbar:
     build:
       targets:
         TokenBarCLI: all

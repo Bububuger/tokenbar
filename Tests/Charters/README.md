@@ -12,7 +12,7 @@
 - **Hypothesis:** the FSEvents debounce holds total CPU < 5 % and the indexed
   event count diverges from raw line count by < 0.1 %.
 - **Capture:** Activity Monitor CPU sample every 5 min; final
-  `tokenbarctl export json` diffed against the raw jsonl tail.
+  `tbar events --days 0 --json` diffed against the raw jsonl tail.
 
 ## CL-P2-020 · EXP-004 visual alignment audit
 - **Time-box:** 60 min

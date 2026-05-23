@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>{{title}} · TokenBar Report</title>
+<style>
+  :root { --ink:#000; --paper:#f5f5f1; --red:#E0093A; }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:0;
+    background:var(--paper); color:var(--ink);
+    font-family:"Georgia","STIX Two Text","Source Han Serif SC",serif;
+    line-height:1.45;
+  }
+  .wrap { max-width:840px; margin:0 auto; padding:40px 28px 80px; }
+  .masthead {
+    border-top:8px solid var(--ink); border-bottom:2px solid var(--ink);
+    padding:10px 0 6px; margin-bottom:24px;
+    display:flex; align-items:baseline; justify-content:space-between;
+    font-size:12px; letter-spacing:.18em; text-transform:uppercase;
+  }
+  .masthead .vol b { font-weight:900; color:var(--red); }
+  h1 {
+    font-family:"Times New Roman","Songti SC",serif;
+    font-size:76px; line-height:.95; letter-spacing:-0.025em;
+    margin:0 0 6px; font-weight:900;
+  }
+  h1 + .deck { font-size:22px; font-weight:700; margin:0 0 28px; max-width:680px; }
+  .meta { font-size:12px; letter-spacing:.1em; text-transform:uppercase; opacity:.75; margin-bottom:36px; border-top:1px solid var(--ink); padding-top:10px; }
+  section { border-top:2px solid var(--ink); padding:24px 0 28px; }
+  section.verdict {
+    background:var(--ink); color:var(--paper); padding:32px 28px; margin:0 -28px;
+  }
+  section.verdict.red { background:var(--red); color:#fff; }
+  h2 {
+    font-size:13px; letter-spacing:.22em; text-transform:uppercase;
+    margin:0 0 14px; font-weight:900;
+  }
+  h2::before { content:"§ "; color:var(--red); }
+  .verdict h2::before { color:#fff; }
+  .lead { font-size:22px; line-height:1.5; max-width:680px; }
+  .lead.tight { font-size:18px; }
+  .big {
+    font-family:"Times New Roman",serif; font-size:120px; line-height:1;
+    letter-spacing:-0.04em; font-weight:900; margin:0;
+  }
+  .big.red { color:var(--red); }
+  .row3 { display:grid; grid-template-columns:repeat(3,1fr); gap:0; border-top:2px solid var(--ink); border-bottom:2px solid var(--ink); margin:18px 0; }
+  .row3 > div { padding:18px 16px; border-right:1px solid var(--ink); }
+  .row3 > div:last-child { border-right:0; }
+  .row3 .n { font-size:42px; font-weight:900; line-height:1; font-family:"Times New Roman",serif; }
+  .row3 .l { font-size:11px; letter-spacing:.12em; text-transform:uppercase; opacity:.7; margin-top:6px; }
+  table.leaderboard { width:100%; border-collapse:collapse; }
+  table.leaderboard th, table.leaderboard td { padding:10px 6px; text-align:left; border-bottom:1px solid var(--ink); font-size:14px; }
+  table.leaderboard th { text-transform:uppercase; letter-spacing:.1em; font-size:11px; }
+  .model-tokens, .model-share, .model-cost { text-align:right; font-variant-numeric:tabular-nums; font-family:"Times New Roman",serif; }
+  .cost-tag { font-size:9px; padding:1px 4px; background:var(--red); color:#fff; margin-left:4px; }
+  .agents-chart .agent-row { display:grid; grid-template-columns:140px 1fr 60px 80px; gap:8px; align-items:center; padding:6px 0; font-size:14px; border-bottom:1px solid rgba(0,0,0,.15); }
+  .agent-bar-wrap { background:transparent; height:8px; border-bottom:1px solid var(--ink); position:relative; }
+  .agent-bar { display:block; height:8px; background:var(--ink); }
+  .agent-pct, .agent-tokens { text-align:right; font-variant-numeric:tabular-nums; font-family:"Times New Roman",serif; }
+  ol.projects-list { padding-left:0; list-style:none; counter-reset:p; }
+  .projects-list .project-row { counter-increment:p; font-size:16px; padding:8px 0; border-bottom:1px solid rgba(0,0,0,.15); }
+  .projects-list .project-row::before { content:counter(p,decimal-leading-zero) ". "; font-weight:900; font-family:"Times New Roman",serif; margin-right:8px; }
+  .project-tokens { float:right; font-weight:900; font-variant-numeric:tabular-nums; font-family:"Times New Roman",serif; }
+  .project-stale { font-size:11px; opacity:.55; }
+  svg.chart.daily { display:block; width:100%; height:140px; background:transparent; }
+  .daily-bar { fill:var(--ink); }
+  .daily-bar-peak { fill:var(--red); }
+  .daily-bar-empty { fill:rgba(0,0,0,.08); }
+  .axis-label { font-size:9px; fill:var(--ink); opacity:.55; }
+  svg.chart.hour-clock { display:block; margin:0 auto; }
+  .hour-seg { fill:var(--ink); stroke:var(--paper); stroke-width:1; }
+  .hour-seg-peak { fill:var(--red); }
+  .hour-seg-empty { fill:rgba(0,0,0,.06); }
+  .hour-tick { font-size:11px; font-weight:900; fill:var(--ink); }
+  .cluster-label { font-size:14px; font-weight:700; fill:var(--ink); }
+  .cluster-bar { fill:var(--ink); }
+  .cluster-pct { font-size:12px; font-weight:900; fill:var(--ink); font-family:"Times New Roman",serif; }
+  .nav a { color:var(--ink); font-size:11px; opacity:.6; text-decoration:none; border-bottom:1px solid var(--ink); }
+  .footer { margin-top:48px; padding-top:24px; border-top:2px solid var(--ink); font-size:12px; opacity:.6; letter-spacing:.08em; text-transform:uppercase; }
+  /* Profile dossier — brutalist */
+  .profile-card { background:var(--paper); padding:0; }
+  .profile-headline { display:flex; flex-wrap:wrap; gap:0; align-items:stretch; margin-bottom:0; border-top:2px solid var(--ink); border-bottom:2px solid var(--ink); }
+  .profile-chip { display:flex; flex-direction:column; padding:14px 18px; background:var(--paper); color:var(--ink); border-right:1px solid var(--ink); flex:1; min-width:120px; }
+  .profile-chip:last-child { border-right:0; }
+  .profile-chip.mastery-expert, .profile-chip.mastery-senior { background:var(--ink); color:var(--paper); }
+  .profile-chip.intensity-extreme, .profile-chip.intensity-heavy { background:var(--red); color:#fff; }
+  .chip-label { font-family:"Source Sans Pro","Helvetica",sans-serif; font-size:10px; letter-spacing:.18em; text-transform:uppercase; font-weight:700; opacity:.7; }
+  .chip-value { font-family:"Times New Roman",serif; font-size:28px; font-weight:900; line-height:1; margin-top:6px; text-transform:capitalize; }
+  .profile-confidence { font-size:10px; letter-spacing:.12em; text-transform:uppercase; padding:10px 18px; border-right:1px solid var(--ink); align-self:center; opacity:.65; }
+  .profile-section { padding:20px 0 8px; border-bottom:1px solid var(--ink); }
+  .profile-section:last-child { border-bottom:0; }
+  .profile-section-head { font-family:"Source Sans Pro",sans-serif; font-size:11px; letter-spacing:.22em; text-transform:uppercase; font-weight:900; color:var(--red); margin-bottom:12px; }
+  .profile-axes { display:grid; grid-template-columns:repeat(4,1fr); gap:0; border:1px solid var(--ink); margin-bottom:10px; }
+  .profile-axis { padding:12px 14px; border-right:1px solid var(--ink); }
+  .profile-axis:last-child { border-right:0; }
+  .axis-name { font-family:"Source Sans Pro",sans-serif; font-size:10px; letter-spacing:.12em; text-transform:uppercase; opacity:.65; }
+  .axis-value { font-family:"Times New Roman",serif; font-size:18px; font-weight:900; margin-top:4px; text-transform:capitalize; }
+  .profile-evidence { margin:6px 0 0; padding-left:18px; font-size:14px; line-height:1.55; }
+  .profile-evidence li { margin-bottom:3px; }
+  .profile-trait-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:0; border-top:1px solid var(--ink); border-left:1px solid var(--ink); }
+  .profile-trait { padding:12px 14px; border-right:1px solid var(--ink); border-bottom:1px solid var(--ink); }
+  .trait-name { font-family:"Times New Roman",serif; font-size:18px; font-weight:900; }
+  .trait-name::before { content:"§ "; color:var(--red); }
+  .trait-evidence { font-size:12px; opacity:.7; margin-top:3px; line-height:1.45; }
+  .profile-quirk-list { padding-left:24px; font-size:14px; line-height:1.6; }
+  .profile-quirk-list li { margin-bottom:5px; }
+  .profile-quirk-list li::marker { content:"▪ "; color:var(--red); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="masthead">
+    <span class="vol"><b>{{persona_label}}</b> · #02 · BRUTALIST EDITION</span>
+    <span>{{date_range_start}} → {{date_range_end}}</span>
+    <a class="nav" href="index.html">← INDEX</a>
+  </div>
+
+  <h1>{{title}}</h1>
+  <p class="deck">{{hero_subtitle}}</p>
+  <p class="meta">{{date_range_days}} days · {{event_count}} events · {{personality_tag}}</p>
+
+  <div class="row3">
+    <div><div class="n">{{total_tokens}}</div><div class="l">total tokens</div></div>
+    <div><div class="n">{{total_prompts}}</div><div class="l">prompts</div></div>
+    <div><div class="n">{{total_cost_usd}}</div><div class="l">est. cost</div></div>
+  </div>
+
+  <section class="verdict">
+    <h2>The Case</h2>
+    <p class="lead">{{narrative_open}}</p>
+  </section>
+
+  <section>
+    <h2>Heaviest day</h2>
+    <p class="big red">{{heaviest_day_tokens}}</p>
+    <p class="meta" style="margin-top:4px;">{{heaviest_day_date}} · {{heaviest_day_prompts}} prompts</p>
+    <p class="lead tight">{{heaviest_day_blurb}}</p>
+  </section>
+
+  <section>
+    <h2>The 24-hour case</h2>
+    <p class="lead tight"><b>{{longest_day_date}}</b> ran for <b>{{longest_day_hours}}</b> distinct hours. That is not productivity. That is residence.</p>
+  </section>
+
+  <section>
+    <h2>Body clock</h2>
+    <div style="display:grid; grid-template-columns:240px 1fr; gap:32px; align-items:center;">
+      <div>{{hour_clock_svg}}</div>
+      <div>
+        <p class="lead tight">Peak: <b>{{peak_hour_label}}</b> ({{peak_hour_tokens}})</p>
+        <p class="lead tight">Night (23-05): <b>{{night_owl_pct}}%</b> · Morning (06-10): <b>{{morning_pct}}%</b></p>
+        <p>{{hour_clock_blurb}}</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Daily series</h2>
+    {{daily_bars_svg}}
+    <p class="lead tight" style="margin-top:14px;">Longest streak: <b>{{streak_longest}}</b> days. Current: <b>{{streak_current}}</b>. Weekend share: <b>{{weekend_pct}}%</b>.</p>
+    <p>{{streak_blurb}}</p>
+  </section>
+
+  <section>
+    <h2>Models — concentrated</h2>
+    {{models_table}}
+    <p style="margin-top:12px;">{{model_blurb}}</p>
+  </section>
+
+  <section>
+    <h2>Agents</h2>
+    {{agents_chart}}
+    <p>{{agent_blurb}}</p>
+  </section>
+
+  <section>
+    <h2>Projects · stale ones marked</h2>
+    {{projects_list}}
+    <p>{{project_blurb}}</p>
+  </section>
+
+  <section>
+    <h2>Prompt classification — {{personality_tag}}</h2>
+    {{cluster_chart}}
+    <p>{{cluster_blurb}}</p>
+    <p>{{personality_tag_blurb}}</p>
+  </section>
+
+  <section>
+    <h2>The Dossier</h2>
+    {{profile_card}}
+    <p class="lead tight" style="margin-top:20px;">{{profile_narrative}}</p>
+  </section>
+
+  <section class="verdict red">
+    <h2>Verdict</h2>
+    <p class="lead">{{closing_line}}</p>
+  </section>
+
+  <div class="footer">{{distinct_projects}} projects · {{distinct_models}} models · {{distinct_agents}} agents · {{override_count}} override(s) / {{default_models_count}} default</div>
+</div>
+</body>
+</html>

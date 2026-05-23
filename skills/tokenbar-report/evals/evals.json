@@ -1,0 +1,54 @@
+{
+  "skill_name": "tokenbar-report",
+  "evals": [
+    {
+      "id": 1,
+      "name": "all-time-chinese",
+      "prompt": "帮我做个 token 年度报告",
+      "expected_output": "Folder at ~/Desktop/tokenbar-report-YYYY-MM-DD/ containing index.html + 7 themed persona HTML files + data.json. Narrative in Chinese. Window covers full TokenBar data range (all-time).",
+      "files": [],
+      "assertions": [
+        { "text": "output folder exists under ~/Desktop matching tokenbar-report-* pattern" },
+        { "text": "exactly 7 persona HTML files (01-comic.html through 07-ft.html) present" },
+        { "text": "index.html present and links to all 7 persona files" },
+        { "text": "data.json present, parses as JSON, has cost.totalUSD > 0 and dataWindow.eventCount > 0" },
+        { "text": "every persona HTML opens in a browser without console errors and contains at least 3 <svg> elements" },
+        { "text": "no leftover '{{placeholder}}' tokens anywhere in any rendered HTML" },
+        { "text": "narrative text in every persona is in Chinese (matching the prompt's language)" },
+        { "text": "the 7 persona themes are visually distinct — at minimum, their <style> blocks differ by > 60% content hash" },
+        { "text": "the same personality_tag appears in every persona HTML (shared synthesis, different voices)" },
+        { "text": "the time window in the report matches the TokenBar database's earliest..latest range" }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "windowed-30d-mixed",
+      "prompt": "最近一个月我在 AI 上烧了多少？做个 html wrap 看看",
+      "expected_output": "Same output structure as eval 1 but time window narrowed to the last 30 days. Numbers must reflect the narrower window (smaller token counts, fewer events).",
+      "files": [],
+      "assertions": [
+        { "text": "output folder exists under ~/Desktop matching tokenbar-report-* pattern" },
+        { "text": "exactly 7 persona HTML files + index.html present" },
+        { "text": "date_range_days in the report equals 30 (±1)" },
+        { "text": "total_tokens in the report is strictly less than the all-time figure" },
+        { "text": "before generation, the assistant confirmed the time window with the user OR explicitly stated the inferred window" },
+        { "text": "narrative is in Chinese with informal register (matches the user's casual phrasing)" }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "english-quarter",
+      "prompt": "Generate an HTML report of my AI coding usage this quarter — show me how I've been spending tokens.",
+      "expected_output": "Same output structure, but narrative in English. Window covers the last calendar quarter (~90 days).",
+      "files": [],
+      "assertions": [
+        { "text": "output folder exists under ~/Desktop matching tokenbar-report-* pattern" },
+        { "text": "exactly 7 persona HTML files + index.html present" },
+        { "text": "narrative text in every persona is in English (matching the prompt's language)" },
+        { "text": "date_range_days is between 80 and 100 (i.e. roughly a quarter)" },
+        { "text": "no Chinese characters appear in the narrative fields of any persona (the visual chrome may still contain '#04' etc., but the persona blurbs must be English)" },
+        { "text": "the ft (Financial Times) persona uses ROI / quarterly framing in the narrative" }
+      ]
+    }
+  ]
+}

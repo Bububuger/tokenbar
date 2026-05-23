@@ -34,9 +34,8 @@ PERSONAS = [
     ("brutalist", "忠言逆耳"),
     ("terminal",  "数据极客"),
     ("essay",     "哲学反思"),
-    ("sunrise",   "鸡汤励志"),
-    ("notebook",  "老朋友闲聊"),
     ("ft",        "财经评论员"),
+    ("jojo",      "人性透视"),
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -778,128 +777,6 @@ def essay_unread_html(data: Dict[str, Any]) -> str:
     )
 
 
-# ── sunrise ────────────────────────────────────────────────────────────────
-
-def sunrise_milestones_html(entries: List[Dict[str, Any]]) -> str:
-    if not entries:
-        return ""
-    badges = []
-    for e in entries:
-        when = _esc(e.get("unlocked_at") or "—")
-        badges.append(
-            f'<div class="badge-card">'
-            f'<div class="badge-name">{_esc(e.get("name"))}</div>'
-            f'<div class="badge-when">unlocked · {when}</div>'
-            f'<div class="badge-blurb">{_esc(e.get("celebration",""))}</div>'
-            f'</div>'
-        )
-    return '<div class="badge-grid">' + "".join(badges) + '</div>'
-
-
-def sunrise_weekly_growth_html(data: Dict[str, Any]) -> str:
-    if not data:
-        return ""
-    headline = _esc(data.get("headline", ""))
-    commentary = _esc(data.get("commentary", ""))
-    weeks = data.get("weeks") or []
-    rows = []
-    for w in weeks:
-        delta = w.get("wow_delta_pct")
-        delta_str = f"{delta:+.1f}%" if delta is not None else "—"
-        delta_class = "growth-up" if (delta or 0) > 0 else ("growth-down" if (delta or 0) < 0 else "growth-flat")
-        rows.append(
-            f'<div class="week-row {delta_class}">'
-            f'<span class="week-date">{_esc(w.get("week_start"))}</span>'
-            f'<span class="week-tokens">{_esc(w.get("tokens_compact"))}</span>'
-            f'<span class="week-delta">{delta_str}</span>'
-            f'</div>'
-        )
-    return (
-        f'<div class="weekly-growth">'
-        f'<div class="growth-headline">{headline}</div>'
-        f'<div class="week-list">' + "".join(rows) + '</div>'
-        f'<div class="growth-commentary">{commentary}</div>'
-        f'</div>'
-    )
-
-
-def sunrise_next_html(entries: List[Dict[str, Any]]) -> str:
-    if not entries:
-        return ""
-    rows = []
-    for e in entries:
-        rows.append(
-            f'<div class="next-row">'
-            f'<div class="next-name">{_esc(e.get("name"))}</div>'
-            f'<div class="next-distance">{_esc(e.get("distance"))}</div>'
-            f'<div class="next-pitch">{_esc(e.get("pitch",""))}</div>'
-            f'</div>'
-        )
-    return '<div class="next-achievable">' + "".join(rows) + '</div>'
-
-
-# ── notebook ───────────────────────────────────────────────────────────────
-
-def notebook_biographies_html(entries: List[Dict[str, Any]]) -> str:
-    if not entries:
-        return ""
-    rows = []
-    for e in entries:
-        rows.append(
-            f'<div class="bio-row">'
-            f'<div class="bio-head">'
-            f'<span class="bio-project">{_esc(e.get("project"))}</span>'
-            f'<span class="bio-span">{_esc(e.get("first_seen"))} → {_esc(e.get("last_seen"))}</span></div>'
-            f'<div class="bio-numbers">{_esc(e.get("tokens"))} tokens · 峰值月 {_esc(e.get("peak_month",""))}</div>'
-            f'<div class="bio-text">{_esc(e.get("biography",""))}</div>'
-            f'</div>'
-        )
-    return '<div class="biographies">' + "".join(rows) + '</div>'
-
-
-def notebook_week_html(data: Dict[str, Any]) -> str:
-    if not data:
-        return ""
-    week_label = _esc(data.get("week_label", "—"))
-    tokens = _esc(data.get("tokens", "—"))
-    peak_day = _esc(data.get("peak_day", "—"))
-    story = _esc(data.get("story", ""))
-    return (
-        f'<div class="week-story">'
-        f'<div class="week-head">'
-        f'<span class="week-label">{week_label}</span>'
-        f'<span class="week-total">{tokens} tokens · 峰值 {peak_day}</span></div>'
-        f'<div class="week-text">{story}</div>'
-        f'</div>'
-    )
-
-
-def notebook_routine_html(data: Dict[str, Any]) -> str:
-    if not data:
-        return ""
-    band = _esc(data.get("regular_band", "—"))
-    day = _esc(data.get("regular_day", "—"))
-    rhythm = _esc(data.get("rhythm_blurb", ""))
-    broken = data.get("broken") or []
-    broke_rows = []
-    for b in broken[:5]:
-        broke_rows.append(
-            f'<li><span class="broken-date">{_esc(b.get("date"))}</span>'
-            f'<span class="broken-ctx">{_esc(b.get("context",""))}</span>'
-            f'<span class="broken-blurb">{_esc(b.get("blurb",""))}</span></li>'
-        )
-    broken_html = ('<ul class="routine-broken">' + "".join(broke_rows) + "</ul>") if broke_rows else ""
-    return (
-        '<div class="routine">'
-        '<div class="routine-head">'
-        f'<span class="routine-band">{band}</span>'
-        f'<span class="routine-day">{day}</span></div>'
-        f'<div class="routine-rhythm">{rhythm}</div>'
-        f'{broken_html}'
-        '</div>'
-    )
-
-
 # ── ft ─────────────────────────────────────────────────────────────────────
 
 def ft_capital_html(entries: List[Dict[str, Any]]) -> str:
@@ -974,6 +851,159 @@ def ft_pnl_html(data: Dict[str, Any]) -> str:
     )
 
 
+# ── jojo ───────────────────────────────────────────────────────────────────
+
+# Mapping from A-E grade to a normalized 0..1 distance from center on the radar
+_JOJO_GRADE_TO_R = {"A": 1.0, "B": 0.8, "C": 0.6, "D": 0.4, "E": 0.22}
+
+
+def jojo_stand_stats_html(data: Dict[str, Any]) -> str:
+    """Render the 6-axis stand stats radar + a side panel of per-axis verdicts.
+    `data` shape: {"composite_rank":"B", "axes":[{"axis":..,"label_cn":..,"label_en":..,
+    "grade":"A","score":4.2,"primary":"...","secondary":"...","verdict":"..."}]}"""
+    if not data:
+        return ""
+    axes = data.get("axes") or []
+    if len(axes) != 6:
+        # Pad to 6 to keep the radar geometry consistent.
+        while len(axes) < 6:
+            axes.append({"label_cn": "—", "label_en": "—", "grade": "E", "primary": ""})
+
+    cx = cy = 220
+    R = 180
+    pts_outer: List[Tuple[float, float]] = []
+    pts_axis: List[Tuple[float, float]] = []
+    label_pts: List[Tuple[float, float, str, str, str]] = []
+    polygon_pts: List[Tuple[float, float]] = []
+    for i, ax in enumerate(axes):
+        # Top, then clockwise. -90deg offset puts the first vertex on top.
+        a = math.radians((360 * i / 6) - 90)
+        pts_outer.append((cx + R * math.cos(a), cy + R * math.sin(a)))
+        pts_axis.append((cx + R * math.cos(a), cy + R * math.sin(a)))
+        # Polygon point uses the grade's radius
+        grade = (ax.get("grade") or "E").upper()
+        r = R * _JOJO_GRADE_TO_R.get(grade, 0.2)
+        polygon_pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+        # Label outside the ring
+        lr = R + 28
+        lx, ly = cx + lr * math.cos(a), cy + lr * math.sin(a)
+        label_pts.append((lx, ly, ax.get("label_cn", "—"), ax.get("label_en", "—"), grade))
+
+    # Background concentric rings + radial spokes
+    rings = []
+    for ratio, letter in zip([1.0, 0.8, 0.6, 0.4, 0.22], ["A", "B", "C", "D", "E"]):
+        rings.append(
+            f'<polygon class="ring ring-{letter}" '
+            + 'points="'
+            + " ".join(
+                f"{cx + R*ratio*math.cos(math.radians((360*i/6)-90)):.1f},"
+                f"{cy + R*ratio*math.sin(math.radians((360*i/6)-90)):.1f}"
+                for i in range(6)
+            )
+            + '"/>'
+        )
+    spokes = []
+    for (x, y) in pts_axis:
+        spokes.append(f'<line class="spoke" x1="{cx}" y1="{cy}" x2="{x:.1f}" y2="{y:.1f}"/>')
+
+    poly_pts_str = " ".join(f"{x:.1f},{y:.1f}" for x, y in polygon_pts)
+    poly = f'<polygon class="stat-polygon" points="{poly_pts_str}"/>'
+
+    dots = []
+    for (x, y) in polygon_pts:
+        dots.append(f'<circle class="stat-vertex" cx="{x:.1f}" cy="{y:.1f}" r="5"/>')
+
+    grade_letters = []
+    for ratio, letter in zip([1.0, 0.8, 0.6, 0.4, 0.22], ["A", "B", "C", "D", "E"]):
+        grade_letters.append(
+            f'<text class="ring-label" x="{cx + 4}" y="{cy - R*ratio + 4:.1f}">{letter}</text>'
+        )
+
+    labels = []
+    for (x, y, cn, en, grade) in label_pts:
+        anchor = "middle"
+        if x < cx - 20:
+            anchor = "end"
+        elif x > cx + 20:
+            anchor = "start"
+        labels.append(
+            f'<text class="axis-cn" x="{x:.1f}" y="{y:.1f}" text-anchor="{anchor}">{html.escape(cn)}</text>'
+            f'<text class="axis-en" x="{x:.1f}" y="{y + 14:.1f}" text-anchor="{anchor}">{html.escape(en)} · {grade}</text>'
+        )
+
+    svg = (
+        f'<svg class="stand-radar" viewBox="0 0 440 440" width="440" height="440">'
+        + "".join(rings)
+        + "".join(spokes)
+        + "".join(grade_letters)
+        + poly
+        + "".join(dots)
+        + "".join(labels)
+        + "</svg>"
+    )
+
+    # Per-axis tile list with verdicts beside the radar
+    tile_rows = []
+    for ax in axes:
+        grade = (ax.get("grade") or "E").upper()
+        tile_rows.append(
+            f'<div class="stand-axis stand-grade-{grade}">'
+            f'<div class="stand-axis-head"><span class="stand-axis-cn">{_esc(ax.get("label_cn"))}</span>'
+            f'<span class="stand-axis-en">{_esc(ax.get("label_en"))}</span>'
+            f'<span class="stand-axis-grade">{grade}</span></div>'
+            f'<div class="stand-axis-primary">{_esc(ax.get("primary"))}</div>'
+            + (f'<div class="stand-axis-secondary">{_esc(ax.get("secondary"))}</div>' if ax.get("secondary") else "")
+            + (f'<div class="stand-axis-verdict">{_esc(ax.get("verdict"))}</div>' if ax.get("verdict") else "")
+            + '</div>'
+        )
+
+    composite = (data.get("composite_rank") or "—").upper()
+    return (
+        '<div class="stand-stats-wrap">'
+        f'<div class="composite-banner">COMPOSITE · <span class="composite-grade composite-{composite}">{composite}</span></div>'
+        '<div class="stand-stats-grid">'
+        f'<div class="stand-radar-wrap">{svg}</div>'
+        f'<div class="stand-axes-list">{"".join(tile_rows)}</div>'
+        '</div></div>'
+    )
+
+
+def jojo_psyche_html(entries: List[Dict[str, Any]]) -> str:
+    if not entries:
+        return '<p class="empty">分析样本不足以建立画像。</p>'
+    rows = []
+    for e in entries:
+        meta = e.get("evidence_meta") or {}
+        meta_str = " · ".join(
+            filter(None, [meta.get("timestamp"), meta.get("project"), meta.get("agent")])
+        )
+        quote = e.get("evidence_quote") or ""
+        rows.append(
+            '<div class="psyche-card">'
+            f'<div class="psyche-trait">{_esc(e.get("trait_name"))}</div>'
+            f'<blockquote class="psyche-evidence">{_esc(quote)}</blockquote>'
+            f'<div class="psyche-meta">{_esc(meta_str)}</div>'
+            f'<div class="psyche-clinical">{_esc(e.get("clinical_note"))}</div>'
+            f'<div class="psyche-dark">{_esc(e.get("darker_read"))}</div>'
+            '</div>'
+        )
+    return '<div class="psyche-grid">' + "".join(rows) + '</div>'
+
+
+def jojo_stand_card_html(data: Dict[str, Any]) -> str:
+    if not data:
+        return ""
+    return (
+        '<div class="stand-card">'
+        f'<div class="stand-card-label">STAND ACQUIRED</div>'
+        f'<div class="stand-card-name">{_esc(data.get("stand_name"))}</div>'
+        f'<div class="stand-card-type">{_esc(data.get("stand_type"))}</div>'
+        f'<div class="stand-card-master">USER · {_esc(data.get("master"))}</div>'
+        f'<div class="stand-card-verdict">「{_esc(data.get("fatalistic_verdict"))}」</div>'
+        '</div>'
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Placeholder substitution
 
@@ -996,37 +1026,213 @@ def substitute(template: str, values: Dict[str, Any], *, lenient: bool = False) 
 # ─────────────────────────────────────────────────────────────────────────────
 # Index page
 
-INDEX_HTML = """<!doctype html>
+INDEX_HTML = r"""<!doctype html>
 <html lang="zh-CN"><head>
 <meta charset="utf-8">
 <title>TokenBar Report · {start} → {end}</title>
 <style>
-  :root {{ color-scheme: dark; }}
-  body {{ margin:0; padding:48px 32px; font-family:-apple-system,BlinkMacSystemFont,'PingFang SC',Helvetica,sans-serif;
-         background:#0a0a0a; color:#eaeaea; }}
-  h1 {{ font-size:32px; margin:0 0 8px; letter-spacing:-0.02em; }}
-  .sub {{ color:#888; margin:0 0 32px; font-size:14px; }}
-  .grid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:16px; max-width:1200px; }}
-  a.card {{ display:block; padding:24px 20px; border-radius:12px; text-decoration:none;
-            color:inherit; transition:transform .12s ease; }}
-  a.card:hover {{ transform:translateY(-2px); }}
-  .pname {{ font-size:18px; font-weight:700; margin-bottom:6px; }}
-  .pid {{ font-size:11px; opacity:.6; letter-spacing:.06em; text-transform:uppercase; margin-bottom:14px; }}
-  .ptag {{ font-size:13px; opacity:.85; line-height:1.4; }}
-  .totals {{ margin-top:48px; padding-top:32px; border-top:1px solid #222; color:#888; font-size:13px; line-height:1.7; }}
-  .totals b {{ color:#eaeaea; font-weight:600; }}
+  :root {{ color-scheme: dark; --paper:#0a0a0a; --gold:#d4af37; --ink:#eaeaea; }}
+  * {{ box-sizing:border-box; }}
+  html, body {{ height:100%; }}
+  body {{
+    margin:0; padding:0;
+    font-family:-apple-system,BlinkMacSystemFont,'PingFang SC',Helvetica,sans-serif;
+    background:
+      radial-gradient(circle at 18% 12%, rgba(212,175,55,.10) 0, transparent 36%),
+      radial-gradient(circle at 82% 88%, rgba(58,31,93,.18)  0, transparent 40%),
+      var(--paper);
+    color:var(--ink);
+    overflow-x:hidden;
+  }}
+  header {{
+    padding:36px 32px 16px; max-width:1200px; margin:0 auto;
+    display:flex; justify-content:space-between; align-items:baseline; gap:16px; flex-wrap:wrap;
+  }}
+  header h1 {{ font-size:34px; margin:0; letter-spacing:-0.02em; font-weight:900; }}
+  header .sub {{ color:#aaa; margin:0; font-size:13px; line-height:1.6; }}
+
+  /* Stage = the area where the deck and the revealed card live */
+  .stage {{
+    position:relative;
+    height: 520px;
+    max-width:1200px;
+    margin: 0 auto 24px;
+    display:flex; align-items:center; justify-content:center;
+    perspective: 1400px;
+  }}
+
+  /* Each card: dual-faced 3D, positioned absolutely so we can fan them in CSS */
+  .card3d {{
+    position:absolute;
+    width:300px; height:430px;
+    transform-style:preserve-3d;
+    transition: transform .9s cubic-bezier(.22,.61,.36,1), opacity .4s ease;
+    cursor:pointer;
+    will-change: transform;
+  }}
+  .card3d .face {{
+    position:absolute; inset:0;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    border-radius:18px;
+    padding:24px 22px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.04) inset;
+    display:flex; flex-direction:column; justify-content:space-between;
+  }}
+  .card3d .back {{
+    background:
+      repeating-linear-gradient(45deg, rgba(212,175,55,.06) 0 8px, transparent 8px 16px),
+      linear-gradient(135deg, #1a1a2e 0%, #0a0a0a 100%);
+    color:var(--gold);
+    border:2px solid var(--gold);
+    text-align:center;
+  }}
+  .card3d .back .seal {{
+    font-family:Impact,"Bebas Neue",sans-serif;
+    font-size:64px; line-height:1; letter-spacing:.04em;
+    margin-top:auto; margin-bottom:auto;
+    opacity:.88;
+    text-shadow: 0 2px 0 rgba(0,0,0,.4);
+  }}
+  .card3d .back .seal-sub {{
+    font-family:Impact,"Bebas Neue",sans-serif;
+    font-size:10px; letter-spacing:.32em; opacity:.55; margin-bottom:8px;
+  }}
+  .card3d .back .seal-label {{
+    font-size:11px; letter-spacing:.24em; opacity:.5; margin-top:8px;
+  }}
+  .card3d .front {{
+    transform: rotateY(180deg);
+    color:#fff;
+  }}
+  .card3d .front .pid {{ font-size:11px; opacity:.7; letter-spacing:.16em; text-transform:uppercase; }}
+  .card3d .front .ptitle {{ font-size:30px; font-weight:900; line-height:1.1; letter-spacing:-0.02em; margin:8px 0 4px; }}
+  .card3d .front .plabel {{ font-size:14px; opacity:.85; margin-bottom:12px; }}
+  .card3d .front .psub {{ font-size:13px; line-height:1.5; opacity:.9; }}
+  .card3d .front .cta {{ margin-top:auto; font-size:12px; letter-spacing:.18em; text-transform:uppercase; opacity:.7; }}
+
+  /* Deck arrangement: 6 cards stacked & fanned */
+  .card3d.in-deck:nth-child(1) {{ transform: translate3d(-2px, 6px, 0) rotateZ(-3deg); z-index:1; }}
+  .card3d.in-deck:nth-child(2) {{ transform: translate3d( 1px, 3px, 0) rotateZ(-1.4deg); z-index:2; }}
+  .card3d.in-deck:nth-child(3) {{ transform: translate3d( 0px, 0px, 0) rotateZ( 0.0deg); z-index:3; }}
+  .card3d.in-deck:nth-child(4) {{ transform: translate3d( 2px,-2px, 0) rotateZ( 1.0deg); z-index:4; }}
+  .card3d.in-deck:nth-child(5) {{ transform: translate3d(-1px,-4px, 0) rotateZ( 2.0deg); z-index:5; }}
+  .card3d.in-deck:nth-child(6) {{ transform: translate3d( 3px,-7px, 0) rotateZ( 3.0deg); z-index:6; }}
+
+  /* Drawn (the picked card flies forward and flips) */
+  .card3d.drawn {{
+    transform: translate3d(0, -10px, 80px) rotateY(180deg) rotateZ(0deg) scale(1.05);
+    z-index:200;
+  }}
+  /* Others slide aside */
+  .card3d.shoved-left  {{ transform: translate3d(-440px, 30px, -60px) rotateZ(-12deg); opacity:.4; }}
+  .card3d.shoved-right {{ transform: translate3d( 440px, 30px, -60px) rotateZ( 12deg); opacity:.4; }}
+
+  .controls {{
+    text-align:center; margin: 18px 0 24px;
+    display:flex; justify-content:center; gap:14px; flex-wrap:wrap;
+  }}
+  button.draw, button.reshuffle {{
+    appearance:none; cursor:pointer; border:none;
+    padding:14px 28px; font-size:13px; font-weight:800;
+    letter-spacing:.22em; text-transform:uppercase;
+    border-radius:999px; transition:transform .12s;
+  }}
+  button.draw {{ background:var(--gold); color:#0a0a0a; }}
+  button.reshuffle {{ background:#222; color:#eee; border:1px solid #444; }}
+  button.draw:hover, button.reshuffle:hover {{ transform:translateY(-2px); }}
+
+  @media (max-width:880px) {{
+    .card3d {{ width:240px; height:340px; }}
+    .card3d .back .seal {{ font-size:52px; }}
+    .stage {{ height:460px; }}
+  }}
+
+  .totals {{
+    max-width:1200px; margin:24px auto 48px; padding: 16px 32px 0;
+    border-top:1px solid #222; color:#888; font-size:12px; line-height:1.7;
+  }}
+  .totals b {{ color:var(--ink); font-weight:600; }}
+
+  .hint {{ text-align:center; color:#888; font-size:12px; letter-spacing:.16em; text-transform:uppercase; margin: 6px 0 24px; opacity:.7; }}
 {theme_cards_css}
 </style></head><body>
-  <h1>TokenBar Report</h1>
-  <p class="sub">{start} → {end} · {days} 天 · {total_tokens} tokens · {total_prompts} prompts · {total_cost}</p>
-  <div class="grid">
-{cards}
+  <header>
+    <div>
+      <h1>TokenBar Report</h1>
+      <p class="sub">{start} → {end} · {days} 天 · {total_tokens} tokens · {total_prompts} prompts · {total_cost}</p>
+    </div>
+    <div class="sub" style="text-align:right;">
+      抽一张牌，看看今天的镜头是哪一面<br>
+      <span style="opacity:.55;">DRAW A CARD · 6 LENSES · 1 DATASET</span>
+    </div>
+  </header>
+
+  <p class="hint">点击下方任意卡牌或「DRAW」按钮 · 每次刷新都会重新洗牌</p>
+
+  <div class="stage" id="stage">
+{cards3d}
   </div>
+
+  <div class="controls">
+    <button class="draw" id="drawBtn">Draw a Card</button>
+    <button class="reshuffle" id="reshuffleBtn">Reshuffle</button>
+  </div>
+
   <div class="totals">
     <div><b>Data window:</b> {window_start} → {window_end} ({window_days} 天, {event_count} events)</div>
     <div><b>Models touched:</b> {distinct_models} · <b>Agents:</b> {distinct_agents} · <b>Projects:</b> {distinct_projects}</div>
     <div><b>Cost method:</b> {override_count} model override(s), {default_count} default-rate model(s)</div>
   </div>
+
+<script>
+(function() {{
+  const stage = document.getElementById('stage');
+  const cards = Array.from(stage.querySelectorAll('.card3d'));
+  const drawBtn = document.getElementById('drawBtn');
+  const reshuffleBtn = document.getElementById('reshuffleBtn');
+  let drawn = null;
+
+  function shuffle() {{
+    drawn = null;
+    cards.forEach(c => c.classList.remove('drawn','shoved-left','shoved-right'));
+    // randomize DOM order so the fanning happens with new neighbors each shuffle
+    const shuffled = cards.slice().sort(() => Math.random() - 0.5);
+    shuffled.forEach((c, i) => {{
+      stage.appendChild(c);
+      c.classList.add('in-deck');
+    }});
+  }}
+
+  function draw(target) {{
+    if (drawn) return;
+    drawn = target;
+    drawn.classList.remove('in-deck');
+    drawn.classList.add('drawn');
+    cards.forEach((c, i) => {{
+      if (c !== drawn) {{
+        c.classList.remove('in-deck');
+        // Alternate left / right shove for visual spread
+        c.classList.add(i % 2 === 0 ? 'shoved-left' : 'shoved-right');
+      }}
+    }});
+    // 1.1s later, navigate to that persona's report
+    setTimeout(() => {{ window.location.href = drawn.dataset.href; }}, 1100);
+  }}
+
+  drawBtn.addEventListener('click', () => {{
+    if (drawn) return;
+    const inDeck = cards.filter(c => c.classList.contains('in-deck'));
+    if (inDeck.length === 0) return;
+    const pick = inDeck[Math.floor(Math.random() * inDeck.length)];
+    draw(pick);
+  }});
+  reshuffleBtn.addEventListener('click', shuffle);
+  cards.forEach(c => c.addEventListener('click', () => draw(c)));
+
+  shuffle();
+}})();
+</script>
 </body></html>
 """
 
@@ -1036,33 +1242,51 @@ PERSONA_CARD_PALETTES = {
     "brutalist": ("#000",    "#000",    "#E0093A", "#fff"),
     "terminal":  ("#0b1419", "#001a08", "#3aff7d", "#3aff7d"),
     "essay":     ("#F5EFE2", "#E7DCC4", "#1c1a16", "#1c1a16"),
-    "sunrise":   ("#FF8C42", "#FF4F8B", "#FFD36B", "#fff"),
-    "notebook":  ("#FAF6E7", "#F0E9CB", "#3a5a8c", "#3a5a8c"),
     "ft":        ("#FFF1E5", "#FCE3CC", "#0d1b2a", "#0d1b2a"),
+    "jojo":      ("#3a1f5d", "#0a0a0a", "#d4af37", "#f4ecd8"),
 }
 
 
 def build_index(payload: Dict[str, Any], narratives: Dict[str, Any]) -> str:
-    cards = []
+    cards3d = []
     css_chunks = []
     for key, label in PERSONAS:
         bg1, bg2, accent, ink = PERSONA_CARD_PALETTES[key]
         css_chunks.append(
-            f"  a.card.{key} {{ background:linear-gradient(135deg, {bg1} 0%, {bg2} 100%); color:{ink}; }}\n"
-            f"  a.card.{key} .pid {{ color:{accent}; opacity:.9; }}\n"
+            f"  .card3d[data-key='{key}'] .front {{ background:linear-gradient(135deg, {bg1} 0%, {bg2} 100%); color:{ink}; }}\n"
+            f"  .card3d[data-key='{key}'] .front .pid {{ color:{accent}; }}\n"
         )
+
         persona_payload = narratives.get(key, {}) or {}
-        n = persona_payload.get("narrative", persona_payload)  # v3 shape OR back-compat flat shape
+        n = persona_payload.get("narrative", persona_payload)
         title = n.get("title", label)
         sub = n.get("hero_subtitle", "—")
-        sub_safe = html.escape(sub)
+        idx = int_idx(key) + 1
+        href = f"{idx:02d}-{key}.html"
         title_safe = html.escape(title)
-        cards.append(
-            f'    <a class="card {key}" href="{int_idx(key)+1:02d}-{key}.html">'
-            f'<div class="pid">#{int_idx(key)+1:02d} · {key}</div>'
-            f'<div class="pname">{label} · {title_safe}</div>'
-            f'<div class="ptag">{sub_safe}</div>'
-            f'</a>'
+        sub_safe = html.escape(sub)
+        label_safe = html.escape(label)
+        key_safe = html.escape(key)
+
+        # 3D dual-faced card for the stage deck. Front face hides the key/label
+        # behind the reveal — you only see it AFTER the flip.
+        cards3d.append(
+            f'    <div class="card3d" data-key="{key_safe}" data-href="{href}">'
+            f'<div class="face back">'
+            f'<div class="seal-sub">TOKENBAR · LENS</div>'
+            f'<div class="seal">?</div>'
+            f'<div class="seal-label">UNKNOWN</div>'
+            f'</div>'
+            f'<div class="face front">'
+            f'<div>'
+            f'<div class="pid">#{idx:02d} · {key_safe}</div>'
+            f'<div class="ptitle">{label_safe}</div>'
+            f'<div class="plabel">{title_safe}</div>'
+            f'<div class="psub">{sub_safe}</div>'
+            f'</div>'
+            f'<div class="cta">Tap to read →</div>'
+            f'</div>'
+            f'</div>'
         )
 
     window = payload.get("queryWindow") or {}
@@ -1084,7 +1308,7 @@ def build_index(payload: Dict[str, Any], narratives: Dict[str, Any]) -> str:
         total_prompts=commas(total_prompts),
         total_cost=total_cost,
         theme_cards_css="".join(css_chunks),
-        cards="\n".join(cards),
+        cards3d="\n".join(cards3d),
         window_start=payload["dataWindow"]["earliest"].split("T")[0],
         window_end=payload["dataWindow"]["latest"].split("T")[0],
         window_days=days_between(payload["dataWindow"]["earliest"], payload["dataWindow"]["latest"]),
@@ -1201,20 +1425,15 @@ PERSONA_BUILDERS: Dict[str, Dict[str, Tuple[str, Any]]] = {
         "recurrence_diary":  ("recurrence_diary",        essay_recurrence_html),
         "unread_conversation": ("unread_conversation",   essay_unread_html),
     },
-    "sunrise": {
-        "milestones_unlocked": ("milestones_unlocked",   sunrise_milestones_html),
-        "weekly_growth":     ("weekly_growth",           sunrise_weekly_growth_html),
-        "next_achievable":   ("next_achievable",         sunrise_next_html),
-    },
-    "notebook": {
-        "project_biographies": ("project_biographies",   notebook_biographies_html),
-        "the_week_that_was": ("the_week_that_was",       notebook_week_html),
-        "routine_and_breaks": ("routine_and_breaks",     notebook_routine_html),
-    },
     "ft": {
         "capital_allocation_table": ("capital_allocation_table", ft_capital_html),
         "concentration_metrics":    ("concentration_metrics",    ft_hhi_html),
         "monthly_pnl":              ("monthly_pnl",              ft_pnl_html),
+    },
+    "jojo": {
+        "stand_stats":      ("stand_stats",      jojo_stand_stats_html),
+        "psyche_breakdown": ("psyche_breakdown", jojo_psyche_html),
+        "stand_card":       ("stand_card",       jojo_stand_card_html),
     },
 }
 

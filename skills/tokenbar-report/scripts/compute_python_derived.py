@@ -10,6 +10,7 @@ import collections
 import datetime as dt
 import json
 import math
+import re
 import statistics
 import sys
 from typing import Any, Dict, List, Optional, Tuple
@@ -342,185 +343,6 @@ def derive_essay(payload: dict) -> dict:
     }
 
 
-def derive_sunrise(payload: dict) -> dict:
-    daily = payload["timeline"]["byDay"]
-    longest, current, longest_end = _streaks(daily)
-    total = _total_tokens(daily)
-    distinct_projects = len(payload.get("projects", []))
-    distinct_agents = len(payload.get("agents", []))
-    distinct_models = len(payload.get("models", []))
-
-    dated = sorted(
-        (_parse_date(b["label"]), b.get("totalTokens", 0))
-        for b in daily if "label" in b
-    )
-
-    def first_day_crossing(threshold: int) -> Optional[str]:
-        for d, tok in dated:
-            if tok >= threshold:
-                return d.isoformat()
-        return None
-
-    milestones = []
-    for thresh_label, thresh in [
-        ("first_1M_day",   1_000_000),
-        ("first_10M_day",  10_000_000),
-        ("first_100M_day", 100_000_000),
-        ("first_500M_day", 500_000_000),
-        ("first_1B_day",   1_000_000_000),
-    ]:
-        when = first_day_crossing(thresh)
-        if when:
-            milestones.append({
-                "badge_id":    thresh_label,
-                "name":        f"单日 ≥ {_compact(thresh)} tokens",
-                "unlocked_at": when,
-            })
-
-    for streak_thresh in [7, 30, 60, 100]:
-        if longest >= streak_thresh:
-            milestones.append({
-                "badge_id":    f"streak_{streak_thresh}",
-                "name":        f"{streak_thresh} 天连续编码",
-                "unlocked_at": longest_end.isoformat() if longest_end else None,
-            })
-
-    if distinct_projects >= 10:
-        milestones.append({"badge_id": "projects_10", "name": "10+ 项目并行", "unlocked_at": None})
-    if distinct_projects >= 50:
-        milestones.append({"badge_id": "projects_50", "name": "50+ 项目触达", "unlocked_at": None})
-    if distinct_projects >= 100:
-        milestones.append({"badge_id": "projects_100", "name": "100+ 项目触达", "unlocked_at": None})
-    if distinct_agents >= 3:
-        milestones.append({"badge_id": "agents_3", "name": "多 agent 协同", "unlocked_at": None})
-    if distinct_models >= 10:
-        milestones.append({"badge_id": "models_10", "name": "10+ 模型探险家", "unlocked_at": None})
-
-    weeks = _by_week(daily)
-    weekly_growth = []
-    last6 = weeks[-6:]
-    for i, (monday, tok) in enumerate(last6):
-        prev = last6[i - 1][1] if i > 0 else None
-        delta = ((tok - prev) / prev * 100) if prev else None
-        weekly_growth.append({
-            "week_start":      monday.isoformat(),
-            "tokens":          tok,
-            "tokens_compact":  _compact(tok),
-            "wow_delta_pct":   round(delta, 1) if delta is not None else None,
-        })
-
-    next_milestones = []
-    for streak_thresh in [30, 60, 100, 200]:
-        if longest < streak_thresh:
-            next_milestones.append({
-                "badge_id": f"streak_{streak_thresh}",
-                "name":     f"{streak_thresh} 天连续编码",
-                "distance": f"{streak_thresh - longest} 天",
-            })
-
-    for thresh in [100_000_000, 500_000_000, 1_000_000_000]:
-        if not first_day_crossing(thresh):
-            avg_daily = total / max(len(daily), 1)
-            if avg_daily > 0:
-                next_milestones.append({
-                    "badge_id": f"day_{thresh}",
-                    "name":     f"单日 ≥ {_compact(thresh)} tokens",
-                    "distance": f"~{thresh / max(avg_daily,1):.1f}× 当前日均",
-                })
-
-    return {
-        "milestones":      milestones,
-        "weekly_growth":   weekly_growth,
-        "next_milestones": next_milestones[:5],
-    }
-
-
-def derive_notebook(payload: dict) -> dict:
-    daily = payload["timeline"]["byDay"]
-    hourly = payload["timeline"]["byHour"]
-
-    projects = sorted(payload.get("projects", []), key=lambda p: p.get("totalTokens", 0), reverse=True)
-    top_projects = []
-    for p in projects[:3]:
-        first = p.get("firstSeen")
-        last = p.get("lastSeen")
-        top_projects.append({
-            "project":        p.get("name"),
-            "first_seen":     first.split("T")[0] if first else None,
-            "last_seen":      last.split("T")[0] if last else None,
-            "tokens":         p.get("totalTokens", 0),
-            "tokens_compact": _compact(p.get("totalTokens", 0)),
-            "promptCount":    p.get("promptCount", 0),
-        })
-
-    weeks = _by_week(daily)
-    heaviest_week = None
-    if weeks:
-        monday, total = max(weeks, key=lambda kv: kv[1])
-        week_start, week_end = monday, monday + dt.timedelta(days=6)
-        daily_breakdown = []
-        for b in daily:
-            try:
-                d = _parse_date(b["label"])
-            except (KeyError, ValueError):
-                continue
-            if week_start <= d <= week_end:
-                daily_breakdown.append({
-                    "date":           d.isoformat(),
-                    "weekday":        d.strftime("%a"),
-                    "tokens":         b.get("totalTokens", 0),
-                    "tokens_compact": _compact(b.get("totalTokens", 0)),
-                })
-        heaviest_week = {
-            "week_start":     week_start.isoformat(),
-            "week_end":       week_end.isoformat(),
-            "tokens":         total,
-            "tokens_compact": _compact(total),
-            "daily":          sorted(daily_breakdown, key=lambda r: r["date"]),
-        }
-
-    hour_tokens = [(b.get("hourOfDay", 0), b.get("totalTokens", 0)) for b in hourly]
-    band_totals = []
-    for h in range(24):
-        triple = sum(hour_tokens[(h + i) % 24][1] for i in range(3))
-        band_totals.append((h, triple))
-    best_band = max(band_totals, key=lambda kv: kv[1]) if band_totals else (0, 0)
-    band_label = f"{best_band[0]:02d}:00-{(best_band[0]+3)%24:02d}:00"
-
-    weekday_tokens: Dict[str, int] = collections.defaultdict(int)
-    for b in daily:
-        try:
-            d = _parse_date(b["label"])
-        except (KeyError, ValueError):
-            continue
-        weekday_tokens[d.strftime("%a")] += b.get("totalTokens", 0)
-    best_weekday = max(weekday_tokens.items(), key=lambda kv: kv[1])[0] if weekday_tokens else "—"
-
-    broke: List[dict] = []
-    avg_weekday_tokens = (sum(weekday_tokens.values()) / max(len(weekday_tokens), 1)) / 7 if weekday_tokens else 0
-    for b in daily:
-        try:
-            d = _parse_date(b["label"])
-        except (KeyError, ValueError):
-            continue
-        tok = b.get("totalTokens", 0)
-        if d.weekday() < 5 and tok == 0 and avg_weekday_tokens > 1_000_000:
-            broke.append({
-                "date":    d.isoformat(),
-                "weekday": d.strftime("%A"),
-            })
-
-    return {
-        "project_arcs":   top_projects,
-        "heaviest_week":  heaviest_week,
-        "routine": {
-            "most_regular_hour_band": band_label,
-            "most_regular_weekday":   best_weekday,
-            "broke_routine":          broke[:6],
-        }
-    }
-
-
 def derive_ft(payload: dict) -> dict:
     total_tokens = _total_tokens(payload["timeline"]["byDay"]) or 1
     total_cost = payload.get("cost", {}).get("totalUSD", 0)
@@ -582,6 +404,367 @@ def derive_ft(payload: dict) -> dict:
     }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# jojo — 6-axis stand stats + prompt intel for psyche analysis
+#
+# Owned vocabulary: A-E grades, prompt content quotes, verb-frequency, session
+# stats. Other personas may NOT use these signals.
+
+# Chinese + English verbs whose frequency in prompt content is signal-bearing
+# for the psyche analysis. Keep the list small and high-signal.
+_JOJO_VERBS = [
+    # restart / iteration
+    "重写", "重新", "再来", "重来", "重置", "重构", "重做",
+    # destruction
+    "删除", "去掉", "干掉", "炸了", "废了",
+    # hesitation / questioning
+    "为什么", "为啥", "怎么", "能不能",
+    # demand / urgency
+    "立刻", "马上", "现在", "快点",
+    # correction
+    "不对", "错了", "改一下", "调整",
+    # exploration
+    "看看", "试试", "对比",
+    # EN verbs
+    "fix", "refactor", "rewrite", "explain", "why", "again", "wrong",
+]
+
+_SHORT_PROMPT_CHARS = 200
+_LONG_PROMPT_CHARS = 5000
+
+
+def _excerpt(text: str, n: int = 200) -> str:
+    s = " ".join(text.split())
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _grade(value: float, thresholds: List[float], reverse: bool = False) -> Tuple[str, float]:
+    """Map a numeric metric to A-E grade.
+    `thresholds` is a 4-element list of cut points yielding 5 bands (A B C D E).
+    `reverse=True` means lower values get higher grades.
+    Returns (letter_grade, normalized_0_to_5_score).
+    """
+    grades = ["A", "B", "C", "D", "E"]
+    if reverse:
+        for i, t in enumerate(thresholds):
+            if value <= t:
+                return grades[i], 5 - i
+        return "E", 1
+    for i, t in enumerate(thresholds):
+        if value >= t:
+            return grades[i], 5 - i
+    return "E", 1
+
+
+def _near_duplicate_clusters(prompts: List[dict], min_count: int = 3) -> List[dict]:
+    """Group prompts by the first ~32 normalized chars to find near-repeats."""
+    buckets: Dict[str, List[dict]] = collections.defaultdict(list)
+    for p in prompts:
+        content = (p.get("content") or "").strip()
+        if not content:
+            continue
+        # Normalize: lower, strip punctuation, keep first 32 chars
+        norm = re.sub(r"[\s\W_]+", "", content.lower())[:32]
+        if not norm:
+            continue
+        buckets[norm].append(p)
+    out = []
+    for norm, items in buckets.items():
+        if len(items) < min_count:
+            continue
+        items_sorted = sorted(items, key=lambda p: p.get("timestamp", ""))
+        samples = [
+            {
+                "timestamp": items_sorted[i].get("timestamp", "").split(".")[0],
+                "project":   items_sorted[i].get("projectName"),
+                "excerpt":   _excerpt(items_sorted[i].get("content", ""), 80),
+            }
+            for i in (0, len(items_sorted) // 2, -1)[: min(3, len(items_sorted))]
+        ]
+        out.append({
+            "norm_key":   norm,
+            "count":      len(items),
+            "first_seen": items_sorted[0].get("timestamp", "").split("T")[0],
+            "last_seen":  items_sorted[-1].get("timestamp", "").split("T")[0],
+            "samples":    samples,
+        })
+    out.sort(key=lambda c: c["count"], reverse=True)
+    return out[:8]
+
+
+def _verb_frequency(prompts: List[dict]) -> Dict[str, int]:
+    freq: Dict[str, int] = {}
+    for v in _JOJO_VERBS:
+        freq[v] = 0
+    for p in prompts:
+        content = (p.get("content") or "").lower()
+        for v in _JOJO_VERBS:
+            if v.lower() in content:
+                freq[v] += 1
+    # Sort by count desc; drop zeros
+    return {k: c for k, c in sorted(freq.items(), key=lambda kv: kv[1], reverse=True) if c > 0}
+
+
+def _session_stats(prompts: List[dict]) -> Dict[str, Any]:
+    sessions: Dict[str, int] = collections.defaultdict(int)
+    for p in prompts:
+        sid = p.get("sessionId")
+        if sid:
+            sessions[sid] += 1
+    if not sessions:
+        return {"count": 0, "avg_prompts": 0, "max_prompts": 0}
+    counts = list(sessions.values())
+    return {
+        "count":        len(sessions),
+        "avg_prompts":  round(sum(counts) / len(counts), 1),
+        "max_prompts":  max(counts),
+    }
+
+
+def _project_age_days(payload: dict) -> int:
+    """Span (in days) of the longest still-active project (lastSeen within 30d of dataWindow.latest)."""
+    latest = _parse_date(payload["dataWindow"]["latest"])
+    longest = 0
+    for p in payload.get("projects", []):
+        first = p.get("firstSeen")
+        last = p.get("lastSeen")
+        if not first or not last:
+            continue
+        try:
+            d_first = _parse_date(first)
+            d_last = _parse_date(last)
+        except ValueError:
+            continue
+        if (latest - d_last).days > 30:
+            continue
+        span = (d_last - d_first).days
+        longest = max(longest, span)
+    return longest
+
+
+def derive_jojo(payload: dict) -> dict:
+    daily = payload["timeline"]["byDay"]
+    hourly = payload["timeline"]["byHour"]
+    prompts = payload.get("prompts", [])
+
+    total_tokens = _total_tokens(daily) or 1
+    daily_tokens_vals = [b.get("totalTokens", 0) for b in daily]
+    sorted_daily = sorted(daily_tokens_vals)
+    median_daily = _quantile(sorted_daily, 0.5) if sorted_daily else 1
+    max_daily = sorted_daily[-1] if sorted_daily else 0
+
+    # ── 破坏力 / DESTRUCTIVE POWER
+    destruction_verbs = ["重写", "删除", "重构", "重新", "炸了", "废了", "rewrite", "refactor"]
+    destruction_count = 0
+    for p in prompts:
+        content = (p.get("content") or "").lower()
+        for v in destruction_verbs:
+            if v.lower() in content:
+                destruction_count += 1
+                break
+    destruction_ratio = destruction_count / max(len(prompts), 1)
+    top_p50_ratio = (max_daily / median_daily) if median_daily > 0 else 1.0
+    # composite: 70% top/median ratio (capped), 30% destruction verb prevalence
+    destr_score = min(top_p50_ratio / 5.0, 1.0) * 0.7 + destruction_ratio * 0.3
+    destr_grade, destr_norm = _grade(destr_score, [0.7, 0.5, 0.35, 0.2])
+
+    # ── 速度 / SPEED
+    hour_total = sum(b.get("totalTokens", 0) for b in hourly) or 1
+    peak_hour_share = max((b.get("totalTokens", 0) / hour_total for b in hourly), default=0)
+    max_prompts_day = max((b.get("promptCount", 0) for b in daily), default=0)
+    speed_score = min(peak_hour_share * 2.5, 1.0) * 0.6 + min(max_prompts_day / 100.0, 1.0) * 0.4
+    speed_grade, speed_norm = _grade(speed_score, [0.7, 0.5, 0.35, 0.2])
+
+    # ── 射程 / RANGE
+    nproj = len(payload.get("projects", []))
+    nmodel = len(payload.get("models", []))
+    nagent = len(payload.get("agents", []))
+    range_score = min(nproj / 30.0, 1.0) * 0.5 + min(nmodel / 12.0, 1.0) * 0.3 + min(nagent / 3.0, 1.0) * 0.2
+    range_grade, range_norm = _grade(range_score, [0.75, 0.55, 0.35, 0.2])
+
+    # ── 持久力 / DURABILITY
+    longest_streak, _, _ = _streaks(daily)
+    oldest_active = _project_age_days(payload)
+    dur_score = min(longest_streak / 80.0, 1.0) * 0.5 + min(oldest_active / 540.0, 1.0) * 0.5
+    dur_grade, dur_norm = _grade(dur_score, [0.7, 0.5, 0.35, 0.2])
+
+    # ── 精密性 / PRECISION
+    content_lens = [p.get("contentLength", 0) for p in prompts]
+    short_pct = (sum(1 for c in content_lens if 0 < c < _SHORT_PROMPT_CHARS) / max(len(content_lens), 1)) * 100
+    long_pct = (sum(1 for c in content_lens if c > _LONG_PROMPT_CHARS) / max(len(content_lens), 1)) * 100
+    # High precision = many short prompts AND few super-long dumps
+    prec_score = (short_pct / 100.0) * 0.7 + (max(0, 30 - long_pct) / 30.0) * 0.3
+    prec_grade, prec_norm = _grade(prec_score, [0.65, 0.45, 0.30, 0.15])
+
+    # ── 成长性 / GROWTH POTENTIAL
+    dated = sorted(
+        ((_parse_date(b["label"]), b.get("totalTokens", 0))
+         for b in daily if "label" in b),
+        key=lambda kv: kv[0],
+    )
+    growth_ratio = 1.0
+    if len(dated) >= 60:
+        first_30 = sum(tok for _, tok in dated[:30])
+        last_30 = sum(tok for _, tok in dated[-30:])
+        if first_30 > 0:
+            growth_ratio = last_30 / first_30
+    elif len(dated) >= 14:
+        half = len(dated) // 2
+        first = sum(tok for _, tok in dated[:half])
+        last = sum(tok for _, tok in dated[half:])
+        if first > 0:
+            growth_ratio = last / first
+    growth_score = min(growth_ratio / 4.0, 1.0)
+    growth_grade, growth_norm = _grade(growth_score, [0.75, 0.50, 0.30, 0.15])
+
+    # ── prompt_intel
+    ultra_long = sorted(
+        (p for p in prompts if p.get("contentLength", 0) > _LONG_PROMPT_CHARS),
+        key=lambda p: p.get("contentLength", 0),
+        reverse=True,
+    )[:5]
+    ultra_long_dump = [
+        {
+            "timestamp":  (p.get("timestamp", "") or "").split(".")[0],
+            "project":    p.get("projectName"),
+            "agent":      p.get("agentDisplayName") or p.get("agent"),
+            "chars":      p.get("contentLength", 0),
+            "excerpt":    _excerpt(p.get("content", ""), 200),
+        }
+        for p in ultra_long
+    ]
+
+    near_dups = _near_duplicate_clusters(prompts)
+    verb_freq = _verb_frequency(prompts)
+    sessions = _session_stats(prompts)
+
+    # Sample first/last prompts each day (first 10 days)
+    by_day: Dict[str, List[dict]] = collections.defaultdict(list)
+    for p in prompts:
+        ts = p.get("timestamp", "")
+        if "T" in ts:
+            by_day[ts.split("T")[0]].append(p)
+    first_prompts_each_day = []
+    last_prompts_each_day = []
+    for d in sorted(by_day.keys())[-10:]:
+        items = sorted(by_day[d], key=lambda p: p.get("timestamp", ""))
+        if items:
+            first_prompts_each_day.append({
+                "date":      d,
+                "timestamp": items[0].get("timestamp", "").split(".")[0],
+                "excerpt":   _excerpt(items[0].get("content", ""), 80),
+            })
+            last_prompts_each_day.append({
+                "date":      d,
+                "timestamp": items[-1].get("timestamp", "").split(".")[0],
+                "excerpt":   _excerpt(items[-1].get("content", ""), 80),
+            })
+
+    # behavioral_extremes
+    active_hours = [b.get("hourOfDay") for b in hourly if b.get("totalTokens", 0) > 0]
+    first_active = min(active_hours, default=0)
+    last_active = max(active_hours, default=0)
+
+    weekday_tokens: Dict[int, int] = collections.defaultdict(int)
+    weekend_tokens = 0
+    for b in daily:
+        try:
+            d = _parse_date(b["label"])
+        except (KeyError, ValueError):
+            continue
+        weekday_tokens[d.weekday()] += b.get("totalTokens", 0)
+        if d.weekday() >= 5:
+            weekend_tokens += b.get("totalTokens", 0)
+    weekday_vals = list(weekday_tokens.values())
+    if weekday_vals and statistics.fmean(weekday_vals) > 0:
+        weekday_cv = statistics.pstdev(weekday_vals) / statistics.fmean(weekday_vals)
+    else:
+        weekday_cv = 0
+    weekend_intensity = weekend_tokens / total_tokens
+
+    composite_norm = (destr_norm + speed_norm + range_norm + dur_norm + prec_norm + growth_norm) / 6.0
+    composite_grade, _ = _grade(composite_norm, [4.2, 3.4, 2.6, 1.8])
+
+    return {
+        "stand_stats": {
+            "composite_rank": composite_grade,
+            "axes": [
+                {
+                    "axis":        "destructive_power",
+                    "label_cn":    "破坏力",
+                    "label_en":    "DESTRUCTIVE POWER",
+                    "grade":       destr_grade,
+                    "score":       round(destr_norm, 2),
+                    "primary":     f"单日峰值 / 中位 = {top_p50_ratio:.1f}×",
+                    "secondary":   f"破坏类动词 prompt 占 {destruction_ratio*100:.0f}%",
+                    "top_day_tokens":     max_daily,
+                    "median_day_tokens":  median_daily,
+                },
+                {
+                    "axis":      "speed",
+                    "label_cn":  "速度",
+                    "label_en":  "SPEED",
+                    "grade":     speed_grade,
+                    "score":     round(speed_norm, 2),
+                    "primary":   f"峰值小时占全日 {peak_hour_share*100:.0f}%",
+                    "secondary": f"单日 prompt 峰值 {max_prompts_day}",
+                },
+                {
+                    "axis":      "range",
+                    "label_cn":  "射程",
+                    "label_en":  "RANGE",
+                    "grade":     range_grade,
+                    "score":     round(range_norm, 2),
+                    "primary":   f"{nproj} 项目 · {nmodel} 模型 · {nagent} agents",
+                },
+                {
+                    "axis":      "durability",
+                    "label_cn":  "持久力",
+                    "label_en":  "DURABILITY",
+                    "grade":     dur_grade,
+                    "score":     round(dur_norm, 2),
+                    "primary":   f"最长 streak {longest_streak} 天",
+                    "secondary": f"最老仍活项目跨度 {oldest_active} 天",
+                },
+                {
+                    "axis":      "precision",
+                    "label_cn":  "精密性",
+                    "label_en":  "PRECISION",
+                    "grade":     prec_grade,
+                    "score":     round(prec_norm, 2),
+                    "primary":   f"短 prompt (< {_SHORT_PROMPT_CHARS} 字) 占 {short_pct:.0f}%",
+                    "secondary": f"超长 prompt (> {_LONG_PROMPT_CHARS} 字) 占 {long_pct:.1f}%",
+                },
+                {
+                    "axis":      "growth_potential",
+                    "label_cn":  "成长性",
+                    "label_en":  "GROWTH POTENTIAL",
+                    "grade":     growth_grade,
+                    "score":     round(growth_norm, 2),
+                    "primary":   f"近期 / 早期 token 比 = {growth_ratio:.2f}×",
+                },
+            ],
+        },
+        "prompt_intel": {
+            "sample_size":           len(prompts),
+            "short_prompt_pct":      round(short_pct, 1),
+            "long_prompt_pct":       round(long_pct, 1),
+            "ultra_long_prompts":    ultra_long_dump,
+            "near_duplicate_clusters": near_dups,
+            "verb_frequency":        verb_freq,
+            "first_prompts_each_day": first_prompts_each_day,
+            "last_prompts_each_day":  last_prompts_each_day,
+            "session_stats":         sessions,
+        },
+        "behavioral_extremes": {
+            "first_active_hour":   first_active,
+            "last_active_hour":    last_active,
+            "weekday_consistency": round(weekday_cv, 3),
+            "weekend_intensity":   round(weekend_intensity, 3),
+        },
+    }
+
+
 def main() -> int:
     payload = json.load(sys.stdin)
     out = {
@@ -589,9 +772,8 @@ def main() -> int:
         "brutalist": derive_brutalist(payload),
         "terminal":  derive_terminal(payload),
         "essay":     derive_essay(payload),
-        "sunrise":   derive_sunrise(payload),
-        "notebook":  derive_notebook(payload),
         "ft":        derive_ft(payload),
+        "jojo":      derive_jojo(payload),
     }
     json.dump(out, sys.stdout, indent=2, ensure_ascii=False)
     return 0

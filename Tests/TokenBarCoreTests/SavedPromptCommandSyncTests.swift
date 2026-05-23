@@ -125,4 +125,62 @@ struct SavedPromptCommandSyncTests {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("tokenbar-sync-tests-\(UUID().uuidString)", isDirectory: true)
     }
+
+    // MARK: - tb → tbar directory migration
+
+    @Test
+    func legacyTbDirectoryMovesToTbarWhenTargetAbsent() throws {
+        let (legacy, target) = makeLegacyTargetPair()
+        try seedLegacy(legacy: legacy, files: ["foo.md": "body"])
+
+        SavedPromptCommandSync.migrateLegacyDirectoryIfNeeded(legacy: legacy, target: target)
+
+        #expect(!FileManager.default.fileExists(atPath: legacy.path))
+        let moved = target.appendingPathComponent("foo.md")
+        #expect(FileManager.default.fileExists(atPath: moved.path))
+        let contents = try String(contentsOf: moved, encoding: .utf8)
+        #expect(contents == "body")
+    }
+
+    @Test
+    func legacyMigrationIsNoOpWhenTargetAlreadyExists() throws {
+        let (legacy, target) = makeLegacyTargetPair()
+        try seedLegacy(legacy: legacy, files: ["legacy.md": "old"])
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        let preserved = target.appendingPathComponent("new.md")
+        try "new".write(to: preserved, atomically: true, encoding: .utf8)
+
+        SavedPromptCommandSync.migrateLegacyDirectoryIfNeeded(legacy: legacy, target: target)
+
+        #expect(FileManager.default.fileExists(atPath: legacy.path))
+        #expect(FileManager.default.fileExists(atPath: preserved.path))
+        // tbar/legacy.md should NOT have been merged in
+        let mergedAttempt = target.appendingPathComponent("legacy.md")
+        #expect(!FileManager.default.fileExists(atPath: mergedAttempt.path))
+    }
+
+    @Test
+    func legacyMigrationIsNoOpWhenLegacyMissing() throws {
+        let (legacy, target) = makeLegacyTargetPair()
+        // Neither directory exists.
+        SavedPromptCommandSync.migrateLegacyDirectoryIfNeeded(legacy: legacy, target: target)
+        #expect(!FileManager.default.fileExists(atPath: legacy.path))
+        #expect(!FileManager.default.fileExists(atPath: target.path))
+    }
+
+    private func makeLegacyTargetPair() -> (legacy: URL, target: URL) {
+        let parent = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tokenbar-migration-\(UUID().uuidString)", isDirectory: true)
+        return (
+            parent.appendingPathComponent("tb", isDirectory: true),
+            parent.appendingPathComponent("tbar", isDirectory: true)
+        )
+    }
+
+    private func seedLegacy(legacy: URL, files: [String: String]) throws {
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        for (name, content) in files {
+            try content.write(to: legacy.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+    }
 }

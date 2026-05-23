@@ -624,6 +624,19 @@ public struct UsageRepository: Sendable {
         }
     }
 
+    public func recentCheckpoints(limit: Int = 20) throws -> [CheckpointSummary] {
+        let safeLimit = max(1, limit)
+        return try database.queue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+            SELECT id, started_at, ended_at, trigger, events_added, prompts_added, warnings, error
+            FROM checkpoints
+            ORDER BY id DESC
+            LIMIT ?
+            """, arguments: [safeLimit])
+            return rows.map(checkpoint(from:))
+        }
+    }
+
     public func latestWarnings(limit: Int = 50) throws -> [UsageSourceWarning] {
         try database.queue.read { db in
             let rows = try Row.fetchAll(db, sql: """

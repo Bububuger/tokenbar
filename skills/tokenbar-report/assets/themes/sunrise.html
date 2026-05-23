@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>{{title}} · TokenBar Report</title>
+<style>
+  :root { --sun1:#FF8C42; --sun2:#FF4F8B; --sun3:#FFD36B; --ink:#1a0f0a; --paper:#fff8f1; --gold:#E8AC4C; }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:0;
+    color:var(--ink); background:var(--paper);
+    font-family:"Inter","SF Pro Display","-apple-system","PingFang SC",sans-serif;
+    line-height:1.55;
+  }
+  .hero {
+    background:linear-gradient(135deg, var(--sun3) 0%, var(--sun1) 45%, var(--sun2) 100%);
+    padding:80px 24px 100px; color:#fff;
+    border-radius:0 0 36px 36px; position:relative; overflow:hidden;
+  }
+  .hero::before {
+    content:""; position:absolute; right:-80px; top:-80px;
+    width:300px; height:300px; border-radius:50%;
+    background:radial-gradient(circle, rgba(255,255,255,.35) 0%, transparent 70%);
+  }
+  .hero .wrap { max-width:780px; margin:0 auto; position:relative; }
+  .badge { display:inline-block; padding:6px 14px; background:rgba(0,0,0,.18); border-radius:999px; font-size:12px; letter-spacing:.12em; font-weight:700; backdrop-filter:blur(4px); }
+  h1 { font-size:64px; line-height:1.05; letter-spacing:-0.025em; margin:18px 0 6px; font-weight:900; }
+  .deck { font-size:22px; font-weight:500; opacity:.95; margin:0 0 24px; max-width:580px; }
+  .stat-strip { display:flex; gap:48px; margin-top:28px; }
+  .stat-strip .stat .n { font-size:48px; font-weight:900; line-height:1; }
+  .stat-strip .stat .l { font-size:12px; letter-spacing:.12em; text-transform:uppercase; opacity:.85; margin-top:4px; }
+  .wrap { max-width:780px; margin:0 auto; padding:0 24px 80px; }
+  section { margin:48px 0; padding:32px; background:#fff; border-radius:24px; box-shadow:0 4px 24px rgba(255,79,139,.08); }
+  h2 { font-size:13px; letter-spacing:.18em; text-transform:uppercase; color:var(--sun1); margin:0 0 16px; font-weight:800; }
+  .milestone {
+    display:inline-flex; align-items:center; gap:10px; padding:10px 18px;
+    background:linear-gradient(135deg, var(--sun3), var(--sun1));
+    color:#fff; border-radius:999px; font-weight:800; font-size:14px;
+    box-shadow:0 4px 14px rgba(255,140,66,.4);
+  }
+  .milestone ::before { content:"✦"; }
+  .big { font-size:64px; font-weight:900; line-height:1; color:var(--sun2); letter-spacing:-0.03em; }
+  .big-row { display:grid; grid-template-columns:1fr 1fr; gap:24px; align-items:center; }
+  .row3 { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+  .row3 .pill { padding:20px; border-radius:16px; background:linear-gradient(135deg, #fff5e9 0%, #ffe7ed 100%); text-align:center; }
+  .pill .n { font-size:32px; font-weight:900; color:var(--ink); }
+  .pill .l { font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:#8a6242; margin-top:4px; }
+  .banner {
+    padding:18px 24px; margin:18px 0;
+    background:linear-gradient(90deg, var(--sun3) 0%, var(--sun1) 100%);
+    color:#fff; border-radius:14px; font-weight:600; font-size:16px;
+    box-shadow:0 6px 18px rgba(255,140,66,.3);
+  }
+  table.leaderboard { width:100%; border-collapse:collapse; font-size:15px; }
+  table.leaderboard th { font-size:11px; letter-spacing:.1em; text-transform:uppercase; padding:10px 6px; text-align:left; color:#8a6242; border-bottom:2px solid #ffe1cc; font-weight:800; }
+  table.leaderboard td { padding:10px 6px; border-bottom:1px solid #ffeedd; }
+  .model-tokens, .model-share, .model-cost { text-align:right; font-variant-numeric:tabular-nums; font-weight:600; }
+  .cost-tag { font-size:9px; padding:1px 5px; background:var(--sun2); color:#fff; border-radius:4px; margin-left:4px; }
+  .agents-chart .agent-row { display:grid; grid-template-columns:140px 1fr 60px 80px; gap:10px; padding:7px 0; align-items:center; font-size:14px; }
+  .agent-bar-wrap { height:10px; background:#ffe1cc; border-radius:5px; overflow:hidden; }
+  .agent-bar { display:block; height:10px; background:linear-gradient(90deg, var(--sun1), var(--sun2)); border-radius:5px; }
+  .agent-pct, .agent-tokens { text-align:right; font-variant-numeric:tabular-nums; font-weight:600; }
+  ol.projects-list { padding-left:0; list-style:none; counter-reset:p; }
+  .projects-list .project-row { counter-increment:p; padding:9px 14px; background:#fff5e9; margin-bottom:6px; border-radius:10px; font-size:15px; font-weight:600; }
+  .projects-list .project-row::before { content:counter(p) "."; color:var(--sun2); font-weight:900; margin-right:10px; }
+  .project-tokens { float:right; color:var(--sun1); }
+  .project-stale { font-size:12px; color:#8a6242; font-weight:400; opacity:.65; }
+  svg.chart.daily { display:block; width:100%; height:160px; }
+  .daily-bar { fill:var(--sun1); }
+  .daily-bar-peak { fill:var(--sun2); }
+  .daily-bar-empty { fill:#ffe1cc; }
+  .axis-label { font-size:10px; fill:#8a6242; }
+  svg.chart.hour-clock { display:block; margin:0 auto; }
+  .hour-seg { fill:var(--sun1); stroke:#fff; stroke-width:2; }
+  .hour-seg-peak { fill:var(--sun2); }
+  .hour-seg-empty { fill:#ffe1cc; }
+  .hour-tick { font-size:12px; fill:var(--ink); font-weight:800; }
+  .cluster-label { font-size:14px; fill:var(--ink); font-weight:600; }
+  .cluster-bar { fill:url(#sunset-grad); }
+  .cluster-pct { font-size:13px; fill:var(--sun2); font-weight:800; }
+  .footer { text-align:center; margin-top:48px; padding:24px; color:#8a6242; font-size:12px; letter-spacing:.06em; }
+  .nav { display:inline-block; margin-bottom:24px; opacity:.85; }
+  .nav a { color:#fff; font-size:12px; text-decoration:none; border-bottom:1px solid rgba(255,255,255,.5); }
+  /* Profile dossier — sunrise */
+  .profile-card { background:#fff; border-radius:18px; padding:6px; }
+  .profile-headline { display:flex; flex-wrap:wrap; gap:12px; padding:14px; background:linear-gradient(135deg, #fff5e9 0%, #ffe7ed 100%); border-radius:14px; margin-bottom:14px; }
+  .profile-chip { display:inline-flex; flex-direction:column; padding:10px 16px; background:#fff; border-radius:14px; box-shadow:0 4px 14px rgba(255,140,66,.18); min-width:120px; }
+  .profile-chip.mastery-senior, .profile-chip.mastery-expert { background:linear-gradient(135deg, var(--sun3), var(--sun1)); color:#fff; }
+  .profile-chip.intensity-extreme, .profile-chip.intensity-heavy { background:linear-gradient(135deg, var(--sun1), var(--sun2)); color:#fff; }
+  .chip-label { font-size:11px; letter-spacing:.1em; text-transform:uppercase; font-weight:800; opacity:.75; }
+  .chip-value { font-size:22px; font-weight:900; margin-top:3px; text-transform:capitalize; line-height:1; letter-spacing:-0.01em; }
+  .profile-confidence { font-size:12px; opacity:.7; margin-left:auto; align-self:center; font-weight:600; color:#8a6242; }
+  .profile-section { margin-top:14px; padding:16px; background:#fff5e9; border-radius:14px; }
+  .profile-section-head { font-size:11px; letter-spacing:.14em; text-transform:uppercase; font-weight:800; color:var(--sun1); margin-bottom:10px; }
+  .profile-section-head::before { content:"✦ "; }
+  .profile-axes { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+  .profile-axis { padding:10px 12px; background:#fff; border-radius:10px; text-align:center; }
+  .axis-name { font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:#8a6242; opacity:.8; }
+  .axis-value { font-size:14px; font-weight:800; margin-top:3px; text-transform:capitalize; color:var(--sun2); }
+  .profile-evidence { margin:8px 0 0; padding-left:0; font-size:13px; line-height:1.6; list-style:none; }
+  .profile-evidence li { margin-bottom:4px; padding-left:24px; position:relative; }
+  .profile-evidence li::before { content:"◆"; position:absolute; left:6px; color:var(--gold); font-size:10px; top:5px; }
+  .profile-trait-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:10px; }
+  .profile-trait { padding:12px 14px; background:#fff; border-radius:12px; border-left:4px solid var(--sun2); }
+  .trait-name { font-size:14px; font-weight:800; color:var(--ink); }
+  .trait-evidence { font-size:11px; color:#8a6242; margin-top:3px; line-height:1.5; }
+  .profile-quirk-list { padding-left:0; font-size:13px; line-height:1.7; list-style:none; }
+  .profile-quirk-list li { padding:8px 14px; background:#fff; border-radius:10px; margin-bottom:6px; border-left:3px solid var(--gold); }
+</style>
+</head>
+<body>
+<svg width="0" height="0"><defs><linearGradient id="sunset-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+  <stop offset="0%" stop-color="#FF8C42"/><stop offset="100%" stop-color="#FF4F8B"/>
+</linearGradient></defs></svg>
+
+<div class="hero">
+  <div class="wrap">
+    <div class="nav"><a href="index.html">← index</a></div>
+    <span class="badge">#05 · {{persona_label}} · {{personality_tag}}</span>
+    <h1>{{title}}</h1>
+    <p class="deck">{{hero_subtitle}}</p>
+    <div class="stat-strip">
+      <div class="stat"><div class="n">{{total_tokens}}</div><div class="l">tokens</div></div>
+      <div class="stat"><div class="n">{{total_prompts}}</div><div class="l">prompts</div></div>
+      <div class="stat"><div class="n">{{total_cost_usd}}</div><div class="l">cost</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <section>
+    <h2>开场</h2>
+    <p style="font-size:18px;">{{narrative_open}}</p>
+    <div style="margin-top:18px;">
+      <span class="milestone">✦ {{streak_longest}} 天最长连胜</span>
+      <span class="milestone" style="background:linear-gradient(135deg, var(--sun2), var(--gold));">⚡ {{streak_current}} 天进行中</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>最高光的一天</h2>
+    <div class="big-row">
+      <div>
+        <div class="big">{{heaviest_day_tokens}}</div>
+        <p style="margin-top:6px; opacity:.7;">{{heaviest_day_date}} · {{heaviest_day_prompts}} prompts</p>
+      </div>
+      <div><p style="font-size:17px;">{{heaviest_day_blurb}}</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>24h 全场记录</h2>
+    <div class="banner">{{longest_day_date}} · 你点亮了 24 个小时中的 {{longest_day_hours}} 个 · {{longest_day_tokens}} tokens</div>
+  </section>
+
+  <section>
+    <h2>你的黄金时段</h2>
+    <div style="display:grid; grid-template-columns:240px 1fr; gap:32px; align-items:center;">
+      <div>{{hour_clock_svg}}</div>
+      <div>
+        <p><b style="font-size:24px; color:var(--sun2);">{{peak_hour_label}}</b><br>是你产能爆棚的时段（{{peak_hour_tokens}} tokens）</p>
+        <div class="row3" style="margin-top:14px;">
+          <div class="pill"><div class="n">{{night_owl_pct}}%</div><div class="l">夜间 23-05</div></div>
+          <div class="pill"><div class="n">{{morning_pct}}%</div><div class="l">清晨 06-10</div></div>
+          <div class="pill"><div class="n">{{weekend_pct}}%</div><div class="l">周末</div></div>
+        </div>
+        <p style="margin-top:14px;">{{hour_clock_blurb}}</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>每日成长曲线</h2>
+    {{daily_bars_svg}}
+    <div class="banner" style="background:linear-gradient(90deg, var(--sun2) 0%, var(--gold) 100%);">{{streak_blurb}}</div>
+  </section>
+
+  <section>
+    <h2>模型 leaderboard</h2>
+    {{models_table}}
+    <p style="margin-top:14px;">{{model_blurb}}</p>
+  </section>
+
+  <section>
+    <h2>你的 agent 阵容</h2>
+    {{agents_chart}}
+    <p>{{agent_blurb}}</p>
+  </section>
+
+  <section>
+    <h2>你深耕的战场</h2>
+    {{projects_list}}
+    <p style="margin-top:14px;">{{project_blurb}}</p>
+  </section>
+
+  <section>
+    <h2>你的问题画像 · {{personality_tag}}</h2>
+    {{cluster_chart}}
+    <p style="margin-top:14px;">{{cluster_blurb}}</p>
+    <div class="banner">{{personality_tag_blurb}}</div>
+  </section>
+
+  <section>
+    <h2>人格档案 · 你的成长画像</h2>
+    {{profile_card}}
+    <div class="banner" style="margin-top:18px;">{{profile_narrative}}</div>
+  </section>
+
+  <section style="text-align:center; padding:48px 32px; background:linear-gradient(135deg, var(--sun3) 0%, var(--sun1) 100%); color:#fff;">
+    <h2 style="color:rgba(255,255,255,.85);">下一站</h2>
+    <p style="font-size:22px; font-weight:700; line-height:1.4;">{{closing_line}}</p>
+  </section>
+
+  <div class="footer">{{date_range_start}} → {{date_range_end}} · {{date_range_days}} 天 · {{event_count}} events · {{distinct_projects}} projects · {{distinct_models}} models · {{override_count}} override(s)</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>{{title}} · TokenBar Report</title>
+<style>
+  :root { --paper:#F5EFE2; --paper2:#E7DCC4; --ink:#1c1a16; --accent:#7d3a1c; --muted:#9b8d74; }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:60px 24px 100px;
+    background:linear-gradient(180deg, var(--paper) 0%, var(--paper2) 100%);
+    color:var(--ink);
+    font-family:"Source Han Serif SC","Noto Serif SC","Songti SC","Source Serif Pro","Georgia",serif;
+    line-height:1.75; font-size:17px;
+  }
+  .wrap { max-width:680px; margin:0 auto; }
+  .topline { font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); margin-bottom:6px; }
+  h1 {
+    font-family:"Playfair Display","Source Han Serif SC","STSong","Songti SC",serif;
+    font-size:60px; line-height:1.05; letter-spacing:-0.01em;
+    margin:0 0 14px; font-weight:700; font-style:italic;
+  }
+  .deck { font-size:22px; line-height:1.4; color:#3a342a; margin:0 0 36px; font-style:italic; }
+  .meta { font-size:12px; letter-spacing:.1em; color:var(--muted); margin-bottom:48px; border-top:1px solid #c9bd9f; padding-top:14px; }
+  section { padding:36px 0; border-top:1px solid #c9bd9f; }
+  section:first-of-type { border-top:0; }
+  h2 {
+    font-family:"Playfair Display","Source Han Serif SC",serif;
+    font-size:13px; letter-spacing:.22em; text-transform:uppercase; color:var(--accent);
+    margin:0 0 18px; font-weight:600;
+  }
+  p { margin:0 0 1.1em; }
+  .drop p::first-letter {
+    float:left; font-size:80px; line-height:.8; padding:8px 8px 0 0;
+    font-family:"Playfair Display","Source Han Serif SC",serif; font-weight:700;
+  }
+  .stats-inline { display:flex; gap:36px; margin:24px 0; font-family:"Playfair Display",serif; }
+  .stats-inline .stat .n { font-size:42px; font-weight:700; font-style:italic; line-height:1; }
+  .stats-inline .stat .l { font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin-top:4px; }
+  .pull-quote {
+    font-family:"Playfair Display","Source Han Serif SC",serif; font-style:italic;
+    font-size:24px; line-height:1.4; padding:0 24px;
+    border-left:3px solid var(--accent); margin:24px 0;
+  }
+  table.leaderboard { width:100%; border-collapse:collapse; font-size:15px; }
+  table.leaderboard th, table.leaderboard td { padding:9px 6px; text-align:left; border-bottom:1px solid #c9bd9f; }
+  table.leaderboard th { font-family:"Playfair Display",serif; text-transform:uppercase; letter-spacing:.1em; font-size:11px; color:var(--muted); font-weight:600; }
+  .model-tokens, .model-share, .model-cost { text-align:right; font-variant-numeric:tabular-nums; }
+  .cost-tag { font-size:9px; padding:1px 4px; background:var(--accent); color:var(--paper); margin-left:4px; border-radius:2px; }
+  .agents-chart .agent-row { display:grid; grid-template-columns:140px 1fr 60px 80px; gap:10px; align-items:center; padding:7px 0; font-size:15px; border-bottom:1px solid #d5c8a8; }
+  .agent-bar-wrap { background:#dccea7; height:6px; border-radius:3px; overflow:hidden; }
+  .agent-bar { display:block; height:6px; background:var(--accent); }
+  .agent-pct, .agent-tokens { text-align:right; font-variant-numeric:tabular-nums; }
+  ol.projects-list { padding-left:0; list-style:none; counter-reset:p; }
+  .projects-list .project-row { counter-increment:p; padding:7px 0; font-size:16px; border-bottom:1px solid #d5c8a8; }
+  .projects-list .project-row::before { content:counter(p,lower-roman) ". "; color:var(--accent); margin-right:6px; font-style:italic; }
+  .project-tokens { float:right; font-variant-numeric:tabular-nums; }
+  .project-stale { font-size:12px; color:var(--muted); font-style:italic; }
+  svg.chart.daily { display:block; width:100%; height:120px; background:transparent; }
+  .daily-bar { fill:var(--ink); opacity:.65; }
+  .daily-bar-peak { fill:var(--accent); opacity:1; }
+  .daily-bar-empty { fill:#d5c8a8; }
+  .axis-label { font-size:9px; fill:var(--muted); }
+  svg.chart.hour-clock { display:block; margin:0 auto; }
+  .hour-seg { fill:var(--ink); opacity:.7; stroke:var(--paper); stroke-width:1; }
+  .hour-seg-peak { fill:var(--accent); opacity:1; }
+  .hour-seg-empty { fill:#d5c8a8; }
+  .hour-tick { font-size:11px; fill:var(--muted); font-family:"Playfair Display",serif; font-style:italic; }
+  .cluster-label { font-size:14px; fill:var(--ink); font-family:inherit; }
+  .cluster-bar { fill:var(--accent); opacity:.75; }
+  .cluster-pct { font-size:12px; fill:var(--muted); font-family:"Playfair Display",serif; font-style:italic; }
+  .footer { margin-top:60px; padding-top:24px; border-top:1px solid #c9bd9f; font-size:12px; color:var(--muted); text-align:center; letter-spacing:.08em; }
+  .nav a { color:var(--muted); font-size:11px; text-decoration:none; border-bottom:1px solid var(--muted); }
+  /* Profile dossier — essay */
+  .profile-card { background:transparent; }
+  .profile-headline { display:flex; flex-wrap:wrap; gap:24px; align-items:flex-end; padding-bottom:18px; margin-bottom:18px; border-bottom:1px solid #c9bd9f; }
+  .profile-chip { display:inline-flex; flex-direction:column; padding:4px 0; min-width:120px; }
+  .chip-label { font-family:"Playfair Display","Source Han Serif SC",serif; font-style:italic; font-size:12px; letter-spacing:.06em; color:var(--muted); }
+  .chip-value { font-family:"Playfair Display",serif; font-size:32px; font-weight:700; font-style:italic; color:var(--accent); margin-top:2px; text-transform:capitalize; line-height:1; }
+  .profile-confidence { font-family:"Playfair Display",serif; font-style:italic; font-size:13px; color:var(--muted); margin-left:auto; }
+  .profile-section { margin-top:22px; }
+  .profile-section-head { font-family:"Playfair Display",serif; font-size:11px; letter-spacing:.22em; text-transform:uppercase; color:var(--accent); font-weight:600; margin-bottom:12px; }
+  .profile-axes { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:12px; padding:14px 0; border-top:1px solid #d5c8a8; border-bottom:1px solid #d5c8a8; }
+  .profile-axis { padding:0 14px; border-right:1px solid #d5c8a8; }
+  .profile-axis:last-child { border-right:0; }
+  .axis-name { font-family:"Playfair Display",serif; font-style:italic; font-size:11px; color:var(--muted); }
+  .axis-value { font-family:"Playfair Display",serif; font-size:17px; font-weight:700; margin-top:2px; text-transform:capitalize; color:var(--ink); }
+  .profile-evidence { margin:6px 0 0; padding-left:0; font-size:15px; line-height:1.7; font-style:italic; list-style:none; }
+  .profile-evidence li { margin-bottom:4px; padding-left:18px; position:relative; }
+  .profile-evidence li::before { content:"—"; position:absolute; left:0; color:var(--accent); }
+  .profile-trait-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:16px 24px; margin-top:8px; }
+  .profile-trait { padding:8px 0; border-top:1px solid #d5c8a8; }
+  .trait-name { font-family:"Playfair Display",serif; font-size:18px; font-weight:700; font-style:italic; }
+  .trait-evidence { font-size:13px; opacity:.75; margin-top:3px; line-height:1.55; }
+  .profile-quirk-list { padding-left:0; font-size:15px; line-height:1.75; list-style:none; font-style:italic; }
+  .profile-quirk-list li { margin-bottom:6px; padding-left:18px; position:relative; }
+  .profile-quirk-list li::before { content:"·"; position:absolute; left:0; color:var(--accent); font-size:20px; line-height:1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topline">#04 · {{persona_label}} · <a class="nav" href="index.html">← index</a></div>
+  <h1>{{title}}</h1>
+  <p class="deck">{{hero_subtitle}}</p>
+  <p class="meta">{{date_range_start}} – {{date_range_end}} · {{date_range_days}} days · 一种自画像 · 标签：{{personality_tag}}</p>
+
+  <section class="drop">
+    <p>{{narrative_open}}</p>
+    <div class="stats-inline">
+      <div class="stat"><div class="n">{{total_tokens}}</div><div class="l">tokens</div></div>
+      <div class="stat"><div class="n">{{total_prompts}}</div><div class="l">prompts</div></div>
+      <div class="stat"><div class="n">{{total_cost_usd}}</div><div class="l">cost</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>关于那一天</h2>
+    <p class="pull-quote">{{heaviest_day_date}}，{{heaviest_day_tokens}} tokens。{{heaviest_day_prompts}} 次提问。</p>
+    <p>{{heaviest_day_blurb}}</p>
+    <p>而最长的那一天，是 {{longest_day_date}}——你在 24 小时里活了 {{longest_day_hours}} 个不同的钟点。</p>
+  </section>
+
+  <section>
+    <h2>时钟</h2>
+    <div style="display:grid; grid-template-columns:1fr 280px; gap:32px; align-items:center;">
+      <div>
+        <p>峰值落在 <b>{{peak_hour_label}}</b>。这并非偶然——夜间（23-05）占了你 <b>{{night_owl_pct}}%</b>，清晨（06-10）只占 <b>{{morning_pct}}%</b>。</p>
+        <p>{{hour_clock_blurb}}</p>
+      </div>
+      <div>{{hour_clock_svg}}</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>每日</h2>
+    {{daily_bars_svg}}
+    <p style="margin-top:18px;">最长连续 <b>{{streak_longest}}</b> 天。当前 <b>{{streak_current}}</b> 天。周末占 <b>{{weekend_pct}}%</b>，工作日占 <b>{{weekday_pct}}%</b>。</p>
+    <p>{{streak_blurb}}</p>
+  </section>
+
+  <section>
+    <h2>关于模型</h2>
+    {{models_table}}
+    <p style="margin-top:14px;">{{model_blurb}}</p>
+  </section>
+
+  <section>
+    <h2>关于工具的选择</h2>
+    {{agents_chart}}
+    <p>{{agent_blurb}}</p>
+  </section>
+
+  <section>
+    <h2>关于工作</h2>
+    {{projects_list}}
+    <p>{{project_blurb}}</p>
+  </section>
+
+  <section>
+    <h2>关于你问的问题</h2>
+    {{cluster_chart}}
+    <p>{{cluster_blurb}}</p>
+    <p class="pull-quote">{{personality_tag}}——{{personality_tag_blurb}}</p>
+  </section>
+
+  <section>
+    <h2>关于你</h2>
+    {{profile_card}}
+    <p class="pull-quote" style="margin-top:24px;">{{profile_narrative}}</p>
+  </section>
+
+  <section>
+    <p style="font-style:italic; font-size:20px; line-height:1.5;">{{closing_line}}</p>
+  </section>
+
+  <div class="footer">tokenbar-report · {{event_count}} events · {{distinct_projects}} projects · {{distinct_models}} models · {{distinct_agents}} agents</div>
+</div>
+</body>
+</html>

@@ -67,9 +67,6 @@ public struct ClaudeUsageEventSource: InspectableUsageEventSource, ResourceBudge
                         updatedAt: incremental.nextWatermark.updatedAt
                     )
                 )
-                if let resourceThrottle {
-                    await resourceThrottle.rest(afterActive: 0.001)
-                }
                 continue
             }
 

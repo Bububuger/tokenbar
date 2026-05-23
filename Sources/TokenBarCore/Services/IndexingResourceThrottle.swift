@@ -9,8 +9,14 @@ public struct IndexingResourceBudget: Sendable, Hashable {
 
     public static let backgroundCPUPercent: Double = 3
     public static let initialIndexCPUPercent: Double = 20
+    public static let bootstrapCatchupCPUPercent: Double = 50
     public static let background = IndexingResourceBudget(cpuPercent: backgroundCPUPercent)
     public static let initialIndex = IndexingResourceBudget(cpuPercent: initialIndexCPUPercent)
+    /// User-visible launch path: app just opened, popover may be in front of
+    /// the user, and `bootstrap-background` has to walk every known source
+    /// file to confirm watermarks. Run at a much higher CPU budget than
+    /// `.background` so this completes in seconds, not minutes.
+    public static let bootstrapCatchup = IndexingResourceBudget(cpuPercent: bootstrapCatchupCPUPercent)
 
     var activeRatio: Double {
         cpuPercent / 100

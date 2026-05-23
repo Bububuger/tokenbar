@@ -2147,7 +2147,9 @@ final class TokenBarRuntimeModel: ObservableObject {
             return IndexingResourceThrottle(budget: .initialIndex)
         }
         switch trigger {
-        case "bootstrap-background", "reparse-all", "file-change":
+        case "bootstrap-background":
+            return IndexingResourceThrottle(budget: .bootstrapCatchup)
+        case "reparse-all", "file-change":
             return IndexingResourceThrottle(budget: .background)
         default:
             return nil

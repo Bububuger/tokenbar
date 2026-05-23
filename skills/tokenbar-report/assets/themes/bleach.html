@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>{{title}} · 死神档案</title>
+<style>
+  :root {
+    --paper:#fff8eb; --ink:#0a0a14; --indigo:#1a1a2a;
+    --silver:#c0c0c0; --bone:#e8e2d2; --blood:#a40e1c;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:0;
+    background: var(--paper);
+    background-image:
+      radial-gradient(circle at 0 0, rgba(26,26,42,.10) 0, transparent 60%),
+      radial-gradient(circle at 100% 100%, rgba(164,14,28,.06) 0, transparent 60%);
+    color:var(--ink);
+    font-family:"STKaiti","Hiragino Mincho ProN","Songti SC","Times New Roman",serif;
+    line-height:1.6;
+  }
+  .wrap { max-width:1040px; margin:0 auto; padding:48px 32px 96px; }
+  .nav { text-align:right; margin-bottom:18px; }
+  .nav a { color:var(--indigo); font-size:11px; letter-spacing:.16em; text-decoration:none; text-transform:uppercase; border-bottom:1px solid var(--indigo); }
+
+  .badge {
+    display:inline-block; padding:6px 14px;
+    background:var(--indigo); color:var(--bone);
+    border:2px solid var(--indigo);
+    font-family:"STKaiti","Hiragino Mincho ProN",serif;
+    font-size:12px; letter-spacing:.24em; font-weight:900;
+    text-transform:uppercase;
+  }
+  h1 {
+    font-size:80px; line-height:.92; letter-spacing:-0.02em;
+    margin:14px 0 4px; font-weight:900;
+    color:var(--indigo);
+    text-shadow: 3px 3px 0 var(--silver), 6px 6px 0 var(--ink);
+  }
+  .sub { font-size:22px; margin:24px 0 8px; font-weight:700; max-width:760px; }
+  .meta { font-size:12px; letter-spacing:.14em; text-transform:uppercase; opacity:.75; margin-bottom:36px; border-top:2px solid var(--ink); border-bottom:1px solid var(--ink); padding:8px 0; }
+
+  .signature-stage {
+    margin:24px 0 36px; padding:0;
+    border:3px solid var(--ink); box-shadow:8px 8px 0 var(--blood);
+    background:#fff;
+  }
+  .signature-stage svg { display:block; margin:0 auto; max-width:640px; }
+
+  section {
+    margin:0 0 36px;
+    background:#fff;
+    border:3px solid var(--ink);
+    border-radius:0;
+    padding:28px 32px;
+    box-shadow:8px 8px 0 var(--indigo);
+    position:relative;
+  }
+  section::before {
+    content: attr(data-rank);
+    position:absolute; top:-22px; left:-22px;
+    background:var(--silver); color:var(--ink);
+    width:44px; height:44px;
+    display:flex; align-items:center; justify-content:center;
+    border:3px solid var(--ink);
+    font-family:"STKaiti","Hiragino Mincho ProN",serif;
+    font-size:24px; font-weight:900;
+    transform:rotate(-6deg);
+  }
+  h2 {
+    margin:0 0 16px; font-size:18px; letter-spacing:.18em; text-transform:uppercase;
+    color:var(--indigo); border-bottom:2px solid var(--ink); padding-bottom:6px;
+    font-family:"STKaiti",serif; font-weight:900;
+  }
+
+  .stat-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:14px; }
+  .stat { padding:18px; border:2px solid var(--ink); background:var(--bone); text-align:center; }
+  .stat .n { font-family:"STKaiti",serif; font-size:36px; font-weight:900; color:var(--indigo); }
+  .stat .l { font-size:11px; letter-spacing:.16em; text-transform:uppercase; opacity:.7; }
+
+  .speech { padding:12px 14px; border-left:4px solid var(--indigo); background:var(--bone); font-size:15px; margin-top:14px; }
+
+  .identity-card { padding:18px 22px; background:var(--bone); border:2px dashed var(--ink); font-size:15px; line-height:1.85; }
+  .identity-card-head { font-family:"STKaiti",serif; font-size:11px; letter-spacing:.24em; text-transform:uppercase; opacity:.6; margin-bottom:10px; }
+
+  /* REIATSU STATS (reusing JOJO radar) */
+  .composite-banner { font-family:"STKaiti",serif; font-size:14px; letter-spacing:.24em; margin-bottom:12px; color:var(--ink); }
+  .composite-grade { display:inline-block; padding:2px 10px; margin-left:8px; background:var(--indigo); color:var(--silver); font-size:18px; }
+  .composite-A { background:var(--blood); }
+  .composite-B { background:var(--indigo); }
+  .composite-C { background:#3d3d3d; }
+  .composite-D { background:#666; }
+  .composite-E { background:#999; }
+  .stand-stats-grid { display:grid; grid-template-columns:480px 1fr; gap:24px; align-items:start; }
+  @media (max-width:880px) { .stand-stats-grid { grid-template-columns:1fr; } }
+  .stand-radar-wrap { display:flex; justify-content:center; }
+  .stand-radar .ring { fill:none; stroke:var(--ink); stroke-opacity:.18; stroke-width:1; }
+  .stand-radar .ring-A { stroke-opacity:.35; }
+  .stand-radar .spoke { stroke:var(--ink); stroke-opacity:.18; stroke-width:1; }
+  .stand-radar .stat-polygon { fill:var(--indigo); fill-opacity:.18; stroke:var(--indigo); stroke-width:2.5; }
+  .stand-radar .stat-vertex { fill:var(--silver); stroke:var(--ink); stroke-width:1.5; }
+  .stand-radar .axis-cn { font-family:"STKaiti","Hiragino Mincho ProN",serif; font-size:14px; font-weight:800; fill:var(--ink); }
+  .stand-radar .axis-en { font-family:Impact,"Bebas Neue",sans-serif; font-size:10px; letter-spacing:.1em; fill:var(--indigo); }
+  .stand-radar .ring-label { font-family:Impact,"Bebas Neue",sans-serif; font-size:9px; fill:var(--ink); opacity:.4; }
+
+  .stand-axes-list { display:grid; gap:8px; }
+  .stand-axis { padding:10px 14px; border:2px solid var(--ink); background:var(--bone); }
+  .stand-axis-head { display:flex; align-items:baseline; gap:10px; margin-bottom:4px; }
+  .stand-axis-cn { font-size:14px; font-weight:900; }
+  .stand-axis-en { font-family:Impact,"Bebas Neue",sans-serif; font-size:10px; letter-spacing:.1em; color:var(--indigo); }
+  .stand-axis-grade { margin-left:auto; font-family:Impact,"Bebas Neue",sans-serif; font-size:20px; font-weight:900; color:var(--silver); background:var(--ink); padding:0 8px; }
+  .stand-grade-A .stand-axis-grade { background:var(--blood); color:var(--bone); }
+  .stand-grade-B .stand-axis-grade { background:var(--indigo); color:var(--silver); }
+  .stand-grade-E .stand-axis-grade { background:#999; color:#fff; }
+  .stand-axis-primary { font-size:12px; line-height:1.45; }
+
+  /* PSYCHE (内界) */
+  .psyche-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
+  .psyche-card { padding:14px 16px; border:2px solid var(--ink); background:var(--bone); position:relative; }
+  .psyche-trait { font-size:14px; font-weight:900; color:var(--indigo); margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid var(--ink); }
+  .psyche-clinical { font-size:13px; line-height:1.6; margin-bottom:6px; }
+  .psyche-dark { font-size:13px; line-height:1.6; color:var(--blood); font-style:italic; padding-top:6px; border-top:1px dashed var(--ink); }
+
+  /* ZANPAKUTO CARD */
+  .stand-card { padding:24px 28px; background:var(--indigo); color:var(--silver); border:3px solid var(--silver); position:relative; overflow:hidden; }
+  .stand-card::after {
+    content:""; position:absolute; inset:0;
+    background-image: radial-gradient(circle, var(--silver) 1px, transparent 1.2px);
+    background-size: 10px 10px;
+    opacity:.06; pointer-events:none;
+  }
+  .stand-card-label { font-family:"STKaiti",serif; font-size:11px; letter-spacing:.32em; color:var(--bone); opacity:.6; }
+  .stand-card-name { font-family:"STKaiti","Hiragino Mincho ProN",serif; font-size:38px; line-height:1.05; font-weight:900; margin:8px 0 6px; color:var(--silver); }
+  .stand-card-type { font-size:13px; letter-spacing:.08em; opacity:.85; margin-bottom:18px; }
+  .stand-card-cry { margin-top:10px; padding:8px 12px; background:rgba(192,192,192,.08); border-left:3px solid var(--silver); font-family:"STKaiti",serif; font-style:italic; font-size:16px; color:var(--bone); }
+  .stand-card-cry .cry-label { font-weight:900; color:var(--silver); margin-right:8px; }
+  .stand-card-verdict { margin-top:18px; padding-top:18px; border-top:1px solid var(--silver); font-size:17px; font-weight:700; line-height:1.5; color:var(--bone); font-style:italic; }
+
+  .footer { margin-top:48px; padding-top:24px; border-top:2px solid var(--ink); font-size:11px; letter-spacing:.14em; text-transform:uppercase; opacity:.6; text-align:center; }
+  .closing { font-family:"STKaiti","Hiragino Mincho ProN",serif; font-size:20px; font-style:italic; margin-bottom:14px; color:var(--indigo); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="nav"><a href="index.html">← INDEX</a></div>
+
+  <span class="badge">#02 · 死神 · {{personality_tag}}</span>
+  <h1>{{title}}</h1>
+  <p class="sub">{{hero_subtitle}}</p>
+  <div class="meta">{{date_range_start}} → {{date_range_end}} · {{date_range_days}} 天 · {{event_count}} events</div>
+
+  <div class="signature-stage">{{signature_visual}}</div>
+
+  <section data-rank="00">
+    <h2>Hero · 灵压基础</h2>
+    <div class="stat-grid">
+      <div class="stat"><div class="n">{{total_tokens}}</div><div class="l">灵压总量</div></div>
+      <div class="stat"><div class="n">{{total_prompts}}</div><div class="l">斩击数</div></div>
+      <div class="stat"><div class="n">{{total_cost_usd}}</div><div class="l">任务俸禄</div></div>
+    </div>
+    <div class="speech">{{narrative_open}}</div>
+  </section>
+
+  <section data-rank="01">
+    <h2>护廷十三队档案 · DOSSIER</h2>
+    <div class="identity-card">
+      <div class="identity-card-head">護廷十三隊 隊員档案</div>
+      {{identity_card}}
+    </div>
+  </section>
+
+  <section data-rank="02">
+    <h2>灵压六维 · REIATSU STATS</h2>
+    <p style="margin:0 0 14px; font-size:14px;">{{reiatsu_stats_intro}}</p>
+    {{reiatsu_stats}}
+  </section>
+
+  <section data-rank="03">
+    <h2>内界 · 心相画像</h2>
+    <p style="margin:0 0 14px; font-size:14px;">{{psyche_breakdown_intro}}</p>
+    {{psyche_breakdown}}
+  </section>
+
+  <section data-rank="04">
+    <h2>斩魄刀継承 · ZANPAKUTO</h2>
+    <p style="margin:0 0 14px; font-size:14px;">{{zanpakuto_card_intro}}</p>
+    {{zanpakuto_card}}
+  </section>
+
+  <div class="footer">
+    <div class="closing">{{closing_line}}</div>
+    <div>· tokenbar-report · 護廷十三隊 · {{override_count}} pricing override(s), {{default_models_count}} default-rate models ·</div>
+  </div>
+</div>
+</body>
+</html>

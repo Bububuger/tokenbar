@@ -5,21 +5,24 @@
       "id": 1,
       "name": "all-time-chinese",
       "prompt": "帮我做个 token 年度报告",
-      "expected_output": "Folder at ~/Desktop/tokenbar-report-YYYY-MM-DD/ containing index.html (interactive card-draw landing) + 6 themed persona HTML files + data.json. Narrative in Chinese. Window covers full TokenBar data range (all-time).",
+      "expected_output": "Folder at ~/Desktop/tokenbar-report-YYYY-MM-DD/ containing index.html (interactive card-draw landing) + 6 themed persona HTML files (01-xiuxian through 06-jojo) + data.json. Narrative in Chinese. Window covers full TokenBar data range (all-time).",
       "files": [],
       "assertions": [
         { "text": "output folder exists under ~/Desktop matching tokenbar-report-* pattern" },
-        { "text": "exactly 6 persona HTML files (01-comic.html through 06-jojo.html) present" },
+        { "text": "exactly 6 persona HTML files present (01-xiuxian.html, 02-wuxia.html, 03-santi.html, 04-shuihu.html, 05-talk.html, 06-jojo.html)" },
         { "text": "index.html present, contains card-draw JS (a 'drawBtn' element), and links to all 6 persona files" },
-        { "text": "06-jojo.html contains the SVG radar (class 'stand-radar'), psyche-card blocks, and stand-card block" },
+        { "text": "06-jojo.html contains the SVG radar (class 'stand-radar'), psyche-card blocks, stand-card block, and a stand-card-cry block" },
+        { "text": "06-jojo.html persona badge reads 'JOJO' (not '人性透视' from v4) — grep for the badge contents" },
+        { "text": "06-jojo.html stand-card-name is one of the S-tier whitelist entries (e.g. ザ・ワールド / スタープラチナ / クレイジー・ダイヤモンド / ゴールド・エクスペリエンス / キング・クリムゾン / メイド・イン・ヘブン / タスク / D4C / キラークイーン / etc.). NEVER an invented name like 'BLACKOUT MIDNIGHT'." },
         { "text": "data.json present, parses as JSON, has cost.totalUSD > 0 and dataWindow.eventCount > 0" },
-        { "text": "every persona HTML opens in a browser without console errors; terminal contains the heatmap <svg> and jojo contains the stand-radar <svg>" },
+        { "text": "every persona HTML opens in a browser without console errors" },
         { "text": "no leftover '{{placeholder}}' tokens anywhere in any rendered HTML" },
         { "text": "narrative text in every persona is in Chinese (matching the prompt's language)" },
         { "text": "the 6 persona themes are visually distinct — at minimum, their <style> blocks differ by > 60% content hash" },
-        { "text": "the same personality_tag appears in every persona HTML (shared synthesis, different voices)" },
-        { "text": "the time window in the report matches the TokenBar database's earliest..latest range" },
-        { "text": "lens isolation: brutalist HTML does not contain σ or p99; essay HTML does not contain HHI; comic HTML does not contain stale-debt; jojo HTML is the only one with grade letters A/B/C/D/E in axis tiles" }
+        { "text": "no shared 'profile-card' dossier section exists in any persona HTML — v5 killed the shared dossier (search for 'profile-card' class should miss in all 6 files)" },
+        { "text": "each persona renders its own题材化 identity_card section: xiuxian uses 境界/灵气 language; wuxia uses 门派/内功 language; santi uses 文明/智子 language; shuihu uses 108/绰号 language; talk uses 段子/开场 language; jojo uses 替身/dossier language" },
+        { "text": "lens isolation: xiuxian must not mention 替身/A-E/智子/108/段子/门派; wuxia must not mention 替身/境界/智子/108/段子; santi must not mention 替身/境界/门派/108/段子; shuihu must not mention 替身/境界/智子/门派/段子; talk must not mention 替身/境界/智子/门派/108; jojo must not mention 境界/灵气/门派/智子/108/段子" },
+        { "text": "CRITICAL: max pairwise content overlap across the 6 rendered persona HTML files (narrative text only, ignoring <style> + <script> + chrome) must be STRICTLY LESS THAN 0.30 (30%) measured via scripts/measure_overlap.py — this is the v5 hard requirement that motivated the redesign" }
       ]
     },
     {
@@ -30,11 +33,12 @@
       "files": [],
       "assertions": [
         { "text": "output folder exists under ~/Desktop matching tokenbar-report-* pattern" },
-        { "text": "exactly 6 persona HTML files + index.html present" },
+        { "text": "exactly 6 persona HTML files (01-xiuxian, 02-wuxia, 03-santi, 04-shuihu, 05-talk, 06-jojo) + index.html present" },
         { "text": "date_range_days in the report equals 30 (±1)" },
         { "text": "total_tokens in the report is strictly less than the all-time figure" },
         { "text": "before generation, the assistant confirmed the time window with the user OR explicitly stated the inferred window" },
-        { "text": "narrative is in Chinese with informal register (matches the user's casual phrasing)" }
+        { "text": "narrative is in Chinese with informal register (matches the user's casual phrasing)" },
+        { "text": "max pairwise overlap < 0.30 (measure_overlap.py)" }
       ]
     },
     {
@@ -46,10 +50,10 @@
       "assertions": [
         { "text": "output folder exists under ~/Desktop matching tokenbar-report-* pattern" },
         { "text": "exactly 6 persona HTML files + index.html present" },
-        { "text": "narrative text in every persona is in English (matching the prompt's language)" },
+        { "text": "narrative text in every persona is in English (matching the prompt's language). 题材-specific noun tags (修仙 → 'Cultivation', 武侠 → 'Wuxia Chronicle', 三体 → 'Dark Forest', 水浒 → 'Outlaws of the Marsh', 脱口秀 → 'Stand-up Special', JOJO → 'JOJO') may stay; the narrative prose around them must be English." },
         { "text": "date_range_days is between 80 and 100 (i.e. roughly a quarter)" },
-        { "text": "no Chinese characters appear in the narrative fields of any persona (the visual chrome may still contain '#04' etc., but the persona blurbs must be English)" },
-        { "text": "the ft (Financial Times) persona uses ROI / quarterly framing in the narrative" }
+        { "text": "the talk persona uses English stand-up cadence (pauses marked by (beat) or similar)" },
+        { "text": "max pairwise overlap < 0.30 (measure_overlap.py)" }
       ]
     }
   ]

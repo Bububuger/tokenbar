@@ -1,6 +1,6 @@
 ---
 name: tokenbar-report
-description: Generate a Spotify-Wrapped-style multi-persona HTML report summarizing the user's TokenBar / `tbar` AI usage data. Use this skill whenever the user asks for a token usage report, annual recap, "year-in-review" of their AI coding, a personal AI portrait, prompt analysis, agent usage breakdown, or any phrasing along the lines of "tbar wrapped", "tokenbar 报告", "做个年度总结", "看看我都用 AI 干了什么", "I used Claude/Codex a lot — summarize my usage". Trigger even when the user mentions only "token report", "show me my usage", "做个我的 prompt 画像", or anything that wants a presentable HTML view over their TokenBar data. The skill produces one folder on the Desktop containing six HTML reports — one per narrative persona (humorous, brutally honest, data nerd, philosophical, financial-analyst, JoJo-style psyche x-ray with prompt-content quotes) — each paired with a uniquely styled visual theme, plus an interactive card-draw landing `index.html` that randomizes the deck order on every load. Do not invoke for live "what's my token count right now" queries — that is `tbar` itself, not this skill.
+description: Generate a Spotify-Wrapped-style multi-persona HTML report summarizing the user's TokenBar / `tbar` AI usage data. Use this skill whenever the user asks for a token usage report, annual recap, "year-in-review" of their AI coding, a personal AI portrait, prompt analysis, agent usage breakdown, or any phrasing along the lines of "tbar wrapped", "tokenbar 报告", "做个年度总结", "看看我都用 AI 干了什么", "I used Claude/Codex a lot — summarize my usage". Trigger even when the user mentions only "token report", "show me my usage", "做个我的 prompt 画像", or anything that wants a presentable HTML view over their TokenBar data. The skill produces one folder on the Desktop containing six HTML reports — one per narrative persona (修仙/Cultivation, 武侠/Wuxia Chronicle, 三体/Dark Forest, 水浒/108 Outlaws, 脱口秀/Stand-up Special, JOJO/Stand-stats psyche x-ray with prompt-content quotes) — each paired with a uniquely styled visual theme, plus an interactive card-draw landing `index.html` that randomizes the deck order on every load. Do not invoke for live "what's my token count right now" queries — that is `tbar` itself, not this skill.
 ---
 
 # tokenbar-report — what this skill does
@@ -12,9 +12,9 @@ Run end-to-end, the skill produces a folder at
   user clicks "DRAW" (or any card / "RESHUFFLE"), a card flips, and the page
   navigates to the chosen persona. The deck shuffles on every load — each
   refresh feels different.
-- `01-comic.html` … `06-jojo.html` — six HTML reports, one per persona, each
-  in its own visual style (Wrapped-comic, brutalist, terminal, essay,
-  Financial Times, JoJo manga-panel)
+- `01-xiuxian.html` … `06-jojo.html` — six HTML reports, one per persona,
+  each in its own visual style (修仙 scroll, 武侠 dark chronicle, 三体 sci-fi
+  archive, 水浒 woodblock banner, 脱口秀 stand-up stage, JOJO manga panel)
 - `data.json` — the aggregated source payload (for debugging / future
   re-renders)
 
@@ -23,21 +23,26 @@ each persona has 2-3 metrics it owns exclusively and a vocabulary the others
 are forbidden to touch. The goal is six genuinely different reads of the
 same dataset, not six wrappers around the same observation.
 
-## The 6 personas at a glance
+## The 6 personas at a glance (v5)
 
-| Idx | Key | Chinese | Lens (what *only* this persona sees) |
+| Idx | Key | 显示名 | Lens (what *only* this persona sees) |
 |---|---|---|---|
-| 01 | `comic`     | 幽默风趣 | Pop-culture conversions, hall of shame (silly questions), trivia |
-| 02 | `brutalist` | 忠言逆耳 | Stale-debt ledger, dependence ratings, repeat-offender verdicts |
-| 03 | `terminal`  | 数据极客 | p50/p90/p99/σ, 7×24 heatmap, |z| ≥ 3 anomaly log |
-| 04 | `essay`     | 哲学反思 | Inactive days, abandoned projects, "unread conversation" long prompts |
-| 05 | `ft`        | 财经评论员 | Capital allocation, HHI concentration, monthly P&L |
-| 06 | `jojo`      | 人性透视 | **6-axis A-E stand stats**, psyche traits with **quoted prompt fragments**, stand-name + fatalistic verdict |
+| 01 | `xiuxian` | 修仙   | 境界 / 灵气 / 渡劫 / 周天循环 / 心魔劫 |
+| 02 | `wuxia`   | 武侠   | 门派 / 内功 / 招式谱 / 闭关 / 江湖事件簿 |
+| 03 | `santi`   | 三体   | Kardashev 文明等级 / 黑暗森林暴露与隐匿 / 思想钢印 |
+| 04 | `shuihu`  | 水浒   | 108 排座次 (天罡正/副/地煞) / 绰号 / 聚义厅大事记 |
+| 05 | `talk`    | 脱口秀 | 开场白 / callback 梗 / 翻车现场 |
+| 06 | `jojo`    | JOJO   | **6-axis A-E stand stats**, psyche traits with **quoted prompt fragments**, **真实 JOJO S-tier 替身白名单 + stand cry + 宿命断言** |
 
 `references/personas.md` is the human-readable overview.
 `references/personas/_contract.md` is the **shared contract** every subagent
 must load. `references/personas/<key>.md` is the per-persona spec — number
 whitelist, vocabulary blacklist, and the structure of the 3 signature sections.
+
+**v5 lens-isolation gate**: after rendering, run
+`scripts/measure_overlap.py <output_dir>` and verify max pairwise overlap is
+strictly < **0.30** (Jaccard on 3-char n-grams, chrome stripped). Lower than
+30% is the v5 hard requirement.
 
 # Workflow
 
@@ -143,12 +148,17 @@ Chinese label or 1-3 word English label. Examples in
 `references/dimensions.md §15`. You may invent a new label if none fit —
 keep it pithy and self-consistent across all six personas.
 
-## Step 5b — derive the **deep personality profile**
+## Step 5b — derive the **deep personality profile** (raw data only)
 
-The short tag is the headline; the **profile** is the dossier under it. It
-is rendered identically across all six reports (each persona only adds a
-1-2 sentence `profile_narrative` blurb in its own voice). Spec lives in
-`references/dimensions.md §16`. Short version:
+The short tag is the headline; the **profile** is the raw data each persona
+uses to author its own `identity_card` narrative. v5 killed the shared
+`profile_card` HTML slot —— each persona renders this data in its own
+题材 language (修仙 writes "道友自……入道", 武侠 writes "江湖人称……",
+三体 writes "档案 #PDC-……", 水浒 writes "梁山泊水寨头领档案……",
+talk writes "大家好，我叫……", JOJO writes "「ザ・ワールド」型替身使者
+档案……").
+
+Spec lives in `references/dimensions.md §16`. Short version:
 
 ```jsonc
 "personality_profile": {
@@ -181,10 +191,15 @@ scripts/compute_python_derived.py < /tmp/payload.json > /tmp/python_derived.json
 ```
 
 Each persona has its own pre-computed bundle inside this file. Subagents
-read `python_derived.<key>` for their lens-specific data. The `jojo` bundle
-includes the 6-axis stand-stats grades, prompt-content intel
-(verb frequencies, near-duplicate clusters, ultra-long prompt excerpts),
-and behavioral extremes — none of which are available to the other 5.
+read `python_derived.<key>` for their lens-specific data.
+
+Bundle contents per persona:
+- `xiuxian` — 境界 ladder placement, peak/valley 时辰, tribulation outlier days
+- `wuxia`   — schools ranked by 内功, verb-cluster move signals, big-day chronicle
+- `santi`   — Kardashev civ-type, exposed/concealed coordinates, seal signals
+- `shuihu`  — combined 108-rank list (project+model+agent), big-event days
+- `talk`    — bombing list (abandoned projects), callback signals, near-dup clusters
+- `jojo`    — 6-axis stand-stats grades, prompt intel (verb freq / near-dup / quoted excerpts / session stats), behavioral extremes, AND a `stand_suggestion` (pre-picked from the S-tier whitelist matching composite_rank + axis distribution)
 
 ## Step 6 — build the shared bundle
 
@@ -200,7 +215,7 @@ and behavioral extremes — none of which are available to the other 5.
 
 ## Step 7 — dispatch SIX persona subagents in PARALLEL
 
-**The architectural heart of v4.** Each persona reads the data from its own
+**The architectural heart of v5.** Each persona reads the data from its own
 lens AND is **constrained by a number/vocabulary contract** so the reports
 don't bleed into each other. The contract files are at:
 
@@ -209,6 +224,8 @@ don't bleed into each other. The contract files are at:
 
 Use the Agent tool with `subagent_type: "claude"` for each persona. Launch
 all six in a single message (parallel) with `run_in_background: true`.
+
+The six persona keys are: `xiuxian`, `wuxia`, `santi`, `shuihu`, `talk`, `jojo`.
 
 Each subagent prompt should be self-contained:
 
@@ -235,12 +252,17 @@ Your job (per the contract):
   3. Read /tmp/shared.json.python_derived["{{persona-key}}"] for the
      Python-side base data.
   4. Do the LLM-side analyses your spec calls for — for jojo this includes
-     reading payload.prompts[] directly to quote actual content; for essay
-     it includes selecting evocative inactive dates; etc.
+     reading payload.prompts[] directly to quote actual content + picking a
+     stand from the S-tier whitelist; for talk it includes authoring the
+     stand-up opening bit with pause markers; for the rest it includes
+     framing payload data in the persona's own题材 vocabulary.
   5. Author the universal narrative fields (title, hero_subtitle,
-     narrative_open, profile_narrative, <section>_intro, closing_line) AND
+     narrative_open, identity_card, <section>_intro, closing_line) AND
      the 3 signature-section data structures your spec defines.
-  6. Emit ONE JSON file at: /tmp/tokenbar-report-personas/{{persona-key}}.json
+  6. **题材化身世**: author the `identity_card` field as 80-200 chars of pure
+     题材 narrative. NEVER copy `personality_profile` raw field names
+     (mastery: senior). Translate every field into your 题材 vocabulary.
+  7. Emit ONE JSON file at: /tmp/tokenbar-report-personas/{{persona-key}}.json
 
 Output shape (strict):
   {
@@ -251,8 +273,8 @@ Output shape (strict):
 
 Constraints:
   - Language: match the user's prompt language ({{detected-language}}).
-  - Stay in your lens. If your contract says "no σ", do not write σ even if
-    Python gives you the distribution stats — that's terminal's.
+  - Stay in your lens. If your contract says you can't say 境界, do not
+    write it even if Python gives you a 境界 ladder — that's xiuxian's.
   - Never write {{placeholder}} syntax in any field. The renderer only
     substitutes inside the *template* HTML, not in narrative strings.
   - Cite real numbers from the payload. Generic claims fail the quality bar.
@@ -273,7 +295,7 @@ python3 -c "
 import json, pathlib
 shared = json.load(open('/tmp/shared.json'))
 narratives = {'_shared': shared}
-for k in ['comic','brutalist','terminal','essay','ft','jojo']:
+for k in ['xiuxian','wuxia','santi','shuihu','talk','jojo']:
     p = pathlib.Path(f'/tmp/tokenbar-report-personas/{k}.json')
     narratives[k] = json.loads(p.read_text()) if p.exists() else {}
 json.dump(narratives, open('/tmp/narratives.json', 'w'), indent=2, ensure_ascii=False)
@@ -296,17 +318,40 @@ number of unmatched placeholders per file to stderr — anything non-zero
 means a subagent didn't fill a required field, or a theme references a
 placeholder no subagent emits.
 
+## Step 9 — VERIFY lens isolation (v5 hard gate)
+
+After rendering, run:
+
+```bash
+scripts/measure_overlap.py ~/Desktop/tokenbar-report-YYYY-MM-DD/
+```
+
+This computes pairwise Jaccard similarity between the 6 rendered HTML files
+(chrome stripped, 3-char n-grams) and prints a 6×6 matrix + the max pair.
+**Pass condition: max < 0.30.** If the script exits non-zero:
+
+1. Identify the offending pair (highest Jaccard).
+2. Re-read both persona spec files and inspect for vocabulary leak —
+   common cause is a persona borrowing another's owned phrase.
+3. Re-dispatch *those two* subagents with a stricter prompt that names
+   the specific shared phrases to avoid.
+4. Re-render + re-measure.
+
 ### Anti-patterns to avoid
 
 - **Don't merge personas' work into a single Claude pass**. The whole
-  premise of v3/v4 is that each persona sees the data differently. If you
-  write all 6 yourself, they collapse back to "same data, different wording".
+  premise is that each persona sees the data differently. If you write all
+  6 yourself, they collapse back to "same data, different wording".
 - **Don't skip subagent dispatch even when the user wants 'just one persona'**.
   Always emit all 6. The card-draw index makes browsing trivial.
-- **Don't let any persona violate its lens contract.** If essay starts
-  citing σ, kill it and re-dispatch.
+- **Don't let any persona violate its lens contract.** If wuxia starts
+  citing 境界 (xiuxian's word), kill it and re-dispatch.
 - **Don't write `{{placeholder}}` literally in any field.** The renderer
   substitutes only in the *template* HTML, not in narrative strings.
+- **For JOJO `stand_card`: NEVER invent a stand name.** Pick from the
+  S-tier whitelist in `references/personas/jojo.md §3`. The
+  `python_derived.jojo.stand_suggestion` already picks a default — the
+  subagent can override but must stay inside the whitelist.
 
 # What the skill does NOT do
 
@@ -322,14 +367,15 @@ placeholder no subagent emits.
 | Path | Purpose |
 |---|---|
 | `SKILL.md` | This file. Workflow + dispatch contract. |
-| `references/personas.md` | Overview of the 6 personas. |
-| `references/personas/_contract.md` | **Shared rules: number ownership, vocabulary blacklist, output shape.** |
-| `references/personas/<key>.md` | Per-persona lens spec (1 file per persona). |
+| `references/personas.md` | Overview of the 6 personas (v5). |
+| `references/personas/_contract.md` | **Shared rules: number ownership, vocabulary blacklist, output shape, identity_card spec.** |
+| `references/personas/<key>.md` | Per-persona lens spec — one each for xiuxian / wuxia / santi / shuihu / talk / jojo. |
 | `references/dimensions.md` | Each report dimension → tbar query + derivation algorithm. |
 | `scripts/collect.sh` | Parallel `tbar` queries + plist read → aggregated JSON. |
 | `scripts/apply_pricing.py` | Honor `tokenbar.pricingOverrides` for cost computation. |
-| `scripts/compute_python_derived.py` | Per-persona Python-side base data (including jojo's stand-stats + prompt intel). |
+| `scripts/compute_python_derived.py` | Per-persona Python-side base data (境界 / 门派 / 文明 / 108 / callback signals / jojo stand-stats + prompt intel + S-tier stand suggestion). |
 | `scripts/render.py` | Substitute placeholders, emit 6 HTML + interactive card-draw index. |
+| `scripts/measure_overlap.py` | **v5 lens-isolation gate.** Computes max pairwise Jaccard across the 6 rendered HTML files. Must be < 0.30. |
 | `assets/themes/<key>.html` | One template per persona. Paired with `references/personas/<key>.md`. |
 | `evals/evals.json` | Test prompts for skill-creator eval workflow. |
 
@@ -346,9 +392,14 @@ placeholder no subagent emits.
   `derive()` or remove the placeholder.
 - **A subagent wrote `{{xxx}}` literally** — those tokens appear in the
   rendered HTML. Re-edit the narratives JSON and re-render.
-- **A persona violates its contract (e.g., essay cites HHI)** — the contract
+- **A persona violates its contract (e.g., wuxia cites 境界)** — the contract
   failed silently. Re-dispatch *that one* subagent with a stricter prompt
-  that explicitly names the forbidden metric.
+  that explicitly names the forbidden metric / vocabulary.
+- **`measure_overlap.py` fails (max ≥ 0.30)** — identify the highest-Jaccard
+  pair, inspect both HTML files for vocabulary leak, re-dispatch the two
+  offending subagents with explicit forbid-list.
+- **JOJO stand_name not on whitelist** — re-dispatch jojo subagent with the
+  whitelist explicitly inlined. The whitelist is in `personas/jojo.md §3`.
 
 # When NOT to invoke this skill
 

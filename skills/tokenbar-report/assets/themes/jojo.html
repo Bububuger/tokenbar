@@ -23,7 +23,6 @@
   .nav { text-align:right; margin-bottom:18px; }
   .nav a { color:var(--purple); font-size:11px; letter-spacing:.16em; text-decoration:none; text-transform:uppercase; border-bottom:1px solid var(--purple); }
 
-  /* Halftone overlay strip (handmade) */
   .halftone {
     height:14px;
     background-image: radial-gradient(circle, var(--ink) 1.5px, transparent 1.6px);
@@ -83,27 +82,10 @@
 
   .speech { padding:12px 14px; border-left:4px solid var(--blood); background:var(--paper); font-size:15px; margin-top:14px; }
 
-  /* Profile dossier — restyled in jojo's clinical voice */
-  .profile-card { background:var(--paper); padding:16px 18px; border:2px dashed var(--ink); margin-bottom:8px; }
-  .profile-headline { display:flex; flex-wrap:wrap; gap:14px; align-items:center; margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--ink); }
-  .profile-chip { display:inline-flex; flex-direction:column; padding:6px 12px; background:#fff; border:2px solid var(--ink); border-radius:2px; min-width:96px; }
-  .chip-label { font-size:9px; letter-spacing:.16em; text-transform:uppercase; font-weight:800; opacity:.55; }
-  .chip-value { font-size:18px; font-weight:900; font-family:Impact,"Bebas Neue",sans-serif; line-height:1.1; text-transform:capitalize; }
-  .profile-confidence { font-size:11px; opacity:.55; margin-left:auto; font-style:italic; }
-  .profile-section-head { font-size:11px; letter-spacing:.18em; text-transform:uppercase; font-weight:900; opacity:.7; margin:14px 0 8px; }
-  .profile-axes { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:10px; }
-  .profile-axis { padding:8px 10px; background:#fff; border:2px solid var(--ink); text-align:center; }
-  .axis-name { font-size:9px; letter-spacing:.1em; text-transform:uppercase; opacity:.6; }
-  .axis-value { font-size:13px; font-weight:900; margin-top:3px; text-transform:capitalize; }
-  .profile-evidence { margin:6px 0 0; padding-left:18px; font-size:12px; line-height:1.55; opacity:.85; }
-  .profile-evidence li { margin-bottom:3px; }
-  .profile-trait-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:8px; }
-  .profile-trait { padding:8px 12px; background:#fff; border:2px solid var(--ink); }
-  .trait-name { font-size:13px; font-weight:900; }
-  .trait-evidence { font-size:11px; opacity:.7; margin-top:3px; line-height:1.4; }
-  .profile-quirk-list { padding-left:18px; font-size:12px; line-height:1.55; }
+  .identity-card { padding:18px 22px; background:var(--paper); border:2px dashed var(--ink); font-size:15px; line-height:1.75; }
+  .identity-card-head { font-family:Impact,"Bebas Neue",sans-serif; font-size:11px; letter-spacing:.24em; text-transform:uppercase; opacity:.6; margin-bottom:10px; }
 
-  /* Section 1: STAND STATS radar */
+  /* STAND STATS radar */
   .composite-banner { font-family:Impact,"Bebas Neue",sans-serif; font-size:14px; letter-spacing:.24em; margin-bottom:12px; color:var(--ink); }
   .composite-grade { display:inline-block; padding:2px 10px; margin-left:8px; background:var(--purple); color:var(--gold); font-size:18px; }
   .composite-A { background:var(--blood); }
@@ -136,7 +118,7 @@
   .stand-axis-secondary { font-size:11px; opacity:.7; margin-top:2px; }
   .stand-axis-verdict { font-size:13px; margin-top:6px; padding-top:6px; border-top:1px dashed var(--ink); font-style:italic; }
 
-  /* Section 2: PSYCHE BREAKDOWN */
+  /* PSYCHE BREAKDOWN */
   .psyche-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
   .psyche-card { padding:14px 16px; border:2px solid var(--ink); background:var(--paper); position:relative; }
   .psyche-card::before { content:"#"; position:absolute; top:6px; right:10px; font-family:Impact,"Bebas Neue",sans-serif; font-size:24px; color:var(--gold); opacity:.5; }
@@ -146,7 +128,7 @@
   .psyche-clinical { font-size:12px; line-height:1.5; margin-bottom:6px; }
   .psyche-dark { font-size:12px; line-height:1.5; color:var(--blood); font-style:italic; padding-top:6px; border-top:1px dashed var(--ink); }
 
-  /* Section 3: STAND CARD */
+  /* STAND CARD */
   .stand-card { padding:24px 28px; background:var(--steel); color:var(--gold); border:3px solid var(--gold); position:relative; overflow:hidden; }
   .stand-card::after {
     content:""; position:absolute; inset:0;
@@ -158,10 +140,17 @@
   .stand-card-name { font-family:Impact,"Bebas Neue",sans-serif; font-size:44px; line-height:1.05; font-weight:900; margin:8px 0 6px; color:var(--gold); }
   .stand-card-type { font-size:13px; letter-spacing:.08em; opacity:.85; margin-bottom:18px; }
   .stand-card-master { font-family:Impact,"Bebas Neue",sans-serif; font-size:11px; letter-spacing:.18em; opacity:.6; }
+  .stand-card-cry { margin-top:14px; padding:10px 12px; background:rgba(212,175,55,.08); border:1px dashed var(--gold); font-family:"Hiragino Mincho ProN","Songti SC",serif; font-style:italic; font-size:18px; color:var(--paper); }
   .stand-card-verdict { margin-top:18px; padding-top:18px; border-top:1px solid var(--gold); font-size:18px; font-weight:700; line-height:1.45; color:var(--paper); font-style:italic; }
 
   .footer { margin-top:48px; padding-top:24px; border-top:2px solid var(--ink); font-size:11px; letter-spacing:.14em; text-transform:uppercase; opacity:.6; text-align:center; }
   .closing { font-family:"Hiragino Mincho ProN","Songti SC",serif; font-size:20px; font-style:italic; margin-bottom:14px; color:var(--purple); }
+  .signature-stage {
+    margin:24px 0 36px; padding:0;
+    border:3px solid var(--ink); box-shadow:8px 8px 0 var(--blood);
+    background:#fff;
+  }
+  .signature-stage svg { display:block; margin:0 auto; max-width:640px; }
 </style>
 </head>
 <body>
@@ -169,10 +158,12 @@
   <div class="nav"><a href="index.html">← INDEX</a></div>
   <div class="halftone"></div>
 
-  <span class="badge">#06 · 人性透视 · {{personality_tag}}</span>
+  <span class="badge">#06 · JOJO · {{personality_tag}}</span>
   <h1>{{title}}</h1>
   <p class="sub">{{hero_subtitle}}</p>
   <div class="meta">{{date_range_start}} → {{date_range_end}} · {{date_range_days}} 天 · {{event_count}} events</div>
+
+  <div class="signature-stage">{{signature_visual}}</div>
 
   <section data-rank="00">
     <h2>Hero · 基础参数</h2>
@@ -185,9 +176,11 @@
   </section>
 
   <section data-rank="01">
-    <h2>人格档案 · Dossier</h2>
-    {{profile_card}}
-    <div class="speech">{{profile_narrative}}</div>
+    <h2>使用者档案 · STAND USER DOSSIER</h2>
+    <div class="identity-card">
+      <div class="identity-card-head">「ザ・ワールド」型替身使者档案</div>
+      {{identity_card}}
+    </div>
   </section>
 
   <section data-rank="02">

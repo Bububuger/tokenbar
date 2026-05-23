@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """render.py — turn the priced payload + per-persona narrative payloads into
-seven themed HTML reports plus an index landing page.
+six themed HTML reports plus an index landing page.
 
 CLI:
     render.py --payload aggregate.json --narratives narratives.json \\
               --output-dir ~/Desktop/tokenbar-report-YYYY-MM-DD/ \\
               --themes-dir <skill-dir>/assets/themes
 
+v5: personas are xiuxian / wuxia / santi / shuihu / talk / jojo. The
+shared "dossier" slot is gone — each persona owns its full 5-section
+structure, including a题材化的`identity_card`narrative authored by its
+subagent.
+
 `narratives.json` shape:
-    { "comic": { ...persona blurbs... }, "brutalist": {...}, ... }
+    { "xiuxian": { ...persona blurbs... }, "wuxia": {...}, ... }
 
 Every theme template file (assets/themes/<key>.html) contains `{{placeholder}}`
 tokens. The substitution is purely string-level — no logic, no escaping by
@@ -30,13 +35,11 @@ import sys
 from typing import Any, Dict, List, Tuple
 
 PERSONAS = [
-    ("comic",     "幽默风趣"),
-    ("brutalist", "忠言逆耳"),
-    ("terminal",  "数据极客"),
-    ("essay",     "哲学反思"),
-    ("ft",        "财经评论员"),
-    ("jojo",      "人性透视"),
+    ("jojo",    "JOJO"),
+    ("bleach",  "死神"),
+    ("hxh",     "猎人"),
 ]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Number formatting
@@ -89,62 +92,9 @@ def heaviest_day(daily: List[Dict[str, Any]]) -> Dict[str, Any]:
     return max(daily, key=lambda b: b.get("totalTokens", 0))
 
 
-def longest_day(day_hour_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    by_day: Dict[str, set] = collections.defaultdict(set)
-    tokens_by_day: Dict[str, int] = collections.defaultdict(int)
-    for r in day_hour_rows:
-        day = r.get("day")
-        hour = r.get("hour-of-day")
-        if day is None or hour is None:
-            continue
-        by_day[day].add(hour)
-        tokens_by_day[day] += r.get("totalTokens", 0)
-    if not by_day:
-        return {"day": "—", "hours": 0, "totalTokens": 0}
-    # max distinct hours; tie-break by tokens
-    best = max(by_day.items(), key=lambda kv: (len(kv[1]), tokens_by_day[kv[0]]))
-    return {"day": best[0], "hours": len(best[1]), "totalTokens": tokens_by_day[best[0]]}
-
-
-def hour_metrics(hourly: List[Dict[str, Any]]) -> Dict[str, Any]:
-    if not hourly:
-        return {"peak_label": "—", "peak_tokens": 0, "night_owl_pct": 0, "morning_pct": 0}
-    total = sum(b.get("totalTokens", 0) for b in hourly) or 1
-    peak = max(hourly, key=lambda b: b.get("totalTokens", 0))
-    night = sum(b.get("totalTokens", 0) for b in hourly if b.get("hourOfDay") in {23, 0, 1, 2, 3, 4})
-    morning = sum(b.get("totalTokens", 0) for b in hourly if b.get("hourOfDay") in {6, 7, 8, 9, 10})
-    return {
-        "peak_label": peak.get("label", "—"),
-        "peak_tokens": peak.get("totalTokens", 0),
-        "night_owl_pct": night / total * 100,
-        "morning_pct": morning / total * 100,
-    }
-
-
-def weekday_split(daily: List[Dict[str, Any]]) -> Tuple[float, float]:
-    """Returns (weekend_pct, weekday_pct)."""
-    weekend, weekday = 0, 0
-    for b in daily:
-        label = b.get("label")
-        if not label:
-            continue
-        try:
-            d = dt.date.fromisoformat(label)
-        except ValueError:
-            continue
-        if d.weekday() >= 5:
-            weekend += b.get("totalTokens", 0)
-        else:
-            weekday += b.get("totalTokens", 0)
-    total = weekend + weekday or 1
-    return weekend / total * 100, weekday / total * 100
-
-
 def streaks(daily: List[Dict[str, Any]]) -> Tuple[int, int]:
-    """Returns (longest, current)."""
     if not daily:
         return 0, 0
-    # Sort by date; an active day is totalTokens > 0.
     dates = sorted(
         ((dt.date.fromisoformat(b["label"]), b.get("totalTokens", 0)) for b in daily if "label" in b),
         key=lambda kv: kv[0],
@@ -166,7 +116,7 @@ def streaks(daily: List[Dict[str, Any]]) -> Tuple[int, int]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SVG rendering — class-driven, the theme CSS does the actual styling.
+# Shared SVG renderers (used by all personas, styling driven by theme CSS)
 
 def svg_daily_bars(daily: List[Dict[str, Any]], width: int = 720, height: int = 180) -> str:
     if not daily:
@@ -207,7 +157,6 @@ def svg_daily_bars(daily: List[Dict[str, Any]], width: int = 720, height: int = 
             f'<title>{d.isoformat()}: {compact_tokens(tok)} tokens</title></rect>'
         )
 
-    # Month tick labels under the bars.
     ticks = []
     seen_months = set()
     for i in range(span):
@@ -230,7 +179,6 @@ def svg_daily_bars(daily: List[Dict[str, Any]], width: int = 720, height: int = 
 
 
 def svg_hour_clock(hourly: List[Dict[str, Any]], size: int = 240) -> str:
-    """Radial 24-segment dial. The active arc per hour is sized by tokens."""
     cx = cy = size / 2
     outer = size / 2 - 8
     inner = outer * 0.36
@@ -267,7 +215,6 @@ def svg_hour_clock(hourly: List[Dict[str, Any]], size: int = 240) -> str:
             f'{compact_tokens(tok)} tokens</title></path>'
         )
 
-    # 12/24/6/18 numerals
     numerals = []
     for h, label in [(0, "00"), (6, "06"), (12, "12"), (18, "18")]:
         a = math.radians((h / 24) * 360 - 90)
@@ -287,49 +234,24 @@ def svg_hour_clock(hourly: List[Dict[str, Any]], size: int = 240) -> str:
     )
 
 
-def svg_cluster_bars(clusters: List[Dict[str, Any]], width: int = 480, row_h: int = 28) -> str:
-    if not clusters:
-        return ""
-    total = sum(c.get("count", 0) for c in clusters) or 1
-    height = row_h * len(clusters) + 12
-    bar_left = 140
-    bar_max = width - bar_left - 70
-    rows = []
-    peak = max((c.get("count", 0) for c in clusters), default=1) or 1
-    for i, c in enumerate(clusters):
-        y = 6 + i * row_h
-        share = c.get("count", 0) / total * 100
-        bar_w = (c.get("count", 0) / peak) * bar_max
-        rows.append(
-            f'<text class="cluster-label" x="0" y="{y + row_h * 0.65:.1f}">{html.escape(c.get("name","—"))}</text>'
-            f'<rect class="cluster-bar" x="{bar_left}" y="{y + row_h * 0.25:.1f}" '
-            f'width="{bar_w:.1f}" height="{row_h * 0.55:.1f}"></rect>'
-            f'<text class="cluster-pct" x="{width - 4}" y="{y + row_h * 0.65:.1f}" '
-            f'text-anchor="end">{share:.0f}%</text>'
-        )
-    return (
-        f'<svg class="chart cluster" viewBox="0 0 {width} {height}" width="100%" height="{height}">'
-        + "".join(rows)
-        + "</svg>"
-    )
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Static HTML chunk builders
+
+def _esc(s: Any) -> str:
+    return html.escape(str(s)) if s is not None else "—"
+
 
 def models_table_html(models: List[Dict[str, Any]], top_n: int = 8, total_tokens: int = 1) -> str:
     sorted_m = sorted(models, key=lambda m: m.get("totalTokens", 0), reverse=True)[:top_n]
     rows = []
     for m in sorted_m:
         share = pct(m.get("totalTokens", 0), total_tokens)
-        method = m.get("costMethod", "default-flat")
-        method_tag = '<span class="cost-tag">OVR</span>' if method == "override" else ""
         rows.append(
             '<tr class="model-row">'
             f'<td class="model-name">{html.escape(m.get("name","—"))}</td>'
             f'<td class="model-tokens">{compact_tokens(m.get("totalTokens",0))}</td>'
             f'<td class="model-share">{share:.1f}%</td>'
-            f'<td class="model-cost">{usd(m.get("estimatedCostUSD",0))}{method_tag}</td>'
+            f'<td class="model-cost">{usd(m.get("estimatedCostUSD",0))}</td>'
             '</tr>'
         )
     return (
@@ -337,119 +259,6 @@ def models_table_html(models: List[Dict[str, Any]], top_n: int = 8, total_tokens
         '<thead><tr><th>Model</th><th>Tokens</th><th>Share</th><th>Cost</th></tr></thead>'
         '<tbody>' + "".join(rows) + '</tbody></table>'
     )
-
-
-def agents_chart_html(agents: List[Dict[str, Any]], total_tokens: int = 1) -> str:
-    sorted_a = sorted(agents, key=lambda a: a.get("totalTokens", 0), reverse=True)
-    rows = []
-    for a in sorted_a:
-        share = pct(a.get("totalTokens", 0), total_tokens)
-        rows.append(
-            f'<div class="agent-row">'
-            f'<span class="agent-name">{html.escape(a.get("displayName","—"))}</span>'
-            f'<span class="agent-bar-wrap"><span class="agent-bar" style="width:{share:.1f}%"></span></span>'
-            f'<span class="agent-pct">{share:.1f}%</span>'
-            f'<span class="agent-tokens">{compact_tokens(a.get("totalTokens",0))}</span>'
-            f'</div>'
-        )
-    return '<div class="agents-chart">' + "".join(rows) + '</div>'
-
-
-def profile_card_html(profile: Dict[str, Any]) -> str:
-    """Render the deep personality profile as a themed class-driven HTML card.
-    The theme CSS paints these classes — the structure here is uniform."""
-    if not profile:
-        return '<div class="profile-card profile-empty">No personality profile authored.</div>'
-
-    def chip(label: str, value: str, kind: str = "") -> str:
-        cls = f"profile-chip {kind}".strip()
-        return (
-            f'<span class="{cls}"><span class="chip-label">{html.escape(label)}</span>'
-            f'<span class="chip-value">{html.escape(value)}</span></span>'
-        )
-
-    def evidence_block(evidence: Any) -> str:
-        if not evidence:
-            return ""
-        items = evidence if isinstance(evidence, list) else [str(evidence)]
-        lis = "".join(f"<li>{html.escape(str(e))}</li>" for e in items)
-        return f'<ul class="profile-evidence">{lis}</ul>'
-
-    mastery = profile.get("mastery_level", {}) or {}
-    intensity = profile.get("intensity", {}) or {}
-    work_style = profile.get("work_style", {}) or {}
-    tooling = profile.get("tooling_sophistication", {}) or {}
-    traits = profile.get("personality_traits", []) or []
-    quirks = profile.get("quirks", []) or []
-
-    parts = ['<div class="profile-card">']
-
-    # Headline rating row: mastery + intensity + tooling (the 3 "level" enums)
-    parts.append('<div class="profile-headline">')
-    parts.append(chip("MASTERY", mastery.get("rating", "—"), f"mastery-{mastery.get('rating','unknown')}"))
-    parts.append(chip("INTENSITY", intensity.get("rating", "—"), f"intensity-{intensity.get('rating','unknown')}"))
-    parts.append(chip("TOOLING", tooling.get("rating", "—"), f"tooling-{tooling.get('rating','unknown')}"))
-    confidence_bits = []
-    if mastery.get("confidence"):
-        confidence_bits.append(f"mastery·{mastery['confidence']}")
-    if intensity.get("confidence"):
-        confidence_bits.append(f"intensity·{intensity['confidence']}")
-    if confidence_bits:
-        parts.append(f'<span class="profile-confidence">confidence: {html.escape(" / ".join(confidence_bits))}</span>')
-    parts.append('</div>')
-
-    # Work-style 4-axis composite
-    if work_style:
-        parts.append('<div class="profile-section profile-workstyle">')
-        parts.append('<div class="profile-section-head">WORK STYLE</div>')
-        parts.append('<div class="profile-axes">')
-        for axis in ("tempo", "preference", "focus", "scheduling"):
-            v = work_style.get(axis)
-            if v:
-                parts.append(
-                    f'<div class="profile-axis"><div class="axis-name">{axis}</div>'
-                    f'<div class="axis-value axis-{html.escape(str(v))}">{html.escape(str(v))}</div></div>'
-                )
-        parts.append('</div>')
-        parts.append(evidence_block(work_style.get("evidence")))
-        parts.append('</div>')
-
-    # Per-section evidence panels for mastery + intensity + tooling
-    for section_name, section_data in (("MASTERY", mastery), ("INTENSITY", intensity), ("TOOLING", tooling)):
-        evidence = section_data.get("evidence")
-        if evidence:
-            parts.append(
-                f'<div class="profile-section profile-{section_name.lower()}-evidence">'
-                f'<div class="profile-section-head">{section_name} · evidence</div>'
-                f'{evidence_block(evidence)}'
-                f'</div>'
-            )
-
-    # Personality traits (3-5)
-    if traits:
-        parts.append('<div class="profile-section profile-traits">')
-        parts.append('<div class="profile-section-head">TRAITS</div>')
-        parts.append('<div class="profile-trait-list">')
-        for t in traits:
-            name = html.escape(str(t.get("trait", "—")))
-            ev = html.escape(str(t.get("evidence", "")))
-            parts.append(
-                f'<div class="profile-trait"><div class="trait-name">{name}</div>'
-                f'<div class="trait-evidence">{ev}</div></div>'
-            )
-        parts.append('</div></div>')
-
-    # Quirks (specific patterns)
-    if quirks:
-        parts.append('<div class="profile-section profile-quirks">')
-        parts.append('<div class="profile-section-head">QUIRKS</div>')
-        parts.append('<ul class="profile-quirk-list">')
-        for q in quirks:
-            parts.append(f'<li>{html.escape(str(q))}</li>')
-        parts.append('</ul></div>')
-
-    parts.append('</div>')
-    return "".join(parts)
 
 
 def projects_list_html(projects: List[Dict[str, Any]], latest_iso: str, top_n: int = 10) -> str:
@@ -478,418 +287,42 @@ def projects_list_html(projects: List[Dict[str, Any]], latest_iso: str, top_n: i
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Per-persona signature section builders
-#
-# Each persona has 3 signature sections (defined in references/personas/<key>.md).
-# These builders consume the subagent's `data` block + the orchestrator's
-# `python_derived` block and emit class-driven HTML chunks the theme CSS
-# paints. The theme HTML references them via {{<section>}} placeholders.
+# Persona-specific signature section builders
+# Each builder consumes the subagent's `data.<section>` block and returns
+# class-driven HTML. Theme CSS does all visual styling.
 
-def _esc(s: Any) -> str:
-    return html.escape(str(s)) if s is not None else "—"
-
-
-# ── comic ──────────────────────────────────────────────────────────────────
-
-def comic_pop_culture_html(equivalents: List[Dict[str, Any]]) -> str:
-    if not equivalents:
-        return ""
-    rows = []
-    for e in equivalents:
-        count = e.get("count", 0)
-        count_str = f"{count:,.0f}" if count >= 100 else f"{count:.1f}"
-        rows.append(
-            f'<div class="pop-row">'
-            f'<span class="pop-count">{count_str}×</span>'
-            f'<span class="pop-unit">{_esc(e.get("unit"))}</span>'
-            f'<span class="pop-blurb">{_esc(e.get("blurb"))}</span>'
-            f'</div>'
-        )
-    return '<div class="pop-culture">' + "".join(rows) + '</div>'
-
-
-def comic_hall_of_shame_html(entries: List[Dict[str, Any]]) -> str:
-    if not entries:
-        return '<p class="empty">数据太干净，找不出锅。难得。</p>'
-    rows = []
-    for e in entries:
-        samples = e.get("samples") or []
-        sample_html = ""
-        if samples:
-            sample_html = '<ul class="shame-samples">' + "".join(
-                f'<li>"{_esc(s)[:100]}"</li>' for s in samples[:2]
-            ) + "</ul>"
-        rows.append(
-            f'<div class="shame-row">'
-            f'<div class="shame-head"><span class="shame-pattern">{_esc(e.get("pattern"))}</span>'
-            f'<span class="shame-count">× {e.get("occurrences", 0)}</span></div>'
-            f'{sample_html}'
-            f'<div class="shame-blurb">{_esc(e.get("blurb"))}</div>'
-            f'</div>'
-        )
-    return '<div class="hall-of-shame">' + "".join(rows) + '</div>'
-
-
-def comic_trivia_html(items: List[Dict[str, Any]]) -> str:
-    if not items:
-        return ""
-    rows = []
-    for it in items:
-        rows.append(
-            f'<div class="trivia-row">'
-            f'<div class="trivia-label">{_esc(it.get("label"))}</div>'
-            f'<div class="trivia-value">{_esc(it.get("value"))}</div>'
-            f'<div class="trivia-blurb">{_esc(it.get("blurb"))}</div>'
-            f'</div>'
-        )
-    return '<div class="trivia-grid">' + "".join(rows) + '</div>'
-
-
-# ── brutalist ──────────────────────────────────────────────────────────────
-
-def brutalist_stale_debt_html(entries: List[Dict[str, Any]]) -> str:
-    if not entries:
-        return '<p class="empty">No stale ledger. (For once.)</p>'
-    rows = []
-    for e in entries:
-        status_class = f"stale-{_esc(e.get('status', 'stale'))}"
-        rows.append(
-            f'<tr class="{status_class}">'
-            f'<td class="ledger-project">{_esc(e.get("project"))}</td>'
-            f'<td class="ledger-tokens">{_esc(e.get("tokens_compact"))}</td>'
-            f'<td class="ledger-cost">${e.get("cost_usd", 0):,.0f}</td>'
-            f'<td class="ledger-days">{e.get("days_idle", 0)}d</td>'
-            f'<td class="ledger-status">{_esc(e.get("status"))}</td>'
-            f'<td class="ledger-verdict">{_esc(e.get("verdict"))}</td>'
-            f'</tr>'
-        )
-    return (
-        '<table class="stale-ledger">'
-        '<thead><tr><th>PROJECT</th><th>TOKENS</th><th>COST</th><th>IDLE</th><th>STATUS</th><th>VERDICT</th></tr></thead>'
-        '<tbody>' + "".join(rows) + '</tbody></table>'
-    )
-
-
-def brutalist_dependence_html(entries: List[Dict[str, Any]]) -> str:
-    if not entries:
-        return ""
-    rows = []
-    for e in entries:
-        rating = _esc(e.get("rating", "—"))
-        rows.append(
-            f'<div class="dep-row dep-{rating}">'
-            f'<div class="dep-axis">{_esc(e.get("axis","—")).upper()}</div>'
-            f'<div class="dep-value">{_esc(e.get("value"))}</div>'
-            f'<div class="dep-rating">{rating}</div>'
-            f'<div class="dep-verdict">{_esc(e.get("verdict"))}</div>'
-            f'</div>'
-        )
-    return '<div class="dependence-index">' + "".join(rows) + '</div>'
-
-
-def brutalist_repeat_offenders_html(entries: List[Dict[str, Any]]) -> str:
-    if not entries:
-        return '<p class="empty">No repeated patterns above threshold.</p>'
-    rows = []
-    for e in entries:
-        rows.append(
-            f'<div class="repeat-row">'
-            f'<div class="repeat-head">'
-            f'<span class="repeat-pattern">{_esc(e.get("pattern"))}</span>'
-            f'<span class="repeat-count">× {e.get("count", 0)}</span></div>'
-            f'<div class="repeat-span">{_esc(e.get("first_seen"))} → {_esc(e.get("last_seen"))}</div>'
-            f'<div class="repeat-verdict">{_esc(e.get("verdict"))}</div>'
-            f'</div>'
-        )
-    return '<div class="repeat-offenders">' + "".join(rows) + '</div>'
-
-
-# ── terminal ───────────────────────────────────────────────────────────────
-
-def terminal_distribution_html(stats: Dict[str, Any]) -> str:
-    if not stats:
-        return ""
-
-    def fmt(v: float) -> str:
-        if v >= 1_000_000:
-            return f"{v / 1_000_000:.2f}M"
-        if v >= 1_000:
-            return f"{v / 1_000:.1f}K"
-        return f"{int(v)}"
-
-    sections = []
-    for metric_key, label in [
-        ("daily_tokens", "daily-tokens"),
-        ("daily_prompts", "daily-prompts"),
-        ("content_length_chars", "content-length"),
-    ]:
-        s = stats.get(metric_key, {})
-        if not s:
-            continue
-        comment = s.get("comment", "")
-        sections.append(
-            f'<div class="dist-row">'
-            f'<div class="dist-name">{label}</div>'
-            f'<div class="dist-cells">'
-            f'<span class="dist-cell"><span class="dist-label">p50</span><span class="dist-val">{fmt(s.get("p50", 0))}</span></span>'
-            f'<span class="dist-cell"><span class="dist-label">p90</span><span class="dist-val">{fmt(s.get("p90", 0))}</span></span>'
-            f'<span class="dist-cell"><span class="dist-label">p99</span><span class="dist-val">{fmt(s.get("p99", 0))}</span></span>'
-            f'<span class="dist-cell"><span class="dist-label">σ</span><span class="dist-val">{fmt(s.get("sigma", 0))}</span></span>'
-            f'<span class="dist-cell"><span class="dist-label">max</span><span class="dist-val">{fmt(s.get("max", 0))}</span></span>'
-            f'</div>'
-            f'<div class="dist-comment">// {_esc(comment)}</div>'
-            f'</div>'
-        )
-    return '<div class="distributions">' + "".join(sections) + '</div>'
-
-
-def terminal_heatmap_svg(heatmap: Dict[str, Any]) -> str:
-    if not heatmap:
-        return ""
-    grid = heatmap.get("grid") or [[0] * 24 for _ in range(7)]
-    max_v = max((v for row in grid for v in row), default=0) or 1
-
-    cell_w = 22
-    cell_h = 22
-    label_w = 40
-    width = label_w + 24 * cell_w
-    height = cell_h * 7 + 28
-    days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-
-    cells = []
-    for wd in range(7):
-        cells.append(
-            f'<text class="heatmap-day" x="0" y="{28 + wd * cell_h + cell_h * 0.65:.1f}">{days[wd]}</text>'
-        )
-        for hr in range(24):
-            v = grid[wd][hr]
-            intensity = v / max_v if max_v else 0
-            opacity = max(0.03, intensity)
-            cells.append(
-                f'<rect class="heat-cell" x="{label_w + hr * cell_w}" y="{28 + wd * cell_h}" '
-                f'width="{cell_w - 1}" height="{cell_h - 1}" '
-                f'fill-opacity="{opacity:.3f}">'
-                f'<title>{days[wd]} {hr:02d}:00 — {compact_tokens(v)} tokens</title></rect>'
-            )
-
-    for hr in [0, 6, 12, 18]:
-        cells.append(
-            f'<text class="heatmap-hour" x="{label_w + hr * cell_w}" y="22">{hr:02d}</text>'
-        )
-    return (
-        f'<svg class="heatmap" viewBox="0 0 {width} {height}" width="100%">'
-        + "".join(cells)
-        + "</svg>"
-    )
-
-
-def terminal_anomalies_html(entries: List[Dict[str, Any]]) -> str:
-    if not entries:
-        return '<p class="empty">no anomalies detected (|z| < 3 across window)</p>'
-    rows = []
-    for e in entries:
-        direction_class = f"anom-{_esc(e.get('direction','upper'))}"
-        rows.append(
-            f'<tr class="{direction_class}">'
-            f'<td class="anom-date">{_esc(e.get("date"))}</td>'
-            f'<td class="anom-tokens">{_esc(e.get("tokens_compact"))}</td>'
-            f'<td class="anom-z">{e.get("z_score", 0):+.1f}σ</td>'
-            f'<td class="anom-dir">{_esc(e.get("direction"))}</td>'
-            f'<td class="anom-comment">{_esc(e.get("comment", ""))}</td>'
-            f'</tr>'
-        )
-    return (
-        '<table class="anomalies"><thead><tr>'
-        '<th>date</th><th>tokens</th><th>z-score</th><th>dir</th><th>// comment</th>'
-        '</tr></thead><tbody>' + "".join(rows) + '</tbody></table>'
-    )
-
-
-# ── essay ──────────────────────────────────────────────────────────────────
-
-def essay_negative_space_html(data: Dict[str, Any]) -> str:
-    if not data:
-        return ""
-    parts = []
-    headline = _esc(data.get("headline", ""))
-    if headline:
-        parts.append(f'<div class="ns-headline">{headline}</div>')
-    inactive = data.get("inactive_day_count") or 0
-    parts.append(f'<div class="ns-stat">{inactive} 个不在场的日子</div>')
-    evocative = data.get("evocative_days") or []
-    if evocative:
-        items = []
-        for d in evocative[:5]:
-            items.append(
-                f'<li><span class="ns-date">{_esc(d.get("date"))}</span>'
-                f'<span class="ns-wd">{_esc(d.get("weekday"))}</span>'
-                f'<span class="ns-ctx">{_esc(d.get("context",""))}</span></li>'
-            )
-        parts.append('<ul class="ns-evocative">' + "".join(items) + "</ul>")
-    abandoned = data.get("abandoned_projects") or []
-    if abandoned:
-        items = []
-        for p in abandoned[:5]:
-            items.append(
-                f'<li><span class="ns-proj">{_esc(p.get("name"))}</span>'
-                f'<span class="ns-meta">{_esc(p.get("lastSeen"))} · {_esc(p.get("tokensInvested"))}</span>'
-                f'<span class="ns-reflect">{_esc(p.get("reflection"))}</span></li>'
-            )
-        parts.append('<ul class="ns-abandoned">' + "".join(items) + "</ul>")
-    essay = data.get("essay") or ""
-    if essay:
-        parts.append(f'<div class="ns-essay">{_esc(essay).replace(chr(10), "<br><br>")}</div>')
-    return '<div class="negative-space">' + "".join(parts) + '</div>'
-
-
-def essay_recurrence_html(entries: List[Dict[str, Any]]) -> str:
-    if not entries:
-        return ""
-    rows = []
-    for e in entries:
-        rows.append(
-            f'<div class="rec-row">'
-            f'<div class="rec-head">'
-            f'<span class="rec-project">{_esc(e.get("project"))}</span>'
-            f'<span class="rec-trajectory">{_esc(e.get("trajectory","—"))}</span></div>'
-            f'<div class="rec-meditation">{_esc(e.get("meditation"))}</div>'
-            f'</div>'
-        )
-    return '<div class="recurrence-diary">' + "".join(rows) + '</div>'
-
-
-def essay_unread_html(data: Dict[str, Any]) -> str:
-    if not data:
-        return ""
-    essay = _esc(data.get("essay", ""))
-    pct = data.get("long_prompt_pct", 0)
-    avg = data.get("avg_long_chars", 0)
-    longest = data.get("longest_chars", 0)
-    return (
-        f'<div class="unread-conversation">'
-        f'<div class="unread-stats">'
-        f'<span class="unread-stat"><span class="unread-num">{pct}%</span><span class="unread-label">超长 prompt 占比</span></span>'
-        f'<span class="unread-stat"><span class="unread-num">{avg:,}</span><span class="unread-label">平均长 prompt 字符</span></span>'
-        f'<span class="unread-stat"><span class="unread-num">{longest:,}</span><span class="unread-label">最长一条字符</span></span>'
-        f'</div>'
-        f'<div class="unread-essay">{essay.replace(chr(10), "<br><br>")}</div>'
-        f'</div>'
-    )
-
-
-# ── ft ─────────────────────────────────────────────────────────────────────
-
-def ft_capital_html(entries: List[Dict[str, Any]]) -> str:
-    if not entries:
-        return ""
-    rows = []
-    for e in entries:
-        delta = e.get("mom_delta_pct")
-        delta_str = f"{delta:+.1f}%" if delta is not None else "—"
-        rows.append(
-            f'<tr class="cap-row">'
-            f'<td class="cap-project">{_esc(e.get("project"))}</td>'
-            f'<td class="cap-tokens">{_esc(e.get("tokens_compact"))}</td>'
-            f'<td class="cap-cost">${e.get("cost_usd", 0):,.0f}</td>'
-            f'<td class="cap-weight">{e.get("weight_pct", 0)}%</td>'
-            f'<td class="cap-delta">{delta_str}</td>'
-            f'<td class="cap-verdict">{_esc(e.get("verdict",""))}</td>'
-            f'</tr>'
-        )
-    return (
-        '<table class="capital-table">'
-        '<thead><tr><th>Project</th><th>Tokens</th><th>Cost</th><th>Weight</th><th>MoM</th><th>Verdict</th></tr></thead>'
-        '<tbody>' + "".join(rows) + '</tbody></table>'
-    )
-
-
-def ft_hhi_html(data: Dict[str, Any]) -> str:
-    if not data:
-        return ""
-    rows = []
-    for axis in ("projects", "models", "agents"):
-        entry = data.get(axis) or {}
-        hhi_val = entry.get("hhi", 0)
-        interp = _esc(entry.get("interpretation", ""))
-        verdict = _esc(entry.get("verdict", ""))
-        rows.append(
-            f'<div class="hhi-row">'
-            f'<div class="hhi-axis">{axis.upper()}</div>'
-            f'<div class="hhi-value">HHI {hhi_val:.4f}</div>'
-            f'<div class="hhi-interp">{interp}</div>'
-            f'<div class="hhi-verdict">{verdict}</div>'
-            f'</div>'
-        )
-    return '<div class="hhi-grid">' + "".join(rows) + '</div>'
-
-
-def ft_pnl_html(data: Dict[str, Any]) -> str:
-    if not data:
-        return ""
-    months = data.get("months") or []
-    obs = _esc(data.get("qoq_observation", ""))
-    verdict = _esc(data.get("verdict", ""))
-    rows = []
-    for m in months:
-        delta = m.get("mom_delta_pct")
-        delta_str = f"{delta:+.1f}%" if delta is not None else "—"
-        rows.append(
-            f'<tr class="pnl-row">'
-            f'<td class="pnl-month">{_esc(m.get("month"))}</td>'
-            f'<td class="pnl-tokens">{_esc(m.get("tokens_compact"))}</td>'
-            f'<td class="pnl-cost">${m.get("cost_usd", 0):,.0f}</td>'
-            f'<td class="pnl-delta">{delta_str}</td>'
-            f'</tr>'
-        )
-    return (
-        '<div class="monthly-pnl">'
-        '<table class="pnl-table"><thead><tr><th>Month</th><th>Tokens</th><th>Cost</th><th>MoM</th></tr></thead>'
-        '<tbody>' + "".join(rows) + '</tbody></table>'
-        f'<div class="pnl-observation">{obs}</div>'
-        f'<div class="pnl-verdict">{verdict}</div>'
-        '</div>'
-    )
+# NOTE: v6 dropped the 5 prior personas (xiuxian/wuxia/santi/shuihu/talk).
+# Section builders below are jojo + bleach + hxh only.
 
 
 # ── jojo ───────────────────────────────────────────────────────────────────
 
-# Mapping from A-E grade to a normalized 0..1 distance from center on the radar
 _JOJO_GRADE_TO_R = {"A": 1.0, "B": 0.8, "C": 0.6, "D": 0.4, "E": 0.22}
 
 
 def jojo_stand_stats_html(data: Dict[str, Any]) -> str:
-    """Render the 6-axis stand stats radar + a side panel of per-axis verdicts.
-    `data` shape: {"composite_rank":"B", "axes":[{"axis":..,"label_cn":..,"label_en":..,
-    "grade":"A","score":4.2,"primary":"...","secondary":"...","verdict":"..."}]}"""
     if not data:
         return ""
     axes = data.get("axes") or []
     if len(axes) != 6:
-        # Pad to 6 to keep the radar geometry consistent.
         while len(axes) < 6:
             axes.append({"label_cn": "—", "label_en": "—", "grade": "E", "primary": ""})
 
     cx = cy = 220
     R = 180
-    pts_outer: List[Tuple[float, float]] = []
     pts_axis: List[Tuple[float, float]] = []
     label_pts: List[Tuple[float, float, str, str, str]] = []
     polygon_pts: List[Tuple[float, float]] = []
     for i, ax in enumerate(axes):
-        # Top, then clockwise. -90deg offset puts the first vertex on top.
         a = math.radians((360 * i / 6) - 90)
-        pts_outer.append((cx + R * math.cos(a), cy + R * math.sin(a)))
         pts_axis.append((cx + R * math.cos(a), cy + R * math.sin(a)))
-        # Polygon point uses the grade's radius
         grade = (ax.get("grade") or "E").upper()
         r = R * _JOJO_GRADE_TO_R.get(grade, 0.2)
         polygon_pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
-        # Label outside the ring
         lr = R + 28
         lx, ly = cx + lr * math.cos(a), cy + lr * math.sin(a)
         label_pts.append((lx, ly, ax.get("label_cn", "—"), ax.get("label_en", "—"), grade))
 
-    # Background concentric rings + radial spokes
     rings = []
     for ratio, letter in zip([1.0, 0.8, 0.6, 0.4, 0.22], ["A", "B", "C", "D", "E"]):
         rings.append(
@@ -902,22 +335,16 @@ def jojo_stand_stats_html(data: Dict[str, Any]) -> str:
             )
             + '"/>'
         )
-    spokes = []
-    for (x, y) in pts_axis:
-        spokes.append(f'<line class="spoke" x1="{cx}" y1="{cy}" x2="{x:.1f}" y2="{y:.1f}"/>')
+    spokes = [f'<line class="spoke" x1="{cx}" y1="{cy}" x2="{x:.1f}" y2="{y:.1f}"/>' for (x, y) in pts_axis]
 
     poly_pts_str = " ".join(f"{x:.1f},{y:.1f}" for x, y in polygon_pts)
     poly = f'<polygon class="stat-polygon" points="{poly_pts_str}"/>'
+    dots = [f'<circle class="stat-vertex" cx="{x:.1f}" cy="{y:.1f}" r="5"/>' for (x, y) in polygon_pts]
 
-    dots = []
-    for (x, y) in polygon_pts:
-        dots.append(f'<circle class="stat-vertex" cx="{x:.1f}" cy="{y:.1f}" r="5"/>')
-
-    grade_letters = []
-    for ratio, letter in zip([1.0, 0.8, 0.6, 0.4, 0.22], ["A", "B", "C", "D", "E"]):
-        grade_letters.append(
-            f'<text class="ring-label" x="{cx + 4}" y="{cy - R*ratio + 4:.1f}">{letter}</text>'
-        )
+    grade_letters = [
+        f'<text class="ring-label" x="{cx + 4}" y="{cy - R*ratio + 4:.1f}">{letter}</text>'
+        for ratio, letter in zip([1.0, 0.8, 0.6, 0.4, 0.22], ["A", "B", "C", "D", "E"])
+    ]
 
     labels = []
     for (x, y, cn, en, grade) in label_pts:
@@ -942,7 +369,6 @@ def jojo_stand_stats_html(data: Dict[str, Any]) -> str:
         + "</svg>"
     )
 
-    # Per-axis tile list with verdicts beside the radar
     tile_rows = []
     for ax in axes:
         grade = (ax.get("grade") or "E").upper()
@@ -993,14 +419,527 @@ def jojo_psyche_html(entries: List[Dict[str, Any]]) -> str:
 def jojo_stand_card_html(data: Dict[str, Any]) -> str:
     if not data:
         return ""
+    cry = data.get("stand_cry") or ""
+    cry_html = f'<div class="stand-card-cry">{_esc(cry)}</div>' if cry else ""
     return (
         '<div class="stand-card">'
         f'<div class="stand-card-label">STAND ACQUIRED</div>'
         f'<div class="stand-card-name">{_esc(data.get("stand_name"))}</div>'
         f'<div class="stand-card-type">{_esc(data.get("stand_type"))}</div>'
         f'<div class="stand-card-master">USER · {_esc(data.get("master"))}</div>'
+        f'{cry_html}'
         f'<div class="stand-card-verdict">「{_esc(data.get("fatalistic_verdict"))}」</div>'
         '</div>'
+    )
+
+
+def signature_visual_jojo(persona_payload: Dict[str, Any]) -> str:
+    """Stand portrait frame — chosen glyph + name + cry + halftone aura."""
+    data = persona_payload.get("data") or {}
+    sc = data.get("stand_card") or {}
+    stand_name = sc.get("stand_name", "「— —」")
+    stand_cry = sc.get("stand_cry", "")
+    stand_type = sc.get("stand_type", "")
+    glyph_svg, accent = _jojo_stand_glyph(stand_name)
+
+    # Halftone dot pattern (background)
+    halftone_id = "jojo_ht"
+    halftone = (
+        f'<defs><pattern id="{halftone_id}" x="0" y="0" width="14" height="14" patternUnits="userSpaceOnUse">'
+        f'<circle cx="7" cy="7" r="1.4" fill="{accent}" opacity="0.45"/>'
+        '</pattern></defs>'
+    )
+
+    # Outer comic-style frame
+    frame = (
+        f'<rect x="6" y="6" width="488" height="488" fill="none" stroke="#0a0a0a" stroke-width="6"/>'
+        f'<rect x="14" y="14" width="472" height="472" fill="url(#{halftone_id})"/>'
+        f'<rect x="14" y="14" width="472" height="472" fill="none" stroke="{accent}" stroke-width="2" stroke-dasharray="8 4"/>'
+    )
+
+    # STAND ACQUIRED banner
+    banner = (
+        f'<g transform="translate(250, 50)">'
+        f'<rect x="-120" y="-22" width="240" height="44" fill="#0a0a0a" stroke="{accent}" stroke-width="3" transform="skewX(-6)"/>'
+        f'<text x="0" y="-2" text-anchor="middle" font-family="Impact,Helvetica,sans-serif" font-size="14" fill="{accent}" letter-spacing="0.32em" font-weight="900" transform="skewX(-6)">STAND ACQUIRED</text>'
+        f'<text x="0" y="14" text-anchor="middle" font-family="Impact,Helvetica,sans-serif" font-size="9" fill="#f4ecd8" opacity="0.6" letter-spacing="0.24em" transform="skewX(-6)">{html.escape(stand_type)}</text>'
+        '</g>'
+    )
+
+    # Glyph centered, scaled into the available area (already drawn around 400x400 origin)
+    glyph_group = f'<g transform="translate(50, 60) scale(1.0)">{glyph_svg}</g>'
+
+    # Stand name (large, two-line bold)
+    name_block = (
+        f'<g transform="translate(250, 440)">'
+        f'<text x="0" y="0" text-anchor="middle" font-family="Hiragino Mincho ProN,STKaiti,serif" font-size="22" fill="#0a0a0a" font-weight="900" letter-spacing="0.06em">{html.escape(stand_name)}</text>'
+        '</g>'
+    )
+
+    # Stand cry — speech-bubble style
+    cry_block = ""
+    if stand_cry:
+        cry_block = (
+            f'<g transform="translate(250, 480)">'
+            f'<text x="0" y="0" text-anchor="middle" font-family="Hiragino Mincho ProN,STKaiti,serif" font-size="18" fill="{accent}" font-style="italic" font-weight="700">「{html.escape(stand_cry)}」</text>'
+            '</g>'
+        )
+
+    return (
+        '<svg class="signature-visual sv-jojo" viewBox="0 0 500 510" width="100%" preserveAspectRatio="xMidYMid meet">'
+        + halftone
+        + '<rect width="500" height="510" fill="#f4ecd8"/>'
+        + frame
+        + banner
+        + glyph_group
+        + name_block
+        + cry_block
+        + '</svg>'
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# bleach + hxh section builders
+
+def bleach_psyche_html(entries: List[Dict[str, Any]]) -> str:
+    if not entries:
+        return '<p class="empty">心相分析样本不足。</p>'
+    rows = []
+    for e in entries:
+        rows.append(
+            '<div class="psyche-card">'
+            f'<div class="psyche-trait">{_esc(e.get("trait_name"))}</div>'
+            f'<div class="psyche-clinical">{_esc(e.get("evidence"))}</div>'
+            f'<div class="psyche-dark">{_esc(e.get("inner_world_note"))}</div>'
+            '</div>'
+        )
+    return '<div class="psyche-grid">' + "".join(rows) + '</div>'
+
+
+def bleach_zanpakuto_card_html(data: Dict[str, Any]) -> str:
+    if not data:
+        return ""
+    return (
+        '<div class="stand-card">'
+        f'<div class="stand-card-label">ZANPAKUTO ACQUIRED · 斩魄刀継承</div>'
+        f'<div class="stand-card-name">{_esc(data.get("zanpakuto_name"))}</div>'
+        f'<div class="stand-card-type">{_esc(data.get("master_division"))} · {_esc(data.get("master_codename"))}</div>'
+        f'<div class="stand-card-cry"><span class="cry-label">始解</span> {_esc(data.get("shikai_name", ""))} 「{_esc(data.get("shikai_call", ""))}」</div>'
+        f'<div class="stand-card-cry"><span class="cry-label">卍解</span> {_esc(data.get("bankai_name", ""))} 「{_esc(data.get("bankai_call", ""))}」</div>'
+        f'<div class="stand-card-verdict">「{_esc(data.get("inner_path_verdict"))}」</div>'
+        '</div>'
+    )
+
+
+def hxh_nen_assessment_html(data: Dict[str, Any]) -> str:
+    if not data:
+        return ""
+    neighbors = data.get("neighbors") or []
+    # Build hexagon radar — re-use jojo radar geometry but label by nen type
+    cx = cy = 220
+    R = 170
+    if len(neighbors) != 6:
+        return f'<div class="nen-assessment">{_esc(data.get("diagnosis"))}</div>'
+    # Polygon points by affinity
+    pts = []
+    for i, n in enumerate(neighbors):
+        a = math.radians((360 * i / 6) - 90)
+        r = R * (n.get("affinity", 0) / 100.0)
+        pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    poly = '<polygon class="stat-polygon" points="' + " ".join(f"{x:.1f},{y:.1f}" for x, y in pts) + '"/>'
+    # Background ring
+    ring_pts = " ".join(
+        f"{cx + R*math.cos(math.radians((360*i/6)-90)):.1f},{cy + R*math.sin(math.radians((360*i/6)-90)):.1f}"
+        for i in range(6)
+    )
+    ring = f'<polygon class="ring" points="{ring_pts}"/>'
+    # Spokes + labels
+    spokes = []
+    labels = []
+    for i, n in enumerate(neighbors):
+        a = math.radians((360 * i / 6) - 90)
+        x = cx + R * math.cos(a); y = cy + R * math.sin(a)
+        spokes.append(f'<line class="spoke" x1="{cx}" y1="{cy}" x2="{x:.1f}" y2="{y:.1f}"/>')
+        lr = R + 32
+        lx, ly = cx + lr * math.cos(a), cy + lr * math.sin(a)
+        anchor = "middle"
+        if lx < cx - 20:
+            anchor = "end"
+        elif lx > cx + 20:
+            anchor = "start"
+        is_primary = (n.get("type") == data.get("primary_type"))
+        cls = "axis-cn primary" if is_primary else "axis-cn"
+        labels.append(
+            f'<text class="{cls}" x="{lx:.1f}" y="{ly:.1f}" text-anchor="{anchor}">{html.escape(n.get("type",""))}</text>'
+            f'<text class="axis-en" x="{lx:.1f}" y="{ly + 14:.1f}" text-anchor="{anchor}">{html.escape(n.get("label",""))} · {n.get("affinity",0):.0f}</text>'
+        )
+
+    svg = (
+        f'<svg class="nen-hex" viewBox="0 0 440 440" width="440" height="440">'
+        + ring
+        + "".join(spokes)
+        + poly
+        + "".join(labels)
+        + "</svg>"
+    )
+    diagnosis = _esc(data.get("diagnosis"))
+    return (
+        '<div class="nen-assessment">'
+        f'<div class="nen-primary-banner">PRIMARY TYPE · <span class="primary-type">{_esc(data.get("primary_type"))}</span> · {_esc(data.get("primary_label"))} ({data.get("primary_affinity",0):.0f}/100)</div>'
+        f'<div class="nen-secondary">SECONDARY · {_esc(data.get("secondary_type"))} · {_esc(data.get("secondary_label"))} ({data.get("secondary_affinity",0):.0f}/100)</div>'
+        f'<div class="nen-hex-wrap">{svg}</div>'
+        f'<div class="nen-diagnosis">{diagnosis}</div>'
+        '</div>'
+    )
+
+
+def hxh_ability_design_html(entries: List[Dict[str, Any]]) -> str:
+    if not entries:
+        return '<p class="empty">未登録能力。</p>'
+    rows = []
+    for e in entries:
+        rows.append(
+            '<div class="ability-card">'
+            f'<div class="ability-name-jp">{_esc(e.get("ability_name_jp"))}</div>'
+            f'<div class="ability-name-cn">{_esc(e.get("ability_name_cn"))}</div>'
+            f'<div class="ability-type">{_esc(e.get("ability_type"))}</div>'
+            f'<div class="ability-effect">{_esc(e.get("effect"))}</div>'
+            f'<div class="ability-constraint"><span class="label">制約：</span>{_esc(e.get("constraint"))}</div>'
+            f'<div class="ability-vow"><span class="label">誓約：</span>{_esc(e.get("vow"))}</div>'
+            + (f'<div class="ability-verdict">{_esc(e.get("verdict"))}</div>' if e.get("verdict") else "")
+            + '</div>'
+        )
+    return '<div class="ability-grid">' + "".join(rows) + '</div>'
+
+
+def hxh_nen_progression_html(data: Dict[str, Any]) -> str:
+    if not data:
+        return ""
+    stages = data.get("stages_mastered") or []
+    rows = []
+    for s in stages:
+        check = "✓" if s.get("mastered") else "—"
+        cls = "stage-row mastered" if s.get("mastered") else "stage-row"
+        rows.append(
+            f'<div class="{cls}">'
+            f'<span class="stage-check">{check}</span>'
+            f'<span class="stage-name">{_esc(s.get("stage"))}</span>'
+            f'<span class="stage-evidence">{_esc(s.get("evidence"))}</span>'
+            '</div>'
+        )
+    return (
+        '<div class="nen-progression">'
+        + "".join(rows)
+        + f'<div class="prog-current">現在の段階：{_esc(data.get("current_stage"))}</div>'
+        + f'<div class="prog-next">次の目標：{_esc(data.get("next_milestone"))}</div>'
+        + f'<div class="prog-verdict">{_esc(data.get("verdict"))}</div>'
+        + '</div>'
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Generic image data-URL lookup + per-persona signature visuals
+# All embedded as base64 data: URLs so HTML stays offline-capable.
+
+import base64
+
+# Cache: (category, asset_id) → base64 data URL (empty string if no file)
+_IMAGE_CACHE: Dict[Tuple[str, str], str] = {}
+
+
+def _image_data_url(category: str, asset_id: str) -> str:
+    """Look for assets/<category>/<asset_id>.{png,webp,jpg} and return a base64
+    data URL. Empty string if no file."""
+    if not asset_id:
+        return ""
+    cache_key = (category, asset_id)
+    if cache_key in _IMAGE_CACHE:
+        return _IMAGE_CACHE[cache_key]
+    skill_dir = pathlib.Path(__file__).resolve().parent.parent
+    base = skill_dir / "assets" / category
+    for ext, mime in [("png", "image/png"), ("webp", "image/webp"), ("jpg", "image/jpeg"), ("jpeg", "image/jpeg")]:
+        candidate = base / f"{asset_id}.{ext}"
+        if candidate.exists():
+            data = candidate.read_bytes()
+            b64 = base64.b64encode(data).decode("ascii")
+            url = f"data:{mime};base64,{b64}"
+            _IMAGE_CACHE[cache_key] = url
+            return url
+    _IMAGE_CACHE[cache_key] = ""
+    return ""
+
+
+# Stand keyword → id mapping
+_STAND_KEYWORDS = [
+    ("ger",     ["ゴールド・エクスペリエンス・レクイエム", "黄金体验·安魂曲", "レクイエム"]),
+    ("ge",      ["ゴールド・エクスペリエンス", "黄金体验"]),
+    ("mih",     ["メイド・イン・ヘブン", "天堂制造"]),
+    ("spw",     ["スタープラチナ・ザ・ワールド", "白金之星·世界"]),
+    ("tw",      ["ザ・ワールド", "世界"]),
+    ("sp",      ["スタープラチナ", "白金之星"]),
+    ("kc",      ["キング・クリムゾン", "绯红之王"]),
+    ("cd",      ["クレイジー・ダイヤモンド", "疯狂钻石"]),
+    ("kq",      ["キラークイーン", "杀手皇后"]),
+    ("tusk",    ["タスク", "獠牙"]),
+    ("d4c",     ["D4C", "肮脏作乱"]),
+    ("sf",      ["スティッキィ", "黏液栗子"]),
+    ("sc",      ["シルバー・チャリオッツ", "银色战车"]),
+    ("hp",      ["ハーミット・パープル", "隐者之紫"]),
+    ("echoes3", ["エコーズ", "回音"]),
+    ("ws",      ["ホワイト・スネイク", "白蛇"]),
+]
+
+_STAND_THEME_ACCENT = {
+    "ger": "#f0c800", "ge": "#f0c800", "mih": "#d04a8c",
+    "spw": "#5d3a8c", "tw": "#d4af37", "sp": "#5d3a8c",
+    "kc": "#a40e1c", "cd": "#ffb4d8", "kq": "#f4a4c0",
+    "tusk": "#d4a574", "d4c": "#3a5a8c", "sf": "#4a8cff",
+    "sc": "#c0c0c0", "hp": "#7d4a9c", "echoes3": "#8cc8e8",
+    "ws": "#f4f4f4",
+}
+
+
+def _resolve_asset_id(name: str, keyword_map: List[Tuple[str, List[str]]]) -> str:
+    s = name or ""
+    for sid, keywords in keyword_map:
+        for kw in keywords:
+            if kw in s:
+                return sid
+    return ""
+
+
+def _jojo_stand_glyph(stand_name: str) -> Tuple[str, str]:
+    """Returns (svg_glyph_or_image, accent_color). Prefers embedded PNG
+    over geometric fallback."""
+    stand_id = _resolve_asset_id(stand_name, _STAND_KEYWORDS)
+    accent = _STAND_THEME_ACCENT.get(stand_id, "#d4af37")
+    img_url = _image_data_url("stands", stand_id) if stand_id else ""
+    if img_url:
+        return f'<image href="{img_url}" x="0" y="0" width="400" height="400" preserveAspectRatio="xMidYMid meet"/>', accent
+    # Fallback: simple placeholder
+    return f'<g transform="translate(200,200)"><circle r="120" fill="none" stroke="{accent}" stroke-width="4"/><text x="0" y="14" text-anchor="middle" font-family="Impact,Helvetica,sans-serif" font-size="48" font-weight="900" fill="{accent}">?</text></g>', accent
+
+
+# Zanpakuto keyword → id mapping
+_ZANPAKUTO_KEYWORDS = [
+    ("tensa_zangetsu",    ["天鎖斬月", "天锁斩月", "斬月"]),
+    ("senbonzakura",      ["千本桜景厳", "千本樱景严", "千本桜"]),
+    ("ryujin_jakka",      ["流刃若火", "残火"]),
+    ("kyoka_suigetsu",    ["鏡花水月", "镜花水月"]),
+    ("kanonji_no_tsuru",  ["片羽の御使い", "片翼天使", "紅姫"]),
+    ("hyourinmaru",       ["氷輪丸", "冰轮丸", "大紅蓮"]),
+    ("katenkyoukotsu",    ["花天狂骨枯松心中", "花天狂骨"]),
+    ("kokujou_tengen",    ["黒縄天譴明王", "黑绳天谴明王"]),
+    ("zabimaru",          ["双骨", "蛇尾丸"]),
+    ("sodenoshirayuki",   ["袖白雪", "白霞罸"]),
+    ("sougyo_kotowari",   ["双魚理", "双鱼理"]),
+    ("haineko",           ["灰猫"]),
+]
+
+
+def _bleach_zanpakuto_glyph(zanpakuto_name: str) -> Tuple[str, str]:
+    asset_id = _resolve_asset_id(zanpakuto_name, _ZANPAKUTO_KEYWORDS)
+    accent = "#e8e2d2"
+    img_url = _image_data_url("zanpakuto", asset_id) if asset_id else ""
+    if img_url:
+        return f'<image href="{img_url}" x="0" y="0" width="400" height="400" preserveAspectRatio="xMidYMid meet"/>', accent
+    # Fallback: stylized katana silhouette
+    return (
+        '<g transform="translate(200,200)">'
+        '<line x1="0" y1="-160" x2="0" y2="120" stroke="#e8e2d2" stroke-width="4"/>'
+        '<line x1="-30" y1="120" x2="30" y2="120" stroke="#1a1a1a" stroke-width="6"/>'
+        '<line x1="0" y1="120" x2="0" y2="170" stroke="#1a1a1a" stroke-width="8"/>'
+        '<circle cx="0" cy="175" r="8" fill="#1a1a1a"/>'
+        '<polygon points="-6,-160 6,-160 0,-180" fill="#e8e2d2"/>'
+        '</g>'
+    ), accent
+
+
+def _hxh_nen_glyph(nen_type: str) -> Tuple[str, str]:
+    """Return image for the dominant nen system (assets/nen/<id>.png). Else hexagon."""
+    NEN_ID = {
+        "強化系":   ("enhancement",   "#e83a3a"),
+        "操作系":   ("manipulation",  "#a04acf"),
+        "具現化系": ("conjuration",   "#3a8ce8"),
+        "放出系":   ("emission",      "#e88c3a"),
+        "変化系":   ("transmutation", "#3acf6e"),
+        "特質系":   ("specialization", "#d4af37"),
+    }
+    asset_id, accent = NEN_ID.get(nen_type, ("", "#5dc0ff"))
+    img_url = _image_data_url("nen", asset_id) if asset_id else ""
+    if img_url:
+        return f'<image href="{img_url}" x="0" y="0" width="400" height="400" preserveAspectRatio="xMidYMid meet"/>', accent
+    # Fallback: stylized aura sphere
+    return (
+        f'<g transform="translate(200,200)">'
+        f'<circle r="140" fill="none" stroke="{accent}" stroke-width="3" stroke-dasharray="4 4"/>'
+        f'<circle r="100" fill="none" stroke="{accent}" stroke-width="2"/>'
+        f'<circle r="50" fill="{accent}" opacity="0.4"/>'
+        f'<text x="0" y="14" text-anchor="middle" font-family="STKaiti,serif" font-size="40" font-weight="900" fill="{accent}">{_esc(nen_type)}</text>'
+        f'</g>'
+    ), accent
+
+
+# ── signature visuals ─────────────────────────────────────────────────────
+
+def signature_visual_jojo(persona_payload: Dict[str, Any]) -> str:
+    """Stand portrait — embedded PNG or fallback glyph + halftone JoJo frame."""
+    data = persona_payload.get("data") or {}
+    sc = data.get("stand_card") or {}
+    stand_name = sc.get("stand_name", "「— —」")
+    stand_cry = sc.get("stand_cry", "")
+    stand_type = sc.get("stand_type", "")
+    glyph_svg, accent = _jojo_stand_glyph(stand_name)
+
+    halftone_id = "jojo_ht"
+    halftone = (
+        f'<defs><pattern id="{halftone_id}" x="0" y="0" width="14" height="14" patternUnits="userSpaceOnUse">'
+        f'<circle cx="7" cy="7" r="1.4" fill="{accent}" opacity="0.45"/>'
+        '</pattern></defs>'
+    )
+    frame = (
+        f'<rect x="6" y="6" width="488" height="488" fill="none" stroke="#0a0a0a" stroke-width="6"/>'
+        f'<rect x="14" y="14" width="472" height="472" fill="url(#{halftone_id})"/>'
+        f'<rect x="14" y="14" width="472" height="472" fill="none" stroke="{accent}" stroke-width="2" stroke-dasharray="8 4"/>'
+    )
+    banner = (
+        f'<g transform="translate(250, 50)">'
+        f'<rect x="-120" y="-22" width="240" height="44" fill="#0a0a0a" stroke="{accent}" stroke-width="3" transform="skewX(-6)"/>'
+        f'<text x="0" y="-2" text-anchor="middle" font-family="Impact,Helvetica,sans-serif" font-size="14" fill="{accent}" letter-spacing="0.32em" font-weight="900" transform="skewX(-6)">STAND ACQUIRED</text>'
+        f'<text x="0" y="14" text-anchor="middle" font-family="Impact,Helvetica,sans-serif" font-size="9" fill="#f4ecd8" opacity="0.6" letter-spacing="0.24em" transform="skewX(-6)">{html.escape(stand_type)}</text>'
+        '</g>'
+    )
+    glyph_group = f'<g transform="translate(50, 60) scale(1.0)">{glyph_svg}</g>'
+    name_block = (
+        f'<g transform="translate(250, 440)">'
+        f'<text x="0" y="0" text-anchor="middle" font-family="Hiragino Mincho ProN,STKaiti,serif" font-size="22" fill="#0a0a0a" font-weight="900" letter-spacing="0.06em">{html.escape(stand_name)}</text>'
+        '</g>'
+    )
+    cry_block = ""
+    if stand_cry:
+        cry_block = (
+            f'<g transform="translate(250, 480)">'
+            f'<text x="0" y="0" text-anchor="middle" font-family="Hiragino Mincho ProN,STKaiti,serif" font-size="18" fill="{accent}" font-style="italic" font-weight="700">「{html.escape(stand_cry)}」</text>'
+            '</g>'
+        )
+
+    return (
+        '<svg class="signature-visual sv-jojo" viewBox="0 0 500 510" width="100%" preserveAspectRatio="xMidYMid meet">'
+        + halftone + '<rect width="500" height="510" fill="#f4ecd8"/>'
+        + frame + banner + glyph_group + name_block + cry_block
+        + '</svg>'
+    )
+
+
+def signature_visual_bleach(persona_payload: Dict[str, Any]) -> str:
+    """Zanpakuto portrait — embedded PNG or katana fallback + 死神 frame
+    (dark indigo + silver, with sumi-e brush border)."""
+    data = persona_payload.get("data") or {}
+    zc = data.get("zanpakuto_card") or {}
+    zanpakuto_name = zc.get("zanpakuto_name", "「— —」")
+    shikai_call = zc.get("shikai_call", "")
+    bankai_call = zc.get("bankai_call", "")
+    division = zc.get("master_division", "")
+    glyph_svg, accent = _bleach_zanpakuto_glyph(zanpakuto_name)
+
+    # Sumi-e splash backdrop pattern
+    sumi = (
+        f'<defs>'
+        f'<radialGradient id="bleachHalo" cx="50%" cy="50%" r="50%">'
+        f'<stop offset="0%" stop-color="{accent}" stop-opacity="0.18"/>'
+        f'<stop offset="100%" stop-color="{accent}" stop-opacity="0"/>'
+        f'</radialGradient>'
+        f'</defs>'
+    )
+    halo = f'<circle cx="250" cy="270" r="200" fill="url(#bleachHalo)"/>'
+    # Vertical sumi-e brush strokes
+    strokes = []
+    for i in range(8):
+        x = 40 + i * 56
+        strokes.append(f'<rect x="{x}" y="20" width="6" height="470" fill="#1a1a2a" opacity="0.18"/>')
+
+    frame = (
+        f'<rect x="6" y="6" width="488" height="498" fill="none" stroke="{accent}" stroke-width="2"/>'
+        f'<rect x="10" y="10" width="480" height="490" fill="none" stroke="#1a1a2a" stroke-width="6"/>'
+    )
+
+    # ZANPAKUTO 継承 banner
+    banner = (
+        f'<g transform="translate(250, 52)">'
+        f'<rect x="-130" y="-22" width="260" height="44" fill="#1a1a2a" stroke="{accent}" stroke-width="2"/>'
+        f'<text x="0" y="-2" text-anchor="middle" font-family="STKaiti,serif" font-size="14" fill="{accent}" letter-spacing="0.32em" font-weight="900">ZANPAKUTO 継承</text>'
+        f'<text x="0" y="14" text-anchor="middle" font-family="STKaiti,serif" font-size="10" fill="#c0c0c0" opacity="0.7" letter-spacing="0.24em">{html.escape(division)}</text>'
+        '</g>'
+    )
+
+    glyph_group = f'<g transform="translate(50, 70) scale(1.0)">{glyph_svg}</g>'
+
+    name_block = (
+        f'<g transform="translate(250, 452)">'
+        f'<text x="0" y="0" text-anchor="middle" font-family="STKaiti,Hiragino Mincho ProN,serif" font-size="26" fill="{accent}" font-weight="900" letter-spacing="0.06em">{html.escape(zanpakuto_name)}</text>'
+        '</g>'
+    )
+    calls = []
+    if shikai_call:
+        calls.append(f'<text x="250" y="478" text-anchor="middle" font-family="STKaiti,serif" font-size="14" fill="#c0c0c0" font-style="italic">始解：「{html.escape(shikai_call)}」</text>')
+    if bankai_call:
+        calls.append(f'<text x="250" y="496" text-anchor="middle" font-family="STKaiti,serif" font-size="14" fill="{accent}" font-style="italic" font-weight="700">卍解：「{html.escape(bankai_call)}」</text>')
+
+    return (
+        '<svg class="signature-visual sv-bleach" viewBox="0 0 500 510" width="100%" preserveAspectRatio="xMidYMid meet">'
+        + sumi + '<rect width="500" height="510" fill="#0a0a14"/>'
+        + "".join(strokes) + halo + frame + banner + glyph_group + name_block
+        + "".join(calls)
+        + '</svg>'
+    )
+
+
+def signature_visual_hxh(persona_payload: Dict[str, Any]) -> str:
+    """Nen hexagon + dominant 系 visual."""
+    data = persona_payload.get("data") or {}
+    nen = data.get("nen_assessment") or {}
+    primary_type = nen.get("primary_type", "強化系")
+    primary_label = nen.get("primary_label", "ENHANCEMENT")
+    primary_affinity = nen.get("primary_affinity", 0)
+    glyph_svg, accent = _hxh_nen_glyph(primary_type)
+
+    frame = (
+        f'<rect x="6" y="6" width="488" height="498" fill="none" stroke="{accent}" stroke-width="2"/>'
+        f'<rect x="14" y="14" width="472" height="482" fill="none" stroke="#5dc0ff" stroke-width="1" stroke-dasharray="3 5"/>'
+    )
+
+    # "NEN ANALYSIS" banner
+    banner = (
+        f'<g transform="translate(250, 52)">'
+        f'<rect x="-130" y="-22" width="260" height="44" fill="#001428" stroke="{accent}" stroke-width="2"/>'
+        f'<text x="0" y="-2" text-anchor="middle" font-family="SF Mono,monospace" font-size="14" fill="{accent}" letter-spacing="0.32em" font-weight="900">NEN ANALYSIS</text>'
+        f'<text x="0" y="14" text-anchor="middle" font-family="SF Mono,monospace" font-size="10" fill="#5dc0ff" opacity="0.7" letter-spacing="0.24em">水見式 · 系判定済</text>'
+        '</g>'
+    )
+
+    glyph_group = f'<g transform="translate(50, 70) scale(1.0)">{glyph_svg}</g>'
+
+    # Primary type label below
+    name_block = (
+        f'<g transform="translate(250, 452)">'
+        f'<text x="0" y="0" text-anchor="middle" font-family="STKaiti,serif" font-size="28" fill="{accent}" font-weight="900" letter-spacing="0.06em">{html.escape(primary_type)}</text>'
+        '</g>'
+    )
+    sub = (
+        f'<text x="250" y="478" text-anchor="middle" font-family="SF Mono,monospace" font-size="14" fill="#5dc0ff" letter-spacing="0.16em">{html.escape(primary_label)} · {primary_affinity:.0f}/100</text>'
+    )
+
+    # Background star field
+    stars = []
+    star_pos = [(45, 80, 1), (120, 50, 2), (310, 30, 1), (450, 70, 1), (75, 410, 1), (200, 430, 2), (390, 410, 1)]
+    for x, y, sz in star_pos:
+        stars.append(f'<circle cx="{x}" cy="{y}" r="{sz}" fill="{accent}" opacity="0.55"/>')
+
+    return (
+        '<svg class="signature-visual sv-hxh" viewBox="0 0 500 510" width="100%" preserveAspectRatio="xMidYMid meet">'
+        + '<rect width="500" height="510" fill="#0a1a2a"/>'
+        + "".join(stars) + frame + banner + glyph_group + name_block + sub
+        + '</svg>'
     )
 
 
@@ -1051,7 +990,6 @@ INDEX_HTML = r"""<!doctype html>
   header h1 {{ font-size:34px; margin:0; letter-spacing:-0.02em; font-weight:900; }}
   header .sub {{ color:#aaa; margin:0; font-size:13px; line-height:1.6; }}
 
-  /* Stage = the area where the deck and the revealed card live */
   .stage {{
     position:relative;
     height: 520px;
@@ -1061,7 +999,6 @@ INDEX_HTML = r"""<!doctype html>
     perspective: 1400px;
   }}
 
-  /* Each card: dual-faced 3D, positioned absolutely so we can fan them in CSS */
   .card3d {{
     position:absolute;
     width:300px; height:430px;
@@ -1111,7 +1048,6 @@ INDEX_HTML = r"""<!doctype html>
   .card3d .front .psub {{ font-size:13px; line-height:1.5; opacity:.9; }}
   .card3d .front .cta {{ margin-top:auto; font-size:12px; letter-spacing:.18em; text-transform:uppercase; opacity:.7; }}
 
-  /* Deck arrangement: 6 cards stacked & fanned */
   .card3d.in-deck:nth-child(1) {{ transform: translate3d(-2px, 6px, 0) rotateZ(-3deg); z-index:1; }}
   .card3d.in-deck:nth-child(2) {{ transform: translate3d( 1px, 3px, 0) rotateZ(-1.4deg); z-index:2; }}
   .card3d.in-deck:nth-child(3) {{ transform: translate3d( 0px, 0px, 0) rotateZ( 0.0deg); z-index:3; }}
@@ -1119,12 +1055,10 @@ INDEX_HTML = r"""<!doctype html>
   .card3d.in-deck:nth-child(5) {{ transform: translate3d(-1px,-4px, 0) rotateZ( 2.0deg); z-index:5; }}
   .card3d.in-deck:nth-child(6) {{ transform: translate3d( 3px,-7px, 0) rotateZ( 3.0deg); z-index:6; }}
 
-  /* Drawn (the picked card flies forward and flips) */
   .card3d.drawn {{
     transform: translate3d(0, -10px, 80px) rotateY(180deg) rotateZ(0deg) scale(1.05);
     z-index:200;
   }}
-  /* Others slide aside */
   .card3d.shoved-left  {{ transform: translate3d(-440px, 30px, -60px) rotateZ(-12deg); opacity:.4; }}
   .card3d.shoved-right {{ transform: translate3d( 440px, 30px, -60px) rotateZ( 12deg); opacity:.4; }}
 
@@ -1196,7 +1130,6 @@ INDEX_HTML = r"""<!doctype html>
   function shuffle() {{
     drawn = null;
     cards.forEach(c => c.classList.remove('drawn','shoved-left','shoved-right'));
-    // randomize DOM order so the fanning happens with new neighbors each shuffle
     const shuffled = cards.slice().sort(() => Math.random() - 0.5);
     shuffled.forEach((c, i) => {{
       stage.appendChild(c);
@@ -1212,11 +1145,9 @@ INDEX_HTML = r"""<!doctype html>
     cards.forEach((c, i) => {{
       if (c !== drawn) {{
         c.classList.remove('in-deck');
-        // Alternate left / right shove for visual spread
         c.classList.add(i % 2 === 0 ? 'shoved-left' : 'shoved-right');
       }}
     }});
-    // 1.1s later, navigate to that persona's report
     setTimeout(() => {{ window.location.href = drawn.dataset.href; }}, 1100);
   }}
 
@@ -1236,14 +1167,11 @@ INDEX_HTML = r"""<!doctype html>
 </body></html>
 """
 
-# Card preview colors per persona (intentionally tight strips of each theme's palette)
+# Card preview palettes — each tuned to that persona's theme
 PERSONA_CARD_PALETTES = {
-    "comic":     ("#FFE94A", "#FF4FA0", "#2BD4F8", "#111"),
-    "brutalist": ("#000",    "#000",    "#E0093A", "#fff"),
-    "terminal":  ("#0b1419", "#001a08", "#3aff7d", "#3aff7d"),
-    "essay":     ("#F5EFE2", "#E7DCC4", "#1c1a16", "#1c1a16"),
-    "ft":        ("#FFF1E5", "#FCE3CC", "#0d1b2a", "#0d1b2a"),
-    "jojo":      ("#3a1f5d", "#0a0a0a", "#d4af37", "#f4ecd8"),
+    "jojo":   ("#3a1f5d", "#0a0a0a", "#d4af37", "#f4ecd8"),
+    "bleach": ("#0a0a14", "#1a1a2a", "#e8e2d2", "#c0c0c0"),
+    "hxh":    ("#0a1a2a", "#001428", "#5dc0ff", "#f4f0e0"),
 }
 
 
@@ -1251,7 +1179,7 @@ def build_index(payload: Dict[str, Any], narratives: Dict[str, Any]) -> str:
     cards3d = []
     css_chunks = []
     for key, label in PERSONAS:
-        bg1, bg2, accent, ink = PERSONA_CARD_PALETTES[key]
+        bg1, bg2, accent, ink = PERSONA_CARD_PALETTES.get(key, ("#222", "#000", "#fff", "#fff"))
         css_chunks.append(
             f"  .card3d[data-key='{key}'] .front {{ background:linear-gradient(135deg, {bg1} 0%, {bg2} 100%); color:{ink}; }}\n"
             f"  .card3d[data-key='{key}'] .front .pid {{ color:{accent}; }}\n"
@@ -1263,15 +1191,9 @@ def build_index(payload: Dict[str, Any], narratives: Dict[str, Any]) -> str:
         sub = n.get("hero_subtitle", "—")
         idx = int_idx(key) + 1
         href = f"{idx:02d}-{key}.html"
-        title_safe = html.escape(title)
-        sub_safe = html.escape(sub)
-        label_safe = html.escape(label)
-        key_safe = html.escape(key)
 
-        # 3D dual-faced card for the stage deck. Front face hides the key/label
-        # behind the reveal — you only see it AFTER the flip.
         cards3d.append(
-            f'    <div class="card3d" data-key="{key_safe}" data-href="{href}">'
+            f'    <div class="card3d" data-key="{html.escape(key)}" data-href="{href}">'
             f'<div class="face back">'
             f'<div class="seal-sub">TOKENBAR · LENS</div>'
             f'<div class="seal">?</div>'
@@ -1279,10 +1201,10 @@ def build_index(payload: Dict[str, Any], narratives: Dict[str, Any]) -> str:
             f'</div>'
             f'<div class="face front">'
             f'<div>'
-            f'<div class="pid">#{idx:02d} · {key_safe}</div>'
-            f'<div class="ptitle">{label_safe}</div>'
-            f'<div class="plabel">{title_safe}</div>'
-            f'<div class="psub">{sub_safe}</div>'
+            f'<div class="pid">#{idx:02d} · {html.escape(key)}</div>'
+            f'<div class="ptitle">{html.escape(label)}</div>'
+            f'<div class="plabel">{html.escape(title)}</div>'
+            f'<div class="psub">{html.escape(sub)}</div>'
             f'</div>'
             f'<div class="cta">Tap to read →</div>'
             f'</div>'
@@ -1338,21 +1260,10 @@ def derive(payload: Dict[str, Any]) -> Dict[str, Any]:
     total_prompts = sum(a.get("promptCount", 0) for a in payload["agents"])
 
     heaviest = heaviest_day(daily)
-    longest = longest_day(payload["summary"]["byDayHour"])
-    hm = hour_metrics(hourly)
-    weekend_p, weekday_p = weekday_split(daily)
     streak_long, streak_cur = streaks(daily)
 
-    # First / last prompt date — use dataWindow as the authoritative source.
     first_date = payload["dataWindow"]["earliest"].split("T")[0]
     last_date = payload["dataWindow"]["latest"].split("T")[0]
-
-    prompts = payload.get("prompts", [])
-    long_prompt_pct = 0.0
-    if prompts:
-        long_count = sum(1 for p in prompts if p.get("contentLength", 0) > 16384)
-        long_prompt_pct = long_count / len(prompts) * 100
-
     cost_total = payload.get("cost", {}).get("totalUSD", 0)
 
     window = payload.get("queryWindow") or {}
@@ -1360,82 +1271,65 @@ def derive(payload: Dict[str, Any]) -> Dict[str, Any]:
     end_iso = window.get("until") or payload["dataWindow"]["latest"]
 
     return {
-        "total_tokens": compact_tokens(total_tokens),
-        "total_tokens_full": commas(total_tokens),
-        "total_prompts": commas(total_prompts),
-        "total_cost_usd": usd(cost_total),
-        "override_count": str(payload.get("pricingOverrideCount", 0)),
+        "total_tokens":       compact_tokens(total_tokens),
+        "total_tokens_full":  commas(total_tokens),
+        "total_prompts":      commas(total_prompts),
+        "total_cost_usd":     usd(cost_total),
+        "override_count":     str(payload.get("pricingOverrideCount", 0)),
         "default_models_count": str(payload.get("cost", {}).get("defaultModels", 0)),
-        "date_range_start": start_iso.split("T")[0],
-        "date_range_end": end_iso.split("T")[0],
-        "date_range_days": str(days_between(start_iso, end_iso)),
-        "event_count": commas(payload["dataWindow"]["eventCount"]),
-        "heaviest_day_date": heaviest.get("label", "—"),
+        "date_range_start":   start_iso.split("T")[0],
+        "date_range_end":     end_iso.split("T")[0],
+        "date_range_days":    str(days_between(start_iso, end_iso)),
+        "event_count":        commas(payload["dataWindow"]["eventCount"]),
+        "heaviest_day_date":  heaviest.get("label", "—"),
         "heaviest_day_tokens": compact_tokens(heaviest.get("totalTokens", 0)),
         "heaviest_day_prompts": commas(heaviest.get("promptCount", 0)),
-        "longest_day_date": longest.get("day", "—"),
-        "longest_day_hours": str(longest.get("hours", 0)),
-        "longest_day_tokens": compact_tokens(longest.get("totalTokens", 0)),
-        "peak_hour_label": hm["peak_label"],
-        "peak_hour_tokens": compact_tokens(hm["peak_tokens"]),
-        "night_owl_pct": f"{hm['night_owl_pct']:.0f}",
-        "morning_pct": f"{hm['morning_pct']:.0f}",
-        "weekend_pct": f"{weekend_p:.0f}",
-        "weekday_pct": f"{weekday_p:.0f}",
-        "streak_longest": str(streak_long),
-        "streak_current": str(streak_cur),
-        "distinct_projects": str(len(payload.get("projects", []))),
-        "distinct_models": str(len(payload.get("models", []))),
-        "distinct_agents": str(len(payload.get("agents", []))),
-        "first_prompt_date": first_date,
-        "last_prompt_date": last_date,
-        "long_prompt_pct": f"{long_prompt_pct:.0f}",
-        # Pre-rendered HTML chunks
-        "daily_bars_svg": svg_daily_bars(daily),
-        "hour_clock_svg": svg_hour_clock(hourly),
-        "models_table": models_table_html(payload.get("models", []), total_tokens=total_tokens or 1),
-        "agents_chart": agents_chart_html(payload.get("agents", []), total_tokens=total_tokens or 1),
-        "projects_list": projects_list_html(
+        "streak_longest":     str(streak_long),
+        "streak_current":     str(streak_cur),
+        "distinct_projects":  str(len(payload.get("projects", []))),
+        "distinct_models":    str(len(payload.get("models", []))),
+        "distinct_agents":    str(len(payload.get("agents", []))),
+        "first_prompt_date":  first_date,
+        "last_prompt_date":   last_date,
+        "daily_bars_svg":     svg_daily_bars(daily),
+        "hour_clock_svg":     svg_hour_clock(hourly),
+        "models_table":       models_table_html(payload.get("models", []), total_tokens=total_tokens or 1),
+        "projects_list":      projects_list_html(
             payload.get("projects", []), payload["dataWindow"]["latest"]
         ),
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Per-persona placeholder→builder dispatch table.
-# Each entry: placeholder_name → (data_key_in_persona_data_block, builder_fn).
 PERSONA_BUILDERS: Dict[str, Dict[str, Tuple[str, Any]]] = {
-    "comic": {
-        "pop_culture":       ("pop_culture_equivalents", comic_pop_culture_html),
-        "hall_of_shame":     ("hall_of_shame",           comic_hall_of_shame_html),
-        "trivia_card":       ("trivia_card",             comic_trivia_html),
-    },
-    "brutalist": {
-        "stale_debt":        ("stale_debt",              brutalist_stale_debt_html),
-        "dependence_index":  ("dependence_index",        brutalist_dependence_html),
-        "repeat_offenders":  ("repeat_offenders",        brutalist_repeat_offenders_html),
-    },
-    "terminal": {
-        "distribution_stats": ("distribution_stats",     terminal_distribution_html),
-        "hourly_heatmap":    ("hourly_heatmap",          terminal_heatmap_svg),
-        "anomaly_log":       ("anomaly_log",             terminal_anomalies_html),
-    },
-    "essay": {
-        "negative_space":    ("negative_space",          essay_negative_space_html),
-        "recurrence_diary":  ("recurrence_diary",        essay_recurrence_html),
-        "unread_conversation": ("unread_conversation",   essay_unread_html),
-    },
-    "ft": {
-        "capital_allocation_table": ("capital_allocation_table", ft_capital_html),
-        "concentration_metrics":    ("concentration_metrics",    ft_hhi_html),
-        "monthly_pnl":              ("monthly_pnl",              ft_pnl_html),
-    },
     "jojo": {
-        "stand_stats":      ("stand_stats",      jojo_stand_stats_html),
-        "psyche_breakdown": ("psyche_breakdown", jojo_psyche_html),
-        "stand_card":       ("stand_card",       jojo_stand_card_html),
+        "stand_stats":         ("stand_stats",          jojo_stand_stats_html),
+        "psyche_breakdown":    ("psyche_breakdown",     jojo_psyche_html),
+        "stand_card":          ("stand_card",           jojo_stand_card_html),
+    },
+    "bleach": {
+        "reiatsu_stats":       ("reiatsu_stats",        lambda d: jojo_stand_stats_html(d) if d else ""),  # reuse radar
+        "psyche_breakdown":    ("psyche_breakdown",     bleach_psyche_html),
+        "zanpakuto_card":      ("zanpakuto_card",       bleach_zanpakuto_card_html),
+    },
+    "hxh": {
+        "nen_assessment":      ("nen_assessment",       hxh_nen_assessment_html),
+        "ability_design":      ("ability_design",       hxh_ability_design_html),
+        "nen_progression":     ("nen_progression",      hxh_nen_progression_html),
     },
 }
+
+
+def _build_signature_visual(persona_key: str, python_derived: Dict[str, Any], persona_payload: Dict[str, Any]) -> str:
+    """All 3 personas need the persona_payload because the visual depends on
+    the chosen asset (Stand / Zanpakuto / Nen type)."""
+    if persona_key == "jojo":
+        return signature_visual_jojo(persona_payload)
+    if persona_key == "bleach":
+        return signature_visual_bleach(persona_payload)
+    if persona_key == "hxh":
+        return signature_visual_hxh(persona_payload)
+    return ""
 
 
 def render_persona(
@@ -1444,28 +1338,20 @@ def render_persona(
     persona_payload: Dict[str, Any],
     persona_key: str,
     persona_label: str,
-    cluster_svg: str,
     personality_tag: str,
-    profile_card: str,
+    python_derived: Dict[str, Any],
 ) -> Tuple[str, List[str]]:
-    """
-    persona_payload shape:
-      { "narrative": { ...flat strings... }, "data": { ...structured signature data... } }
-    """
     values = dict(derived)
     values["persona_key"] = persona_key
     values["persona_label"] = persona_label
     values["personality_tag"] = personality_tag
-    values["cluster_chart"] = cluster_svg
-    values["profile_card"] = profile_card
+    values["signature_visual"] = _build_signature_visual(persona_key, python_derived, persona_payload)
 
-    # Per-persona signature section HTML chunks (build from persona's data block).
     data_block = persona_payload.get("data", {}) or {}
     builders = PERSONA_BUILDERS.get(persona_key, {})
     for placeholder, (data_key, builder) in builders.items():
         values[placeholder] = builder(data_block.get(data_key))
 
-    # Narrative fields — escape so authors can't break the template HTML.
     narrative = persona_payload.get("narrative") or {}
     for k, v in narrative.items():
         values[k] = html.escape(str(v)).replace("\n", "<br>")
@@ -1490,12 +1376,9 @@ def main() -> int:
 
     derived = derive(payload)
 
-    # Shared LLM-authored payload (clusters, tag, deep profile).
     shared = narratives.get("_shared", {})
-    clusters = shared.get("clusters", [])
-    cluster_svg = svg_cluster_bars(clusters)
     personality_tag = shared.get("personality_tag", "—")
-    profile_card = profile_card_html(shared.get("personality_profile") or {})
+    python_derived = shared.get("python_derived", {}) or {}
 
     summary_lines = []
     for idx, (key, label) in enumerate(PERSONAS, start=1):
@@ -1506,13 +1389,12 @@ def main() -> int:
         template = template_path.read_text(encoding="utf-8")
         narrative = narratives.get(key, {})
         html_out, missing = render_persona(
-            template, derived, narrative, key, label, cluster_svg, personality_tag, profile_card
+            template, derived, narrative, key, label, personality_tag, python_derived
         )
         out_file = out_dir / f"{idx:02d}-{key}.html"
         out_file.write_text(html_out, encoding="utf-8")
         summary_lines.append(f"  {key:<10s} → {out_file}  ({len(missing)} placeholders unmatched)")
 
-    # Persist the source payload for debugging / re-generation.
     (out_dir / "data.json").write_text(json.dumps(payload, indent=2, ensure_ascii=False))
 
     index_html = build_index(payload, narratives)

@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>{{title}} · 念能力档案</title>
+<style>
+  :root {
+    --void:#0a1a2a; --deep:#001428; --paper:#f4f0e0;
+    --signal:#5dc0ff; --signal-hi:#7fc9ff; --sterile:#cfe8ff;
+    --accent:#e8a83a; --alarm:#ff6a6a;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0;
+    background: var(--paper);
+    background-image:
+      radial-gradient(circle at 18% 12%, rgba(93,192,255,.08) 0, transparent 36%),
+      radial-gradient(circle at 82% 88%, rgba(232,168,58,.06) 0, transparent 40%);
+    color:#1a1a2a;
+    font-family:-apple-system,"PingFang SC","SF Mono",sans-serif;
+    line-height:1.55;
+  }
+  .wrap { max-width:1080px; margin:0 auto; padding:36px 32px 96px; }
+  .nav { text-align:right; margin-bottom:16px; }
+  .nav a { color:var(--void); font-size:11px; letter-spacing:.16em; text-decoration:none; border-bottom:1px solid var(--void); text-transform:uppercase; }
+
+  .header-bar {
+    border:1px solid var(--void); padding:8px 14px;
+    background:rgba(93,192,255,.05);
+    margin-bottom:16px;
+    display:flex; justify-content:space-between; align-items:center;
+    font-size:11px; letter-spacing:.18em; color:var(--void);
+  }
+  .header-bar .classification { color:var(--alarm); font-weight:900; }
+
+  h1 {
+    font-family:"SF Mono","Menlo",monospace;
+    font-size:64px; font-weight:900; letter-spacing:.04em;
+    color:var(--void); margin:8px 0;
+  }
+  .sub {
+    font-family:"PingFang SC",sans-serif;
+    font-size:20px; line-height:1.55; max-width:760px;
+    color:var(--void); margin:14px 0 24px;
+  }
+  .signal-meta {
+    border-top:1px solid var(--void); border-bottom:1px solid var(--void);
+    padding:8px 0; margin-bottom:36px;
+    font-size:11px; letter-spacing:.14em; color:var(--void); opacity:.85;
+  }
+
+  .signature-stage {
+    margin:20px 0 32px; padding:0;
+    background:#fff; border:2px solid var(--void);
+    box-shadow: 0 8px 30px rgba(0,0,0,.1);
+  }
+  .signature-stage svg { display:block; margin:0 auto; max-width:640px; }
+
+  section {
+    margin:0 0 28px;
+    background:rgba(255,255,255,.85);
+    border:1px solid var(--void);
+    border-left:4px solid var(--signal);
+    padding:24px 28px;
+    position:relative;
+  }
+  section::before {
+    content: attr(data-rank);
+    position:absolute; top:-10px; left:18px;
+    background:var(--paper); color:var(--void);
+    padding:0 10px; font-size:11px; letter-spacing:.24em;
+    text-transform:uppercase; font-family:"SF Mono",monospace; font-weight:900;
+  }
+  h2 {
+    margin:0 0 16px; font-family:"SF Mono",monospace;
+    font-size:18px; font-weight:900; color:var(--void);
+    letter-spacing:.12em; text-transform:uppercase;
+    padding-bottom:8px; border-bottom:1px dashed var(--void);
+  }
+
+  .stat-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  .stat {
+    text-align:left; padding:18px;
+    background:rgba(93,192,255,.06);
+    border:1px solid var(--void);
+  }
+  .stat .n { font-size:32px; font-weight:900; color:var(--void); font-family:"SF Mono",monospace; }
+  .stat .l { font-size:11px; letter-spacing:.18em; opacity:.7; margin-top:4px; text-transform:uppercase; }
+
+  .narrative {
+    margin-top:16px; padding:12px 16px;
+    background:rgba(93,192,255,.06);
+    border-left:3px solid var(--signal);
+    font-size:15px; font-family:"PingFang SC",sans-serif;
+  }
+
+  .identity-card {
+    padding:18px 20px;
+    background:rgba(93,192,255,.04);
+    border:1px solid var(--void);
+    border-left:3px solid var(--alarm);
+    font-family:"SF Mono","Menlo",monospace;
+    font-size:13px; line-height:1.95;
+    white-space:pre-wrap;
+  }
+
+  /* NEN ASSESSMENT */
+  .nen-assessment { display:grid; grid-template-columns: 1fr; gap:12px; }
+  .nen-primary-banner { font-family:"SF Mono",monospace; font-size:14px; letter-spacing:.16em; color:var(--void); padding:8px 12px; background:rgba(93,192,255,.1); border-left:4px solid var(--alarm); }
+  .nen-primary-banner .primary-type { font-size:20px; color:var(--alarm); font-weight:900; }
+  .nen-secondary { font-family:"SF Mono",monospace; font-size:12px; color:var(--void); opacity:.85; letter-spacing:.12em; }
+  .nen-hex-wrap { display:flex; justify-content:center; }
+  .nen-hex .ring { fill:none; stroke:var(--void); stroke-opacity:.18; stroke-width:1; }
+  .nen-hex .spoke { stroke:var(--void); stroke-opacity:.18; stroke-width:1; }
+  .nen-hex .stat-polygon { fill:var(--signal); fill-opacity:.22; stroke:var(--signal); stroke-width:2.5; }
+  .nen-hex .axis-cn { font-family:"STKaiti","PingFang SC",serif; font-size:16px; font-weight:800; fill:var(--void); }
+  .nen-hex .axis-cn.primary { fill:var(--alarm); font-size:18px; }
+  .nen-hex .axis-en { font-family:"SF Mono",monospace; font-size:10px; letter-spacing:.1em; fill:var(--void); opacity:.7; }
+  .nen-diagnosis { font-family:"PingFang SC",sans-serif; font-size:14px; padding:12px 16px; background:rgba(232,168,58,.1); border-left:4px solid var(--accent); }
+
+  /* ABILITY CARDS */
+  .ability-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
+  .ability-card { padding:16px 18px; background:#fff; border:1px solid var(--void); border-left:6px solid var(--accent); }
+  .ability-name-jp { font-family:"STKaiti","Hiragino Mincho ProN",serif; font-size:20px; font-weight:900; color:var(--void); }
+  .ability-name-cn { font-family:"PingFang SC",sans-serif; font-size:13px; color:var(--void); opacity:.7; margin-bottom:8px; }
+  .ability-type { font-family:"SF Mono",monospace; font-size:11px; letter-spacing:.18em; color:var(--alarm); margin-bottom:10px; padding-bottom:6px; border-bottom:1px dashed var(--void); }
+  .ability-effect { font-size:14px; line-height:1.7; font-family:"PingFang SC",sans-serif; margin-bottom:10px; }
+  .ability-constraint, .ability-vow { font-size:12px; line-height:1.6; font-family:"PingFang SC",sans-serif; padding:6px 8px; margin-bottom:4px; background:rgba(93,192,255,.06); }
+  .ability-constraint .label, .ability-vow .label { color:var(--alarm); font-weight:900; }
+  .ability-verdict { margin-top:8px; padding-top:6px; border-top:1px dashed var(--void); font-size:12px; font-style:italic; color:var(--accent); }
+
+  /* PROGRESSION */
+  .nen-progression { display:grid; gap:8px; }
+  .stage-row { display:flex; align-items:center; gap:14px; padding:10px 14px; background:rgba(93,192,255,.05); border:1px solid var(--void); }
+  .stage-row.mastered { border-left:4px solid var(--signal); }
+  .stage-check { font-family:"SF Mono",monospace; font-size:18px; font-weight:900; color:var(--signal); width:24px; text-align:center; }
+  .stage-name { font-family:"STKaiti",serif; font-size:16px; font-weight:900; width:120px; }
+  .stage-evidence { font-size:13px; opacity:.85; font-family:"PingFang SC",sans-serif; }
+  .prog-current, .prog-next { padding:8px 12px; background:rgba(232,168,58,.08); border-left:4px solid var(--accent); font-family:"SF Mono",monospace; font-size:13px; }
+  .prog-verdict { padding:12px 16px; background:var(--void); color:var(--paper); font-family:"STKaiti",serif; font-size:16px; font-style:italic; }
+
+  .footer { margin-top:48px; padding-top:16px; border-top:1px solid var(--void); text-align:center; font-size:11px; opacity:.6; letter-spacing:.14em; color:var(--void); text-transform:uppercase; }
+  .closing { font-family:"PingFang SC",sans-serif; font-size:18px; font-style:italic; margin-bottom:12px; color:var(--alarm); text-transform:none; letter-spacing:0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="nav"><a href="index.html">← INDEX</a></div>
+
+  <div class="header-bar">
+    <div>HUNTER 協会档案 · CLASSIFICATION:<span class="classification"> ULTRA · 認定済</span></div>
+    <div>DOCUMENT REF · 念能力者 #{{personality_tag}}</div>
+  </div>
+  <h1>{{title}}</h1>
+  <p class="sub">{{hero_subtitle}}</p>
+  <div class="signal-meta">REGISTRATION: {{date_range_start}} → {{date_range_end}} · {{date_range_days}} DAYS · {{event_count}} INVOCATIONS</div>
+
+  <div class="signature-stage">{{signature_visual}}</div>
+
+  <section data-rank="00 · BASE METRICS">
+    <h2>// オーラ baseline metrics</h2>
+    <div class="stat-grid">
+      <div class="stat"><div class="n">{{total_tokens}}</div><div class="l">オーラ容量</div></div>
+      <div class="stat"><div class="n">{{total_prompts}}</div><div class="l">念発動回数</div></div>
+      <div class="stat"><div class="n">{{total_cost_usd}}</div><div class="l">修业报酬</div></div>
+    </div>
+    <div class="narrative">{{narrative_open}}</div>
+  </section>
+
+  <section data-rank="01 · DOSSIER">
+    <h2>// 念能力者 dossier</h2>
+    <div class="identity-card">{{identity_card}}</div>
+  </section>
+
+  <section data-rank="02 · NEN ANALYSIS">
+    <h2>// 系判定 · nen affinity assessment</h2>
+    <p style="margin:0 0 14px; font-size:14px; font-family:'PingFang SC',sans-serif;">{{nen_assessment_intro}}</p>
+    {{nen_assessment}}
+  </section>
+
+  <section data-rank="03 · ABILITIES">
+    <h2>// 登録念能力 · constraints &amp; vows</h2>
+    <p style="margin:0 0 14px; font-size:14px; font-family:'PingFang SC',sans-serif;">{{ability_design_intro}}</p>
+    {{ability_design}}
+  </section>
+
+  <section data-rank="04 · PROGRESSION">
+    <h2>// 修业進捗 · 纒 / 練 / 絶 / 発</h2>
+    <p style="margin:0 0 14px; font-size:14px; font-family:'PingFang SC',sans-serif;">{{nen_progression_intro}}</p>
+    {{nen_progression}}
+  </section>
+
+  <div class="footer">
+    <div class="closing">{{closing_line}}</div>
+    <div>// tokenbar-report · 念能力者协会 · {{override_count}} ovr · {{default_models_count}} default //</div>
+  </div>
+</div>
+</body>
+</html>

@@ -5,6 +5,7 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
     case claudeCode
     case geminiCLI
     case hermes
+    case openclaw
     case openCode
     case custom
 
@@ -18,6 +19,8 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
             "Gemini CLI"
         case .hermes:
             "Hermes"
+        case .openclaw:
+            "OpenClaw"
         case .openCode:
             "OpenCode"
         case .custom:
@@ -35,6 +38,8 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
             0.50
         case .hermes:
             0.15
+        case .openclaw:
+            2.50
         case .openCode:
             0.00
         case .custom:
@@ -48,6 +53,7 @@ public enum ParserKind: String, Sendable, Hashable {
     case claudeCode
     case hermes
     case gemini
+    case openclaw
     case openCode
     case sample
     case custom
@@ -78,6 +84,7 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
     case codex
     case hermes
     case gemini
+    case openclaw
     case openCode
 
     public var displayName: String {
@@ -90,6 +97,8 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             "Hermes"
         case .gemini:
             "Gemini CLI"
+        case .openclaw:
+            "OpenClaw"
         case .openCode:
             "OpenCode"
         }
@@ -105,6 +114,8 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             "state.db"
         case .gemini:
             "**/chats/*.json"
+        case .openclaw:
+            "**/sessions/*.jsonl"
         case .openCode:
             "opencode.db"
         }
@@ -120,6 +131,8 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             .hermes
         case .gemini:
             .geminiCLI
+        case .openclaw:
+            .openclaw
         case .openCode:
             .openCode
         }
@@ -135,6 +148,8 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             .hermes
         case .gemini:
             .gemini
+        case .openclaw:
+            .openclaw
         case .openCode:
             .openCode
         }

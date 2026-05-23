@@ -888,14 +888,15 @@ def notebook_routine_html(data: Dict[str, Any]) -> str:
             f'<span class="broken-ctx">{_esc(b.get("context",""))}</span>'
             f'<span class="broken-blurb">{_esc(b.get("blurb",""))}</span></li>'
         )
+    broken_html = ('<ul class="routine-broken">' + "".join(broke_rows) + "</ul>") if broke_rows else ""
     return (
-        f'<div class="routine">'
-        f'<div class="routine-head">'
+        '<div class="routine">'
+        '<div class="routine-head">'
         f'<span class="routine-band">{band}</span>'
         f'<span class="routine-day">{day}</span></div>'
         f'<div class="routine-rhythm">{rhythm}</div>'
-        f'{"<ul class=\"routine-broken\">" + "".join(broke_rows) + "</ul>" if broke_rows else ""}'
-        f'</div>'
+        f'{broken_html}'
+        '</div>'
     )
 
 

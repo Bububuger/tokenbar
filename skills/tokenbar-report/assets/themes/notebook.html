@@ -6,78 +6,29 @@
 <style>
   :root { --paper:#FAF6E7; --line:#d8c997; --ink:#2d2a1c; --pen:#3a5a8c; --red:#b94a48; --doodle:#5a7d3b; }
   * { box-sizing:border-box; }
-  body {
-    margin:0; padding:48px 24px 100px;
-    color:var(--ink); background:var(--paper);
-    background-image:repeating-linear-gradient(0deg, transparent 0, transparent 31px, rgba(216,201,151,.45) 31px, rgba(216,201,151,.45) 32px);
-    font-family:"Caveat","Patrick Hand","ZCOOL XiaoWei","KaiTi","STKaiti","Noto Serif SC",serif;
-    line-height:1.45; font-size:20px;
-  }
+  body { margin:0; padding:48px 24px 100px; color:var(--ink); background:var(--paper); background-image:repeating-linear-gradient(0deg, transparent 0, transparent 31px, rgba(216,201,151,.45) 31px, rgba(216,201,151,.45) 32px); font-family:"Caveat","Patrick Hand","ZCOOL XiaoWei","KaiTi","STKaiti","Noto Serif SC",serif; line-height:1.45; font-size:20px; }
   .wrap { max-width:780px; margin:0 auto; }
   .topline { display:flex; justify-content:space-between; font-size:14px; opacity:.6; margin-bottom:8px; }
   .topline .left::before { content:"📓 "; }
   .nav a { color:var(--ink); text-decoration:none; border-bottom:1px solid var(--ink); font-size:14px; }
-  h1 {
-    font-size:62px; line-height:1; margin:8px 0 6px; font-weight:700;
-    color:var(--pen);
-    text-shadow:1px 1px 0 rgba(58,90,140,.15);
-  }
-  h1::after { content:""; display:block; width:60%; height:6px; margin-top:6px;
-    background:linear-gradient(90deg, var(--pen) 0%, transparent 100%); border-radius:3px; }
+  h1 { font-size:62px; line-height:1; margin:8px 0 6px; font-weight:700; color:var(--pen); text-shadow:1px 1px 0 rgba(58,90,140,.15); }
+  h1::after { content:""; display:block; width:60%; height:6px; margin-top:6px; background:linear-gradient(90deg, var(--pen) 0%, transparent 100%); border-radius:3px; }
   .deck { font-size:24px; color:var(--ink); margin:6px 0 28px; }
   .deck b { color:var(--red); }
   .meta { font-size:14px; color:#6e6750; margin-bottom:32px; }
   section { margin:28px 0; padding:18px 22px; background:rgba(255,255,255,.4); border-radius:8px; position:relative; }
-  section::before {
-    content:""; position:absolute; left:-14px; top:18px;
-    width:6px; height:80%; background:var(--pen); opacity:.4; border-radius:3px;
-  }
-  h2 {
-    font-size:28px; margin:0 0 12px; color:var(--red); font-weight:700;
-    display:inline-block; padding-bottom:3px;
-    border-bottom:3px dotted var(--red);
-  }
+  section::before { content:""; position:absolute; left:-14px; top:18px; width:6px; height:80%; background:var(--pen); opacity:.4; border-radius:3px; }
+  h2 { font-size:28px; margin:0 0 12px; color:var(--red); font-weight:700; display:inline-block; padding-bottom:3px; border-bottom:3px dotted var(--red); }
   p { margin:0 0 0.8em; }
-  .underline { background:linear-gradient(180deg, transparent 60%, rgba(245,224,80,.6) 60%); padding:0 2px; }
+  .preface { color:#6e6750; font-size:18px; font-style:italic; margin:0 0 14px; }
   .stat-strip { display:flex; gap:36px; margin:18px 0; }
-  .stat-strip .stat .n { font-size:48px; font-weight:700; color:var(--pen); line-height:1; }
-  .stat-strip .stat .l { font-size:14px; color:#6e6750; }
-  .sticky-note {
-    display:inline-block; background:#fff89b; padding:12px 16px;
-    box-shadow:2px 4px 8px rgba(0,0,0,.1); transform:rotate(-1.5deg);
-    margin:8px 0; font-size:18px;
-  }
+  .stat-strip .n { font-size:48px; font-weight:700; color:var(--pen); line-height:1; }
+  .stat-strip .l { font-size:14px; color:#6e6750; }
+  .sticky-note { display:inline-block; background:#fff89b; padding:12px 16px; box-shadow:2px 4px 8px rgba(0,0,0,.1); transform:rotate(-1.5deg); margin:8px 0; font-size:18px; }
   .sticky-note.pink { background:#ffbbcd; }
   .sticky-note.blue { background:#bee5ff; }
-  table.leaderboard { width:100%; border-collapse:collapse; font-size:18px; }
-  table.leaderboard th, table.leaderboard td { padding:6px 4px; text-align:left; border-bottom:1px dashed var(--ink); }
-  table.leaderboard th { font-size:14px; color:var(--red); }
-  .model-tokens, .model-share, .model-cost { text-align:right; font-variant-numeric:tabular-nums; font-family:"Caveat","Patrick Hand",sans-serif; color:var(--pen); }
-  .cost-tag { font-size:10px; padding:1px 4px; background:var(--red); color:#fff; margin-left:3px; border-radius:3px; font-family:sans-serif; }
-  .agents-chart .agent-row { display:grid; grid-template-columns:140px 1fr 60px 80px; gap:8px; padding:5px 0; align-items:center; font-size:18px; }
-  .agent-bar-wrap { height:14px; background:transparent; border-bottom:2px solid var(--ink); position:relative; }
-  .agent-bar { display:block; height:12px; background:repeating-linear-gradient(45deg, var(--pen) 0 6px, transparent 6px 8px); }
-  .agent-pct, .agent-tokens { text-align:right; color:var(--pen); font-variant-numeric:tabular-nums; }
-  ol.projects-list { padding-left:0; list-style:none; counter-reset:p; }
-  .projects-list .project-row { counter-increment:p; padding:5px 0; font-size:20px; }
-  .projects-list .project-row::before { content:"☐ "; color:var(--doodle); margin-right:4px; }
-  .project-tokens { float:right; color:var(--pen); font-variant-numeric:tabular-nums; }
-  .project-stale { font-size:14px; color:#9b8d74; font-style:italic; }
-  svg.chart.daily { display:block; width:100%; height:140px; }
-  .daily-bar { fill:var(--pen); opacity:.7; }
-  .daily-bar-peak { fill:var(--red); opacity:1; }
-  .daily-bar-empty { fill:rgba(0,0,0,.06); }
-  .axis-label { font-size:12px; fill:#6e6750; font-family:"Caveat",sans-serif; }
-  svg.chart.hour-clock { display:block; margin:0 auto; }
-  .hour-seg { fill:var(--pen); opacity:.55; stroke:var(--paper); stroke-width:1.5; }
-  .hour-seg-peak { fill:var(--red); opacity:1; }
-  .hour-seg-empty { fill:rgba(0,0,0,.05); }
-  .hour-tick { font-size:14px; fill:var(--ink); font-family:"Caveat",sans-serif; font-weight:700; }
-  .cluster-label { font-size:18px; fill:var(--ink); font-family:"Caveat",sans-serif; font-weight:700; }
-  .cluster-bar { fill:var(--pen); opacity:.7; }
-  .cluster-pct { font-size:16px; fill:var(--red); font-family:"Caveat",sans-serif; font-weight:700; }
-  .footer { margin-top:48px; text-align:center; font-size:14px; color:#6e6750; padding-top:14px; border-top:1px dashed var(--ink); }
-  /* Profile dossier — notebook */
+
+  /* Profile dossier */
   .profile-card { background:rgba(255,255,255,.6); padding:14px; border-radius:8px; }
   .profile-headline { display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; padding-bottom:14px; margin-bottom:14px; border-bottom:1px dashed var(--ink); }
   .profile-chip { display:inline-flex; flex-direction:column; padding:8px 14px; background:#fff89b; transform:rotate(-1.5deg); box-shadow:2px 3px 6px rgba(0,0,0,.1); min-width:110px; }
@@ -93,14 +44,42 @@
   .axis-name { font-size:14px; color:#6e6750; }
   .axis-value { font-size:18px; font-weight:700; margin-top:2px; color:var(--pen); text-transform:capitalize; }
   .profile-evidence { margin:6px 0 0; padding-left:24px; font-size:16px; line-height:1.7; }
-  .profile-evidence li { margin-bottom:4px; }
   .profile-trait-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; margin-top:6px; }
   .profile-trait { padding:10px 14px; background:rgba(255,255,255,.5); border:1px dashed var(--ink); border-radius:8px; }
   .trait-name { font-size:18px; font-weight:700; color:var(--pen); }
   .trait-name::before { content:"☆ "; color:var(--red); }
   .trait-evidence { font-size:14px; color:#6e6750; margin-top:3px; }
   .profile-quirk-list { padding-left:24px; font-size:16px; line-height:1.7; }
-  .profile-quirk-list li::marker { content:"♥ "; color:var(--red); }
+
+  /* Sig 1: biographies */
+  .biographies { display:grid; gap:14px; }
+  .bio-row { padding:12px 16px; background:rgba(255,255,255,.55); border:1px dashed var(--ink); border-radius:10px; }
+  .bio-head { display:flex; justify-content:space-between; gap:14px; align-items:baseline; }
+  .bio-project { font-size:22px; font-weight:700; color:var(--pen); }
+  .bio-span { font-size:14px; color:#6e6750; }
+  .bio-numbers { font-size:16px; color:var(--red); margin:4px 0 8px; font-style:italic; }
+  .bio-text { font-size:18px; line-height:1.6; }
+
+  /* Sig 2: the week that was */
+  .week-story { padding:14px 16px; background:#fff89b; border-radius:8px; box-shadow:2px 3px 6px rgba(0,0,0,.1); }
+  .week-head { display:flex; justify-content:space-between; gap:14px; align-items:baseline; margin-bottom:10px; padding-bottom:8px; border-bottom:2px dotted var(--red); }
+  .week-label { font-size:24px; font-weight:700; color:var(--red); }
+  .week-total { font-size:16px; color:#6e6750; }
+  .week-text { font-size:18px; line-height:1.7; }
+
+  /* Sig 3: routine */
+  .routine { padding-top:6px; }
+  .routine-head { display:flex; gap:14px; margin-bottom:10px; flex-wrap:wrap; }
+  .routine-band, .routine-day { padding:6px 14px; background:#bee5ff; border-radius:999px; font-weight:700; color:var(--pen); }
+  .routine-day { background:#fff89b; }
+  .routine-rhythm { font-size:18px; margin:8px 0 14px; }
+  .routine-broken { list-style:none; padding:0; }
+  .routine-broken li { padding:8px 0; border-top:1px dashed var(--ink); display:flex; gap:12px; flex-wrap:wrap; align-items:baseline; }
+  .broken-date { font-weight:700; }
+  .broken-ctx { color:var(--red); font-style:italic; }
+  .broken-blurb { color:#6e6750; flex:1; }
+
+  .footer { margin-top:48px; text-align:center; font-size:14px; color:#6e6750; padding-top:14px; border-top:1px dashed var(--ink); }
 </style>
 </head>
 <body>
@@ -117,65 +96,10 @@
     <h2>说在前面</h2>
     <p style="font-size:22px;">{{narrative_open}}</p>
     <div class="stat-strip">
-      <div class="stat"><div class="n">{{total_tokens}}</div><div class="l">总 token</div></div>
-      <div class="stat"><div class="n">{{total_prompts}}</div><div class="l">总 prompt</div></div>
-      <div class="stat"><div class="n">{{total_cost_usd}}</div><div class="l">估算花费</div></div>
+      <div><div class="n">{{total_tokens}}</div><div class="l">总 token</div></div>
+      <div><div class="n">{{total_prompts}}</div><div class="l">总 prompt</div></div>
+      <div><div class="n">{{total_cost_usd}}</div><div class="l">估算花费</div></div>
     </div>
-  </section>
-
-  <section>
-    <h2>最猛的那一天</h2>
-    <div class="sticky-note pink">{{heaviest_day_date}} · <b>{{heaviest_day_tokens}}</b> tokens · {{heaviest_day_prompts}} prompts</div>
-    <p style="font-size:22px; margin-top:14px;">{{heaviest_day_blurb}}</p>
-  </section>
-
-  <section>
-    <h2>最长的那一天</h2>
-    <p style="font-size:22px;"><span class="underline">{{longest_day_date}}</span> 那天，你点亮了 <b>{{longest_day_hours}}/24</b> 个小时，烧掉 {{longest_day_tokens}} tokens。该歇歇了。</p>
-  </section>
-
-  <section>
-    <h2>你的作息</h2>
-    <div style="display:grid; grid-template-columns:240px 1fr; gap:24px; align-items:center;">
-      <div>{{hour_clock_svg}}</div>
-      <div>
-        <div class="sticky-note blue">{{peak_hour_label}} 是你的"嗨点"——{{peak_hour_tokens}} tokens</div>
-        <p style="margin-top:14px;">夜里 23-05 占 <b>{{night_owl_pct}}%</b>；清晨 06-10 只有 <b>{{morning_pct}}%</b>。</p>
-        <p>{{hour_clock_blurb}}</p>
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <h2>这几个月你大概是这样的</h2>
-    {{daily_bars_svg}}
-    <p style="margin-top:12px;">连续敲过 <b>{{streak_longest}}</b> 天没断。当前 streak <b>{{streak_current}}</b>。周末占 <b>{{weekend_pct}}%</b>——你呀，周末也不放过自己。</p>
-    <p>{{streak_blurb}}</p>
-  </section>
-
-  <section>
-    <h2>你常用的模型</h2>
-    {{models_table}}
-    <p style="margin-top:12px;">{{model_blurb}}</p>
-  </section>
-
-  <section>
-    <h2>你的工具箱</h2>
-    {{agents_chart}}
-    <p>{{agent_blurb}}</p>
-  </section>
-
-  <section>
-    <h2>你在搞哪些项目</h2>
-    {{projects_list}}
-    <p style="margin-top:12px;">{{project_blurb}}</p>
-  </section>
-
-  <section>
-    <h2>你都在问 AI 什么</h2>
-    {{cluster_chart}}
-    <p style="margin-top:14px;">{{cluster_blurb}}</p>
-    <div class="sticky-note">{{personality_tag}} · {{personality_tag_blurb}}</div>
   </section>
 
   <section>
@@ -184,11 +108,29 @@
     <div class="sticky-note pink" style="margin-top:14px; font-size:18px;">{{profile_narrative}}</div>
   </section>
 
+  <section>
+    <h2>几个老朋友</h2>
+    <p class="preface">{{biographies_intro}}</p>
+    {{project_biographies}}
+  </section>
+
+  <section>
+    <h2>那一周你是这样的</h2>
+    <p class="preface">{{week_that_was_intro}}</p>
+    {{the_week_that_was}}
+  </section>
+
+  <section>
+    <h2>规律 vs 出格</h2>
+    <p class="preface">{{routine_intro}}</p>
+    {{routine_and_breaks}}
+  </section>
+
   <section style="background:rgba(58,90,140,.08); text-align:center;">
     <p style="font-size:28px; color:var(--pen); font-weight:700;">{{closing_line}}</p>
   </section>
 
-  <div class="footer">{{distinct_projects}} 个项目 · {{distinct_models}} 个模型 · {{distinct_agents}} 个 agent · 长 prompt {{long_prompt_pct}}%</div>
+  <div class="footer">{{distinct_projects}} 个项目 · {{distinct_models}} 个模型 · {{distinct_agents}} 个 agent</div>
 </div>
 </body>
 </html>

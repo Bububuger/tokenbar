@@ -121,9 +121,12 @@ xcodebuild \
     exit 1
   }
 
-TBAR_BIN="$DERIVED_DATA/Build/Products/Release/tbar"
+# The `tbar` scheme builds the `TokenBarCLI` Xcode target — Xcode names the
+# output by the target, not the scheme. Look up TokenBarCLI here, then rename
+# to `tbar` when copying into the .app.
+TBAR_BIN="$DERIVED_DATA/Build/Products/Release/TokenBarCLI"
 if [[ ! -x "$TBAR_BIN" ]]; then
-  echo "  Error: tbar binary not found or not executable at $TBAR_BIN"
+  echo "  Error: TokenBarCLI binary not found or not executable at $TBAR_BIN"
   ls -la "$(dirname "$TBAR_BIN")" 2>/dev/null || true
   exit 1
 fi

@@ -1,24 +1,68 @@
-# TokenBar
+import Foundation
 
-This directory is the TokenBar product codebase.
+/// Deterministic sample usage events for first-launch / preview / demo when
+/// no real local agent logs are discoverable. Returns roughly one week of
+/// synthetic activity across a handful of agents, projects, and models.
+/// Output is fully deterministic given the same `referenceDate` so SwiftUI
+/// previews and snapshot tests stay stable.
+public enum SampleUsageProvider {
+    public static func events(referenceDate: Date) -> [UsageEvent] {
+        var events: [UsageEvent] = []
+        let calendar = Calendar(identifier: .gregorian)
 
-Current source of truth for product planning:
+        // (agent, parser, modelName). Picked to cover the main agent flavours
+        // the rest of the app special-cases.
+        let agents: [(AgentKind, ParserKind, String)] = [
+            (.claudeCode, .claudeCode, "claude-opus-4-7"),
+            (.codex,      .codex,      "gpt-5.5"),
+            (.geminiCLI,  .gemini,     "gemini-2.5-pro"),
+        ]
 
+        let projects: [(name: String, path: String)] = [
+            ("tokenbar",   "/Users/sample/projects/tokenbar"),
+            ("my-cli-tool", "/Users/sample/projects/my-cli-tool"),
+            ("side-project",    "/Users/sample/projects/side-project"),
+        ]
 
-Current bootstrap:
+        // 7 days × 4 hours-of-day × 3 agents = 84 sample events.
+        let hoursOfDay = [9, 12, 15, 21]
 
-- Xcode-generated macOS app target (`project.yml` -> `TokenBar.xcodeproj`)
-- `TokenBarCore` domain layer with deterministic sample data
-- real `swift-testing` coverage for the aggregation layer
-- SwiftUI app shell with menu bar extra, main window, and settings placeholder
-- `script/build.sh`, `script/test.sh`, `script/build_and_run.sh`
-- `script/autoresearch_acceptance.sh`
-- project-local Xcode env bootstrap via `script/xcode_env.sh`
+        for dayOffset in 0..<7 {
+            guard let day = calendar.date(byAdding: .day, value: -dayOffset, to: referenceDate) else { continue }
+            for hour in hoursOfDay {
+                let minute = (hour * 13) % 60
+                guard let timestamp = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day) else { continue }
+                for (agentIdx, agentInfo) in agents.enumerated() {
+                    let (agent, parser, model) = agentInfo
+                    let projIdx = (dayOffset + hour + agentIdx) % projects.count
+                    let proj = projects[projIdx]
 
-Current launch behavior:
+                    let inputTokens   = 4_000 + dayOffset * 1_200 + agentIdx * 400
+                    let outputTokens  = 2_500 + dayOffset * 700  + agentIdx * 200
+                    let cacheTokens   = inputTokens * 8
 
-- the repo now builds a real development-signed Xcode app target
-- on this machine, direct terminal launch still depends on macOS Developer Mode
-- `script/build_and_run.sh` therefore falls back to asking Xcode to run the
-  `TokenBar` scheme when terminal-launched developer apps are blocked by system
-  policy
+                    events.append(
+                        UsageEvent(
+                            id:               "sample-\(dayOffset)-\(hour)-\(agent.rawValue)",
+                            agent:            agent,
+                            projectPath:      proj.path,
+                            projectName:      proj.name,
+                            sessionId:        "sample-session-\(dayOffset)-\(agent.rawValue)",
+                            timestamp:        timestamp,
+                            inputTokens:      inputTokens,
+                            outputTokens:     outputTokens,
+                            cacheTokens:      cacheTokens,
+                            reasoningTokens:  agent == .codex ? 800 : nil,
+                            modelName:        model,
+                            sourcePath:       "sample://\(agent.rawValue)/\(proj.name)",
+                            parser:           parser,
+                            confidence:       1.0
+                        )
+                    )
+                }
+            }
+        }
+
+        return events
+    }
+}

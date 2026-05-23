@@ -5,8 +5,7 @@
 <title>{{title}} · TokenBar Report</title>
 <style>
   :root {
-    --bg:#fff8d5; --ink:#111; --pop1:#FF4FA0; --pop2:#2BD4F8; --pop3:#FFE94A;
-    --pop4:#7CE38B; --shadow:rgba(0,0,0,.85);
+    --bg:#fff8d5; --ink:#111; --pop1:#FF4FA0; --pop2:#2BD4F8; --pop3:#FFE94A; --pop4:#7CE38B;
   }
   * { box-sizing:border-box; }
   body {
@@ -20,6 +19,8 @@
     color:var(--ink); line-height:1.5;
   }
   .wrap { max-width:880px; margin:0 auto; }
+  .nav { text-align:center; margin-bottom:24px; }
+  .nav a { color:var(--ink); font-size:13px; opacity:.6; text-decoration:none; border-bottom:1px solid var(--ink); }
   .badge {
     display:inline-block; padding:6px 14px;
     background:var(--ink); color:var(--pop3);
@@ -43,8 +44,7 @@
     display:inline-block; margin:0 0 14px;
     background:var(--pop3); padding:6px 14px;
     border:3px solid var(--ink); border-radius:10px;
-    box-shadow:3px 3px 0 var(--ink);
-    transform:rotate(-1deg);
+    box-shadow:3px 3px 0 var(--ink); transform:rotate(-1deg);
     font-size:20px; letter-spacing:-0.01em;
   }
   .stat-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
@@ -62,57 +62,7 @@
     padding:18px 20px; border-radius:18px; margin:18px 0 0;
     box-shadow:4px 4px 0 var(--ink);
   }
-  .speech::after {
-    content:""; position:absolute; bottom:-14px; left:42px;
-    width:24px; height:24px; background:#fff;
-    border-right:3px solid var(--ink); border-bottom:3px solid var(--ink);
-    transform:rotate(45deg);
-  }
-  .row { display:grid; grid-template-columns:240px 1fr; gap:24px; align-items:center; }
-  @media (max-width:720px) { .row { grid-template-columns:1fr; } .stat-grid { grid-template-columns:1fr 1fr; } }
-  .big-day { font-size:56px; font-weight:900; line-height:1; }
-  .big-day .date { display:block; font-size:14px; font-weight:600; opacity:.7; margin-top:6px; letter-spacing:.04em; }
-  .chip {
-    display:inline-block; padding:5px 12px; margin:0 6px 6px 0;
-    background:var(--pop3); border:2px solid var(--ink); border-radius:999px;
-    font-size:13px; font-weight:700;
-  }
-  table.leaderboard { width:100%; border-collapse:collapse; }
-  table.leaderboard th, table.leaderboard td {
-    padding:10px 8px; text-align:left; border-bottom:2px dashed var(--ink);
-    font-size:14px;
-  }
-  table.leaderboard th { font-weight:800; }
-  .model-tokens, .model-share, .model-cost { text-align:right; font-variant-numeric:tabular-nums; }
-  .cost-tag { font-size:10px; padding:2px 5px; background:var(--ink); color:var(--pop3); border-radius:4px; margin-left:4px; }
-  .agents-chart .agent-row {
-    display:grid; grid-template-columns:120px 1fr 60px 80px; gap:10px;
-    align-items:center; padding:6px 0; font-size:14px;
-  }
-  .agent-bar-wrap { background:rgba(0,0,0,.08); border-radius:6px; height:14px; border:2px solid var(--ink); }
-  .agent-bar { display:block; height:100%; background:var(--pop1); border-radius:4px; }
-  .agent-pct, .agent-tokens { text-align:right; font-variant-numeric:tabular-nums; }
-  ol.projects-list { padding-left:24px; }
-  .projects-list .project-row { font-size:15px; padding:4px 0; }
-  .project-tokens { float:right; font-weight:700; font-variant-numeric:tabular-nums; }
-  .project-stale { font-size:12px; opacity:.55; }
-  svg.chart.daily { display:block; width:100%; height:180px; background:rgba(0,0,0,.04); border-radius:8px; padding:6px; }
-  .daily-bar { fill:var(--pop2); }
-  .daily-bar-peak { fill:var(--pop1); }
-  .daily-bar-empty { fill:rgba(0,0,0,.08); }
-  .axis-label { font-size:9px; fill:var(--ink); opacity:.55; }
-  svg.chart.hour-clock { display:block; margin:0 auto; }
-  .hour-seg { fill:var(--pop2); stroke:var(--ink); stroke-width:1.5; }
-  .hour-seg-peak { fill:var(--pop1); }
-  .hour-seg-empty { fill:rgba(0,0,0,.05); }
-  .hour-tick { font-size:11px; font-weight:800; fill:var(--ink); }
-  .cluster-label { font-size:13px; font-weight:700; fill:var(--ink); }
-  .cluster-bar { fill:var(--pop4); stroke:var(--ink); stroke-width:1.5; }
-  .cluster-pct { font-size:12px; font-weight:700; fill:var(--ink); }
-  .footer { text-align:center; margin-top:48px; padding-top:24px; border-top:3px dashed var(--ink); font-size:13px; opacity:.65; }
-  .nav { text-align:center; margin-bottom:24px; }
-  .nav a { color:var(--ink); font-size:13px; opacity:.6; text-decoration:none; border-bottom:1px solid var(--ink); }
-  /* Profile dossier — themed for comic */
+  /* Profile dossier */
   .profile-card { background:#fff; }
   .profile-headline { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-bottom:18px; padding-bottom:14px; border-bottom:2px dashed var(--ink); }
   .profile-chip { display:inline-flex; flex-direction:column; padding:8px 14px; background:var(--pop3); border:3px solid var(--ink); border-radius:14px; box-shadow:3px 3px 0 var(--ink); min-width:96px; transform:rotate(-1deg); }
@@ -134,8 +84,33 @@
   .trait-name { font-size:14px; font-weight:800; }
   .trait-evidence { font-size:11px; opacity:.7; margin-top:3px; line-height:1.4; }
   .profile-quirk-list { padding-left:20px; font-size:13px; line-height:1.6; }
-  .profile-quirk-list li { margin-bottom:4px; }
-  .profile-quirk-list li::marker { content:"✦  "; }
+
+  /* Signature 1: pop culture */
+  .pop-culture { display:grid; gap:12px; }
+  .pop-row { display:grid; grid-template-columns:120px 160px 1fr; gap:14px; align-items:center; padding:12px 16px; background:var(--pop3); border:3px solid var(--ink); border-radius:14px; box-shadow:4px 4px 0 var(--ink); }
+  .pop-row:nth-child(even) { background:var(--pop2); }
+  .pop-count { font-size:28px; font-weight:900; }
+  .pop-unit { font-size:16px; font-weight:700; }
+  .pop-blurb { font-size:14px; line-height:1.4; }
+
+  /* Signature 2: hall of shame */
+  .hall-of-shame { display:grid; gap:14px; }
+  .shame-row { padding:14px 18px; background:#fff8d5; border:3px solid var(--ink); border-radius:14px; }
+  .shame-head { display:flex; justify-content:space-between; gap:14px; align-items:baseline; }
+  .shame-pattern { font-size:16px; font-weight:800; flex:1; }
+  .shame-count { background:var(--pop1); color:#fff; font-weight:900; padding:2px 10px; border-radius:999px; font-size:14px; }
+  .shame-samples { font-size:11px; opacity:.7; font-style:italic; margin:6px 0; padding-left:20px; }
+  .shame-samples li { margin-bottom:2px; }
+  .shame-blurb { font-size:14px; margin-top:6px; padding:8px 12px; background:var(--pop3); border:2px solid var(--ink); border-radius:8px; }
+
+  /* Signature 3: trivia */
+  .trivia-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; }
+  .trivia-row { padding:12px 16px; background:var(--pop4); border:3px solid var(--ink); border-radius:14px; box-shadow:3px 3px 0 var(--ink); }
+  .trivia-label { font-size:11px; letter-spacing:.08em; text-transform:uppercase; font-weight:800; opacity:.7; }
+  .trivia-value { font-size:18px; font-weight:900; margin:4px 0; }
+  .trivia-blurb { font-size:13px; line-height:1.4; opacity:.85; }
+
+  .footer { text-align:center; margin-top:48px; padding-top:24px; border-top:3px dashed var(--ink); font-size:13px; opacity:.65; }
 </style>
 </head>
 <body>
@@ -157,75 +132,27 @@
   </div>
 
   <div class="card tilt-r">
-    <h2>最猛的一天</h2>
-    <div class="row">
-      <div class="big-day">{{heaviest_day_tokens}}<span class="date">{{heaviest_day_date}} · {{heaviest_day_prompts}} prompts</span></div>
-      <div>{{heaviest_day_blurb}}</div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>24h 打满 · 最长的一天</h2>
-    <p style="font-size:17px; line-height:1.6;">
-      <span class="chip">{{longest_day_date}}</span>
-      你在那天活跃了 <b>{{longest_day_hours}} 个不同的小时</b>，累计 {{longest_day_tokens}} tokens。
-      最后一条 prompt 是 <b>{{last_prompt_date}}</b>；最远那一条要追到 <b>{{first_prompt_date}}</b>。
-    </p>
-  </div>
-
-  <div class="card tilt-l">
-    <h2>你的作息时钟</h2>
-    <div class="row">
-      <div>{{hour_clock_svg}}</div>
-      <div>
-        <p><b>{{peak_hour_label}}</b> 是你的爆肝时段（{{peak_hour_tokens}} tokens）。</p>
-        <p>夜猫含量：<b>{{night_owl_pct}}%</b>（23:00-05:00）<br>晨型含量：<b>{{morning_pct}}%</b>（06:00-10:00）</p>
-        <div class="speech">{{hour_clock_blurb}}</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>每日波形 · {{streak_longest}}-天连胜</h2>
-    {{daily_bars_svg}}
-    <p style="margin-top:14px;">最长连续活跃 <b>{{streak_longest}} 天</b>；当前 streak <b>{{streak_current}} 天</b>；周末占比 <b>{{weekend_pct}}%</b>，工作日 <b>{{weekday_pct}}%</b>。</p>
-    <div class="speech">{{streak_blurb}}</div>
-  </div>
-
-  <div class="card tilt-r">
-    <h2>Model 榜</h2>
-    {{models_table}}
-    <div class="speech">{{model_blurb}}</div>
-  </div>
-
-  <div class="card">
-    <h2>Agent / 提供商分布</h2>
-    {{agents_chart}}
-    <div class="speech">{{agent_blurb}}</div>
-  </div>
-
-  <div class="card tilt-l">
-    <h2>项目榜（Top 10）</h2>
-    {{projects_list}}
-    <div class="speech">{{project_blurb}}</div>
-  </div>
-
-  <div class="card">
-    <h2>你 prompt 的画像 · <span class="chip">{{personality_tag}}</span></h2>
-    {{cluster_chart}}
-    <div class="speech">{{cluster_blurb}}</div>
-    <p style="margin-top:14px;">{{personality_tag_blurb}}</p>
-  </div>
-
-  <div class="card tilt-l">
     <h2>人格档案 · The Dossier</h2>
     {{profile_card}}
     <div class="speech">{{profile_narrative}}</div>
   </div>
 
+  <div class="card">
+    <h2>你 = 多少个？</h2>
+    <p style="margin:0 0 14px; font-size:15px;">{{pop_culture_intro}}</p>
+    {{pop_culture}}
+  </div>
+
+  <div class="card tilt-l">
+    <h2>Hall of Shame · 你问过的</h2>
+    <p style="margin:0 0 14px; font-size:15px;">{{hall_of_shame_intro}}</p>
+    {{hall_of_shame}}
+  </div>
+
   <div class="card tilt-r">
-    <h2>顺便说一句</h2>
-    <p>你触达了 <b>{{distinct_projects}}</b> 个项目、<b>{{distinct_models}}</b> 个模型、<b>{{distinct_agents}}</b> 个 agent。{{long_prompt_pct}}% 的 prompt 是长 prompt（&gt;4k token）。</p>
+    <h2>无聊冷知识</h2>
+    <p style="margin:0 0 14px; font-size:15px;">{{trivia_intro}}</p>
+    {{trivia_card}}
   </div>
 
   <div class="footer">

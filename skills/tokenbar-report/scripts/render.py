@@ -479,6 +479,501 @@ def projects_list_html(projects: List[Dict[str, Any]], latest_iso: str, top_n: i
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Per-persona signature section builders
+#
+# Each persona has 3 signature sections (defined in references/personas/<key>.md).
+# These builders consume the subagent's `data` block + the orchestrator's
+# `python_derived` block and emit class-driven HTML chunks the theme CSS
+# paints. The theme HTML references them via {{<section>}} placeholders.
+
+def _esc(s: Any) -> str:
+    return html.escape(str(s)) if s is not None else "—"
+
+
+# ── comic ──────────────────────────────────────────────────────────────────
+
+def comic_pop_culture_html(equivalents: List[Dict[str, Any]]) -> str:
+    if not equivalents:
+        return ""
+    rows = []
+    for e in equivalents:
+        count = e.get("count", 0)
+        count_str = f"{count:,.0f}" if count >= 100 else f"{count:.1f}"
+        rows.append(
+            f'<div class="pop-row">'
+            f'<span class="pop-count">{count_str}×</span>'
+            f'<span class="pop-unit">{_esc(e.get("unit"))}</span>'
+            f'<span class="pop-blurb">{_esc(e.get("blurb"))}</span>'
+            f'</div>'
+        )
+    return '<div class="pop-culture">' + "".join(rows) + '</div>'
+
+
+def comic_hall_of_shame_html(entries: List[Dict[str, Any]]) -> str:
+    if not entries:
+        return '<p class="empty">数据太干净，找不出锅。难得。</p>'
+    rows = []
+    for e in entries:
+        samples = e.get("samples") or []
+        sample_html = ""
+        if samples:
+            sample_html = '<ul class="shame-samples">' + "".join(
+                f'<li>"{_esc(s)[:100]}"</li>' for s in samples[:2]
+            ) + "</ul>"
+        rows.append(
+            f'<div class="shame-row">'
+            f'<div class="shame-head"><span class="shame-pattern">{_esc(e.get("pattern"))}</span>'
+            f'<span class="shame-count">× {e.get("occurrences", 0)}</span></div>'
+            f'{sample_html}'
+            f'<div class="shame-blurb">{_esc(e.get("blurb"))}</div>'
+            f'</div>'
+        )
+    return '<div class="hall-of-shame">' + "".join(rows) + '</div>'
+
+
+def comic_trivia_html(items: List[Dict[str, Any]]) -> str:
+    if not items:
+        return ""
+    rows = []
+    for it in items:
+        rows.append(
+            f'<div class="trivia-row">'
+            f'<div class="trivia-label">{_esc(it.get("label"))}</div>'
+            f'<div class="trivia-value">{_esc(it.get("value"))}</div>'
+            f'<div class="trivia-blurb">{_esc(it.get("blurb"))}</div>'
+            f'</div>'
+        )
+    return '<div class="trivia-grid">' + "".join(rows) + '</div>'
+
+
+# ── brutalist ──────────────────────────────────────────────────────────────
+
+def brutalist_stale_debt_html(entries: List[Dict[str, Any]]) -> str:
+    if not entries:
+        return '<p class="empty">No stale ledger. (For once.)</p>'
+    rows = []
+    for e in entries:
+        status_class = f"stale-{_esc(e.get('status', 'stale'))}"
+        rows.append(
+            f'<tr class="{status_class}">'
+            f'<td class="ledger-project">{_esc(e.get("project"))}</td>'
+            f'<td class="ledger-tokens">{_esc(e.get("tokens_compact"))}</td>'
+            f'<td class="ledger-cost">${e.get("cost_usd", 0):,.0f}</td>'
+            f'<td class="ledger-days">{e.get("days_idle", 0)}d</td>'
+            f'<td class="ledger-status">{_esc(e.get("status"))}</td>'
+            f'<td class="ledger-verdict">{_esc(e.get("verdict"))}</td>'
+            f'</tr>'
+        )
+    return (
+        '<table class="stale-ledger">'
+        '<thead><tr><th>PROJECT</th><th>TOKENS</th><th>COST</th><th>IDLE</th><th>STATUS</th><th>VERDICT</th></tr></thead>'
+        '<tbody>' + "".join(rows) + '</tbody></table>'
+    )
+
+
+def brutalist_dependence_html(entries: List[Dict[str, Any]]) -> str:
+    if not entries:
+        return ""
+    rows = []
+    for e in entries:
+        rating = _esc(e.get("rating", "—"))
+        rows.append(
+            f'<div class="dep-row dep-{rating}">'
+            f'<div class="dep-axis">{_esc(e.get("axis","—")).upper()}</div>'
+            f'<div class="dep-value">{_esc(e.get("value"))}</div>'
+            f'<div class="dep-rating">{rating}</div>'
+            f'<div class="dep-verdict">{_esc(e.get("verdict"))}</div>'
+            f'</div>'
+        )
+    return '<div class="dependence-index">' + "".join(rows) + '</div>'
+
+
+def brutalist_repeat_offenders_html(entries: List[Dict[str, Any]]) -> str:
+    if not entries:
+        return '<p class="empty">No repeated patterns above threshold.</p>'
+    rows = []
+    for e in entries:
+        rows.append(
+            f'<div class="repeat-row">'
+            f'<div class="repeat-head">'
+            f'<span class="repeat-pattern">{_esc(e.get("pattern"))}</span>'
+            f'<span class="repeat-count">× {e.get("count", 0)}</span></div>'
+            f'<div class="repeat-span">{_esc(e.get("first_seen"))} → {_esc(e.get("last_seen"))}</div>'
+            f'<div class="repeat-verdict">{_esc(e.get("verdict"))}</div>'
+            f'</div>'
+        )
+    return '<div class="repeat-offenders">' + "".join(rows) + '</div>'
+
+
+# ── terminal ───────────────────────────────────────────────────────────────
+
+def terminal_distribution_html(stats: Dict[str, Any]) -> str:
+    if not stats:
+        return ""
+
+    def fmt(v: float) -> str:
+        if v >= 1_000_000:
+            return f"{v / 1_000_000:.2f}M"
+        if v >= 1_000:
+            return f"{v / 1_000:.1f}K"
+        return f"{int(v)}"
+
+    sections = []
+    for metric_key, label in [
+        ("daily_tokens", "daily-tokens"),
+        ("daily_prompts", "daily-prompts"),
+        ("content_length_chars", "content-length"),
+    ]:
+        s = stats.get(metric_key, {})
+        if not s:
+            continue
+        comment = s.get("comment", "")
+        sections.append(
+            f'<div class="dist-row">'
+            f'<div class="dist-name">{label}</div>'
+            f'<div class="dist-cells">'
+            f'<span class="dist-cell"><span class="dist-label">p50</span><span class="dist-val">{fmt(s.get("p50", 0))}</span></span>'
+            f'<span class="dist-cell"><span class="dist-label">p90</span><span class="dist-val">{fmt(s.get("p90", 0))}</span></span>'
+            f'<span class="dist-cell"><span class="dist-label">p99</span><span class="dist-val">{fmt(s.get("p99", 0))}</span></span>'
+            f'<span class="dist-cell"><span class="dist-label">σ</span><span class="dist-val">{fmt(s.get("sigma", 0))}</span></span>'
+            f'<span class="dist-cell"><span class="dist-label">max</span><span class="dist-val">{fmt(s.get("max", 0))}</span></span>'
+            f'</div>'
+            f'<div class="dist-comment">// {_esc(comment)}</div>'
+            f'</div>'
+        )
+    return '<div class="distributions">' + "".join(sections) + '</div>'
+
+
+def terminal_heatmap_svg(heatmap: Dict[str, Any]) -> str:
+    if not heatmap:
+        return ""
+    grid = heatmap.get("grid") or [[0] * 24 for _ in range(7)]
+    max_v = max((v for row in grid for v in row), default=0) or 1
+
+    cell_w = 22
+    cell_h = 22
+    label_w = 40
+    width = label_w + 24 * cell_w
+    height = cell_h * 7 + 28
+    days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+    cells = []
+    for wd in range(7):
+        cells.append(
+            f'<text class="heatmap-day" x="0" y="{28 + wd * cell_h + cell_h * 0.65:.1f}">{days[wd]}</text>'
+        )
+        for hr in range(24):
+            v = grid[wd][hr]
+            intensity = v / max_v if max_v else 0
+            opacity = max(0.03, intensity)
+            cells.append(
+                f'<rect class="heat-cell" x="{label_w + hr * cell_w}" y="{28 + wd * cell_h}" '
+                f'width="{cell_w - 1}" height="{cell_h - 1}" '
+                f'fill-opacity="{opacity:.3f}">'
+                f'<title>{days[wd]} {hr:02d}:00 — {compact_tokens(v)} tokens</title></rect>'
+            )
+
+    for hr in [0, 6, 12, 18]:
+        cells.append(
+            f'<text class="heatmap-hour" x="{label_w + hr * cell_w}" y="22">{hr:02d}</text>'
+        )
+    return (
+        f'<svg class="heatmap" viewBox="0 0 {width} {height}" width="100%">'
+        + "".join(cells)
+        + "</svg>"
+    )
+
+
+def terminal_anomalies_html(entries: List[Dict[str, Any]]) -> str:
+    if not entries:
+        return '<p class="empty">no anomalies detected (|z| < 3 across window)</p>'
+    rows = []
+    for e in entries:
+        direction_class = f"anom-{_esc(e.get('direction','upper'))}"
+        rows.append(
+            f'<tr class="{direction_class}">'
+            f'<td class="anom-date">{_esc(e.get("date"))}</td>'
+            f'<td class="anom-tokens">{_esc(e.get("tokens_compact"))}</td>'
+            f'<td class="anom-z">{e.get("z_score", 0):+.1f}σ</td>'
+            f'<td class="anom-dir">{_esc(e.get("direction"))}</td>'
+            f'<td class="anom-comment">{_esc(e.get("comment", ""))}</td>'
+            f'</tr>'
+        )
+    return (
+        '<table class="anomalies"><thead><tr>'
+        '<th>date</th><th>tokens</th><th>z-score</th><th>dir</th><th>// comment</th>'
+        '</tr></thead><tbody>' + "".join(rows) + '</tbody></table>'
+    )
+
+
+# ── essay ──────────────────────────────────────────────────────────────────
+
+def essay_negative_space_html(data: Dict[str, Any]) -> str:
+    if not data:
+        return ""
+    parts = []
+    headline = _esc(data.get("headline", ""))
+    if headline:
+        parts.append(f'<div class="ns-headline">{headline}</div>')
+    inactive = data.get("inactive_day_count") or 0
+    parts.append(f'<div class="ns-stat">{inactive} 个不在场的日子</div>')
+    evocative = data.get("evocative_days") or []
+    if evocative:
+        items = []
+        for d in evocative[:5]:
+            items.append(
+                f'<li><span class="ns-date">{_esc(d.get("date"))}</span>'
+                f'<span class="ns-wd">{_esc(d.get("weekday"))}</span>'
+                f'<span class="ns-ctx">{_esc(d.get("context",""))}</span></li>'
+            )
+        parts.append('<ul class="ns-evocative">' + "".join(items) + "</ul>")
+    abandoned = data.get("abandoned_projects") or []
+    if abandoned:
+        items = []
+        for p in abandoned[:5]:
+            items.append(
+                f'<li><span class="ns-proj">{_esc(p.get("name"))}</span>'
+                f'<span class="ns-meta">{_esc(p.get("lastSeen"))} · {_esc(p.get("tokensInvested"))}</span>'
+                f'<span class="ns-reflect">{_esc(p.get("reflection"))}</span></li>'
+            )
+        parts.append('<ul class="ns-abandoned">' + "".join(items) + "</ul>")
+    essay = data.get("essay") or ""
+    if essay:
+        parts.append(f'<div class="ns-essay">{_esc(essay).replace(chr(10), "<br><br>")}</div>')
+    return '<div class="negative-space">' + "".join(parts) + '</div>'
+
+
+def essay_recurrence_html(entries: List[Dict[str, Any]]) -> str:
+    if not entries:
+        return ""
+    rows = []
+    for e in entries:
+        rows.append(
+            f'<div class="rec-row">'
+            f'<div class="rec-head">'
+            f'<span class="rec-project">{_esc(e.get("project"))}</span>'
+            f'<span class="rec-trajectory">{_esc(e.get("trajectory","—"))}</span></div>'
+            f'<div class="rec-meditation">{_esc(e.get("meditation"))}</div>'
+            f'</div>'
+        )
+    return '<div class="recurrence-diary">' + "".join(rows) + '</div>'
+
+
+def essay_unread_html(data: Dict[str, Any]) -> str:
+    if not data:
+        return ""
+    essay = _esc(data.get("essay", ""))
+    pct = data.get("long_prompt_pct", 0)
+    avg = data.get("avg_long_chars", 0)
+    longest = data.get("longest_chars", 0)
+    return (
+        f'<div class="unread-conversation">'
+        f'<div class="unread-stats">'
+        f'<span class="unread-stat"><span class="unread-num">{pct}%</span><span class="unread-label">超长 prompt 占比</span></span>'
+        f'<span class="unread-stat"><span class="unread-num">{avg:,}</span><span class="unread-label">平均长 prompt 字符</span></span>'
+        f'<span class="unread-stat"><span class="unread-num">{longest:,}</span><span class="unread-label">最长一条字符</span></span>'
+        f'</div>'
+        f'<div class="unread-essay">{essay.replace(chr(10), "<br><br>")}</div>'
+        f'</div>'
+    )
+
+
+# ── sunrise ────────────────────────────────────────────────────────────────
+
+def sunrise_milestones_html(entries: List[Dict[str, Any]]) -> str:
+    if not entries:
+        return ""
+    badges = []
+    for e in entries:
+        when = _esc(e.get("unlocked_at") or "—")
+        badges.append(
+            f'<div class="badge-card">'
+            f'<div class="badge-name">{_esc(e.get("name"))}</div>'
+            f'<div class="badge-when">unlocked · {when}</div>'
+            f'<div class="badge-blurb">{_esc(e.get("celebration",""))}</div>'
+            f'</div>'
+        )
+    return '<div class="badge-grid">' + "".join(badges) + '</div>'
+
+
+def sunrise_weekly_growth_html(data: Dict[str, Any]) -> str:
+    if not data:
+        return ""
+    headline = _esc(data.get("headline", ""))
+    commentary = _esc(data.get("commentary", ""))
+    weeks = data.get("weeks") or []
+    rows = []
+    for w in weeks:
+        delta = w.get("wow_delta_pct")
+        delta_str = f"{delta:+.1f}%" if delta is not None else "—"
+        delta_class = "growth-up" if (delta or 0) > 0 else ("growth-down" if (delta or 0) < 0 else "growth-flat")
+        rows.append(
+            f'<div class="week-row {delta_class}">'
+            f'<span class="week-date">{_esc(w.get("week_start"))}</span>'
+            f'<span class="week-tokens">{_esc(w.get("tokens_compact"))}</span>'
+            f'<span class="week-delta">{delta_str}</span>'
+            f'</div>'
+        )
+    return (
+        f'<div class="weekly-growth">'
+        f'<div class="growth-headline">{headline}</div>'
+        f'<div class="week-list">' + "".join(rows) + '</div>'
+        f'<div class="growth-commentary">{commentary}</div>'
+        f'</div>'
+    )
+
+
+def sunrise_next_html(entries: List[Dict[str, Any]]) -> str:
+    if not entries:
+        return ""
+    rows = []
+    for e in entries:
+        rows.append(
+            f'<div class="next-row">'
+            f'<div class="next-name">{_esc(e.get("name"))}</div>'
+            f'<div class="next-distance">{_esc(e.get("distance"))}</div>'
+            f'<div class="next-pitch">{_esc(e.get("pitch",""))}</div>'
+            f'</div>'
+        )
+    return '<div class="next-achievable">' + "".join(rows) + '</div>'
+
+
+# ── notebook ───────────────────────────────────────────────────────────────
+
+def notebook_biographies_html(entries: List[Dict[str, Any]]) -> str:
+    if not entries:
+        return ""
+    rows = []
+    for e in entries:
+        rows.append(
+            f'<div class="bio-row">'
+            f'<div class="bio-head">'
+            f'<span class="bio-project">{_esc(e.get("project"))}</span>'
+            f'<span class="bio-span">{_esc(e.get("first_seen"))} → {_esc(e.get("last_seen"))}</span></div>'
+            f'<div class="bio-numbers">{_esc(e.get("tokens"))} tokens · 峰值月 {_esc(e.get("peak_month",""))}</div>'
+            f'<div class="bio-text">{_esc(e.get("biography",""))}</div>'
+            f'</div>'
+        )
+    return '<div class="biographies">' + "".join(rows) + '</div>'
+
+
+def notebook_week_html(data: Dict[str, Any]) -> str:
+    if not data:
+        return ""
+    week_label = _esc(data.get("week_label", "—"))
+    tokens = _esc(data.get("tokens", "—"))
+    peak_day = _esc(data.get("peak_day", "—"))
+    story = _esc(data.get("story", ""))
+    return (
+        f'<div class="week-story">'
+        f'<div class="week-head">'
+        f'<span class="week-label">{week_label}</span>'
+        f'<span class="week-total">{tokens} tokens · 峰值 {peak_day}</span></div>'
+        f'<div class="week-text">{story}</div>'
+        f'</div>'
+    )
+
+
+def notebook_routine_html(data: Dict[str, Any]) -> str:
+    if not data:
+        return ""
+    band = _esc(data.get("regular_band", "—"))
+    day = _esc(data.get("regular_day", "—"))
+    rhythm = _esc(data.get("rhythm_blurb", ""))
+    broken = data.get("broken") or []
+    broke_rows = []
+    for b in broken[:5]:
+        broke_rows.append(
+            f'<li><span class="broken-date">{_esc(b.get("date"))}</span>'
+            f'<span class="broken-ctx">{_esc(b.get("context",""))}</span>'
+            f'<span class="broken-blurb">{_esc(b.get("blurb",""))}</span></li>'
+        )
+    return (
+        f'<div class="routine">'
+        f'<div class="routine-head">'
+        f'<span class="routine-band">{band}</span>'
+        f'<span class="routine-day">{day}</span></div>'
+        f'<div class="routine-rhythm">{rhythm}</div>'
+        f'{"<ul class=\"routine-broken\">" + "".join(broke_rows) + "</ul>" if broke_rows else ""}'
+        f'</div>'
+    )
+
+
+# ── ft ─────────────────────────────────────────────────────────────────────
+
+def ft_capital_html(entries: List[Dict[str, Any]]) -> str:
+    if not entries:
+        return ""
+    rows = []
+    for e in entries:
+        delta = e.get("mom_delta_pct")
+        delta_str = f"{delta:+.1f}%" if delta is not None else "—"
+        rows.append(
+            f'<tr class="cap-row">'
+            f'<td class="cap-project">{_esc(e.get("project"))}</td>'
+            f'<td class="cap-tokens">{_esc(e.get("tokens_compact"))}</td>'
+            f'<td class="cap-cost">${e.get("cost_usd", 0):,.0f}</td>'
+            f'<td class="cap-weight">{e.get("weight_pct", 0)}%</td>'
+            f'<td class="cap-delta">{delta_str}</td>'
+            f'<td class="cap-verdict">{_esc(e.get("verdict",""))}</td>'
+            f'</tr>'
+        )
+    return (
+        '<table class="capital-table">'
+        '<thead><tr><th>Project</th><th>Tokens</th><th>Cost</th><th>Weight</th><th>MoM</th><th>Verdict</th></tr></thead>'
+        '<tbody>' + "".join(rows) + '</tbody></table>'
+    )
+
+
+def ft_hhi_html(data: Dict[str, Any]) -> str:
+    if not data:
+        return ""
+    rows = []
+    for axis in ("projects", "models", "agents"):
+        entry = data.get(axis) or {}
+        hhi_val = entry.get("hhi", 0)
+        interp = _esc(entry.get("interpretation", ""))
+        verdict = _esc(entry.get("verdict", ""))
+        rows.append(
+            f'<div class="hhi-row">'
+            f'<div class="hhi-axis">{axis.upper()}</div>'
+            f'<div class="hhi-value">HHI {hhi_val:.4f}</div>'
+            f'<div class="hhi-interp">{interp}</div>'
+            f'<div class="hhi-verdict">{verdict}</div>'
+            f'</div>'
+        )
+    return '<div class="hhi-grid">' + "".join(rows) + '</div>'
+
+
+def ft_pnl_html(data: Dict[str, Any]) -> str:
+    if not data:
+        return ""
+    months = data.get("months") or []
+    obs = _esc(data.get("qoq_observation", ""))
+    verdict = _esc(data.get("verdict", ""))
+    rows = []
+    for m in months:
+        delta = m.get("mom_delta_pct")
+        delta_str = f"{delta:+.1f}%" if delta is not None else "—"
+        rows.append(
+            f'<tr class="pnl-row">'
+            f'<td class="pnl-month">{_esc(m.get("month"))}</td>'
+            f'<td class="pnl-tokens">{_esc(m.get("tokens_compact"))}</td>'
+            f'<td class="pnl-cost">${m.get("cost_usd", 0):,.0f}</td>'
+            f'<td class="pnl-delta">{delta_str}</td>'
+            f'</tr>'
+        )
+    return (
+        '<div class="monthly-pnl">'
+        '<table class="pnl-table"><thead><tr><th>Month</th><th>Tokens</th><th>Cost</th><th>MoM</th></tr></thead>'
+        '<tbody>' + "".join(rows) + '</tbody></table>'
+        f'<div class="pnl-observation">{obs}</div>'
+        f'<div class="pnl-verdict">{verdict}</div>'
+        '</div>'
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Placeholder substitution
 
 PLACEHOLDER_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
@@ -555,9 +1050,10 @@ def build_index(payload: Dict[str, Any], narratives: Dict[str, Any]) -> str:
             f"  a.card.{key} {{ background:linear-gradient(135deg, {bg1} 0%, {bg2} 100%); color:{ink}; }}\n"
             f"  a.card.{key} .pid {{ color:{accent}; opacity:.9; }}\n"
         )
-        title = narratives.get(key, {}).get("title", label)
-        sub = narratives.get(key, {}).get("hero_subtitle", "—")
-        # Strip any HTML; preserve newlines.
+        persona_payload = narratives.get(key, {}) or {}
+        n = persona_payload.get("narrative", persona_payload)  # v3 shape OR back-compat flat shape
+        title = n.get("title", label)
+        sub = n.get("hero_subtitle", "—")
         sub_safe = html.escape(sub)
         title_safe = html.escape(title)
         cards.append(
@@ -680,25 +1176,80 @@ def derive(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-persona placeholder→builder dispatch table.
+# Each entry: placeholder_name → (data_key_in_persona_data_block, builder_fn).
+PERSONA_BUILDERS: Dict[str, Dict[str, Tuple[str, Any]]] = {
+    "comic": {
+        "pop_culture":       ("pop_culture_equivalents", comic_pop_culture_html),
+        "hall_of_shame":     ("hall_of_shame",           comic_hall_of_shame_html),
+        "trivia_card":       ("trivia_card",             comic_trivia_html),
+    },
+    "brutalist": {
+        "stale_debt":        ("stale_debt",              brutalist_stale_debt_html),
+        "dependence_index":  ("dependence_index",        brutalist_dependence_html),
+        "repeat_offenders":  ("repeat_offenders",        brutalist_repeat_offenders_html),
+    },
+    "terminal": {
+        "distribution_stats": ("distribution_stats",     terminal_distribution_html),
+        "hourly_heatmap":    ("hourly_heatmap",          terminal_heatmap_svg),
+        "anomaly_log":       ("anomaly_log",             terminal_anomalies_html),
+    },
+    "essay": {
+        "negative_space":    ("negative_space",          essay_negative_space_html),
+        "recurrence_diary":  ("recurrence_diary",        essay_recurrence_html),
+        "unread_conversation": ("unread_conversation",   essay_unread_html),
+    },
+    "sunrise": {
+        "milestones_unlocked": ("milestones_unlocked",   sunrise_milestones_html),
+        "weekly_growth":     ("weekly_growth",           sunrise_weekly_growth_html),
+        "next_achievable":   ("next_achievable",         sunrise_next_html),
+    },
+    "notebook": {
+        "project_biographies": ("project_biographies",   notebook_biographies_html),
+        "the_week_that_was": ("the_week_that_was",       notebook_week_html),
+        "routine_and_breaks": ("routine_and_breaks",     notebook_routine_html),
+    },
+    "ft": {
+        "capital_allocation_table": ("capital_allocation_table", ft_capital_html),
+        "concentration_metrics":    ("concentration_metrics",    ft_hhi_html),
+        "monthly_pnl":              ("monthly_pnl",              ft_pnl_html),
+    },
+}
+
+
 def render_persona(
     template: str,
     derived: Dict[str, Any],
-    narrative: Dict[str, Any],
+    persona_payload: Dict[str, Any],
     persona_key: str,
     persona_label: str,
     cluster_svg: str,
     personality_tag: str,
     profile_card: str,
 ) -> Tuple[str, List[str]]:
+    """
+    persona_payload shape:
+      { "narrative": { ...flat strings... }, "data": { ...structured signature data... } }
+    """
     values = dict(derived)
     values["persona_key"] = persona_key
     values["persona_label"] = persona_label
     values["personality_tag"] = personality_tag
     values["cluster_chart"] = cluster_svg
     values["profile_card"] = profile_card
+
+    # Per-persona signature section HTML chunks (build from persona's data block).
+    data_block = persona_payload.get("data", {}) or {}
+    builders = PERSONA_BUILDERS.get(persona_key, {})
+    for placeholder, (data_key, builder) in builders.items():
+        values[placeholder] = builder(data_block.get(data_key))
+
     # Narrative fields — escape so authors can't break the template HTML.
+    narrative = persona_payload.get("narrative") or {}
     for k, v in narrative.items():
         values[k] = html.escape(str(v)).replace("\n", "<br>")
+
     return substitute(template, values, lenient=True)
 
 

@@ -30,6 +30,7 @@ struct TokenBarProbe {
             ClaudeUsageEventSource(),
             HermesUsageEventSource(),
             GeminiUsageEventSource(),
+            OpenClawUsageEventSource(),
             OpenCodeUsageEventSource(),
         ]
 

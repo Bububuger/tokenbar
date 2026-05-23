@@ -239,6 +239,37 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
                     )
                 )
             }
+        case .openclaw:
+            for file in files {
+                let incremental = try JSONLIncrementalReader.read(
+                    fileURL: file,
+                    sourceName: sourceName,
+                    agent: record.engine.agentKind,
+                    watermark: watermarks[file.path],
+                    now: referenceDate
+                )
+                let context = OpenClawUsageParser.sessionContext(fileURL: file)
+                let result = OpenClawUsageParser.parse(
+                    lines: incremental.lines,
+                    fileURL: file,
+                    initialSessionID: context.sessionID,
+                    initialProjectPath: context.projectPath
+                )
+                events.append(contentsOf: result.events.map { customEvent($0) })
+                nextWatermarks.append(customWatermark(
+                    from: incremental.nextWatermark,
+                    lastEventId: result.events.last?.id ?? watermarks[file.path]?.lastEventId
+                ))
+                warnings.append(contentsOf: incremental.warnings)
+                warnings.append(contentsOf: result.warnings.map {
+                    UsageSourceWarning(
+                        sourceName: sourceName,
+                        sourcePath: $0.sourcePath,
+                        lineNumber: $0.lineNumber,
+                        message: $0.message
+                    )
+                })
+            }
         case .openCode:
             for file in files {
                 let result = try OpenCodeUsageParser.parse(databaseURL: file, watermark: watermarks[file.path])

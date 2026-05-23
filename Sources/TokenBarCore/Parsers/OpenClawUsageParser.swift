@@ -1,0 +1,164 @@
+import Foundation
+
+public struct OpenClawParseWarning: Sendable, Hashable {
+    public let sourcePath: String
+    public let lineNumber: Int
+    public let message: String
+
+    public init(sourcePath: String, lineNumber: Int, message: String) {
+        self.sourcePath = sourcePath
+        self.lineNumber = lineNumber
+        self.message = message
+    }
+}
+
+public struct OpenClawParseResult: Sendable, Hashable {
+    public let events: [UsageEvent]
+    public let warnings: [OpenClawParseWarning]
+
+    public init(events: [UsageEvent], warnings: [OpenClawParseWarning]) {
+        self.events = events
+        self.warnings = warnings
+    }
+}
+
+/// Parses `~/.openclaw/agents/*/sessions/*.jsonl`. Session header (`type:
+/// "session"`) carries the project `cwd` and session id; assistant messages
+/// with `message.usage` carry the token counts (input / output / cacheRead /
+/// cacheWrite + model + provider-supplied unix-ms timestamp).
+public enum OpenClawUsageParser {
+    public static func sessionContext(fileURL: URL) -> (sessionID: String?, projectPath: String?) {
+        guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else {
+            return (nil, nil)
+        }
+        for raw in text.split(whereSeparator: \.isNewline).prefix(8) {
+            let trimmed = String(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty,
+                  let data = trimmed.data(using: .utf8),
+                  let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  (object["type"] as? String) == "session" else {
+                continue
+            }
+            return (object["id"] as? String, object["cwd"] as? String)
+        }
+        return (nil, nil)
+    }
+
+    public static func parse(
+        lines: [JSONLLineRecord],
+        fileURL: URL,
+        initialSessionID: String? = nil,
+        initialProjectPath: String? = nil
+    ) -> OpenClawParseResult {
+        let sourcePath = fileURL.path
+        var sessionID = initialSessionID
+        var projectPath = initialProjectPath
+        var events: [UsageEvent] = []
+        var warnings: [OpenClawParseWarning] = []
+
+        for line in lines {
+            let text = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty,
+                  let data = text.data(using: .utf8),
+                  let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let type = object["type"] as? String else {
+                continue
+            }
+
+            if type == "session" {
+                if let id = object["id"] as? String { sessionID = id }
+                if let cwd = object["cwd"] as? String { projectPath = cwd }
+                continue
+            }
+
+            guard type == "message",
+                  let messageDict = object["message"] as? [String: Any],
+                  let usage = messageDict["usage"] as? [String: Any] else {
+                continue
+            }
+
+            let input = intValue(usage["input"])
+            let output = intValue(usage["output"])
+            let cacheRead = intValue(usage["cacheRead"])
+            let cacheWrite = intValue(usage["cacheWrite"])
+            let cacheTokens = cacheRead + cacheWrite
+            guard input + output + cacheTokens > 0 else { continue }
+
+            guard let timestamp = resolveTimestamp(messageDict: messageDict, outer: object) else {
+                warnings.append(OpenClawParseWarning(
+                    sourcePath: sourcePath,
+                    lineNumber: line.lineNumber,
+                    message: "missing or unparseable timestamp"
+                ))
+                continue
+            }
+
+            let messageID = (object["id"] as? String) ?? "line-\(line.lineNumber)"
+            let resolvedSession = sessionID ?? fileURL.deletingPathExtension().lastPathComponent
+            let resolvedProjectName = projectPath.map {
+                URL(fileURLWithPath: $0).lastPathComponent
+            } ?? "openclaw"
+            let model = messageDict["model"] as? String
+
+            events.append(UsageEvent(
+                id: "\(sourcePath)#\(messageID)",
+                agent: .openclaw,
+                projectPath: projectPath,
+                projectName: resolvedProjectName,
+                sessionId: resolvedSession,
+                timestamp: timestamp,
+                inputTokens: input,
+                outputTokens: output,
+                cacheTokens: cacheTokens,
+                reasoningTokens: nil,
+                modelName: model,
+                sourcePath: sourcePath,
+                parser: .openclaw,
+                confidence: 1.0
+            ))
+        }
+
+        return OpenClawParseResult(events: events, warnings: warnings)
+    }
+
+    private static func intValue(_ raw: Any?) -> Int {
+        if let n = raw as? NSNumber { return n.intValue }
+        if let n = raw as? Int { return n }
+        return 0
+    }
+
+    private static func resolveTimestamp(messageDict: [String: Any], outer: [String: Any]) -> Date? {
+        if let n = messageDict["timestamp"] as? NSNumber {
+            return Date(timeIntervalSince1970: n.doubleValue / 1000.0)
+        }
+        if let outerIso = outer["timestamp"] as? String {
+            return isoTimestampParser.parse(outerIso)
+        }
+        return nil
+    }
+
+    private static let isoTimestampParser = LockedOpenClawISO8601Parser()
+}
+
+/// ISO8601DateFormatter is not thread-safe; wrap reads in NSLock so it can be
+/// touched from concurrent parsing tasks without crashing.
+private final class LockedOpenClawISO8601Parser: @unchecked Sendable {
+    private let lock = NSLock()
+    private let fractional: ISO8601DateFormatter
+    private let plain: ISO8601DateFormatter
+
+    init() {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        self.fractional = fractional
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        self.plain = plain
+    }
+
+    func parse(_ value: String) -> Date? {
+        lock.lock()
+        defer { lock.unlock() }
+        return fractional.date(from: value) ?? plain.date(from: value)
+    }
+}

@@ -1,0 +1,39 @@
+name: ✨ Feature request / 功能建议
+description: Suggest a feature, a new data source, or a UI improvement.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        TokenBar's bar for new features is "does it still feel like a glance, not a tab?".
+        Adding a new built-in source? Consider whether **Custom Sources** (`Settings → Custom Sources`) could already cover it.
+
+  - type: textarea
+    id: what-and-why
+    attributes:
+      label: What do you want, and why? / 你想要什么？为什么？
+      placeholder: |
+        I want a 7×24 heatmap of when I actually code with AI, because I suspect I'm a 10pm-1am person and never the 9-5 person I claim to be.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: shape
+    attributes:
+      label: Shape of the change
+      options:
+        - New data source / 新数据源
+        - New UI surface (popover / window) / 新界面
+        - New CLI command / 新 tbar 命令
+        - New `tokenbar-report` persona / 新人格视角
+        - Performance / 性能
+        - Settings / 设置项
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: prior-art
+    attributes:
+      label: Prior art / 类似实现
+      description: Other tools that do this well? Screenshots? Links?

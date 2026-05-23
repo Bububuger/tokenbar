@@ -1,0 +1,68 @@
+name: 🐛 Bug report / Bug 报告
+description: Something in TokenBar shows the wrong number, crashes, or otherwise misbehaves.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. TokenBar's job is "the one number that's actually right" — so wrong numbers are the highest-priority bugs.
+        感谢反馈。TokenBar 的核心承诺是「唯一一个真的对的数字」，因此数字不对是最高优先级问题。
+
+  - type: input
+    id: tokenbar-version
+    attributes:
+      label: TokenBar version
+      description: From `About TokenBar` or `Resources/Info.plist → CFBundleShortVersionString`.
+      placeholder: "1.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS version
+      placeholder: "macOS 14.6 (23G80) — Apple silicon"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected-source
+    attributes:
+      label: Which data source is affected? / 哪个数据源受影响？
+      multiple: true
+      options:
+        - Claude Code
+        - Codex
+        - Gemini CLI
+        - Hermes
+        - OpenClaw
+        - OpenCode
+        - Custom Source
+        - Not source-specific (UI / aggregation)
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened? / 发生了什么？
+      description: What did you do, what did you see, what did you expect to see?
+      placeholder: |
+        I opened the popover after a long Claude Code session and the "Today" total was lower than what `script/tbar summary --days 1` printed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics output (optional)
+      description: Open `Diagnostics` from the popover footer and paste the relevant excerpt. Redact paths if needed.
+      render: text
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I confirm I have not pasted any prompt text I would not want public.
+          required: true

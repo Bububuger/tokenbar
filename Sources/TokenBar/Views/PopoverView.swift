@@ -389,6 +389,19 @@ struct PopoverView: View {
             Spacer()
 
             PopoverFooterIconButton(
+                systemImage: "chevron.left.forwardslash.chevron.right",
+                tint: TokenBarStyle.muted,
+                help: "View source on GitHub (⇧⌘G)",
+                keyEquivalent: "g",
+                modifiers: [.command, .shift]
+            ) {
+                TokenBarTelemetry.event("popover.github.click", success: true)
+                if let url = URL(string: "https://github.com/Bububuger/tokenbar") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+
+            PopoverFooterIconButton(
                 systemImage: "power",
                 tint: TokenBarStyle.error,
                 help: "Quit TokenBar (⌘Q)",

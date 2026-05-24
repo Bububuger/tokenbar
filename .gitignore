@@ -17,3 +17,8 @@ TokenBar.xcodeproj/xcuserdata/
 # excluded from git because filenames contain CJK + spaces that confuse
 # downstream tooling (notably ultrareview seed bundle import).
 docs/design-prd/tokenbar/uploads/
+
+# Internal-only working docs (date-stamped refactor notes, article drafts) —
+# kept on disk for reference, not pushed to the public repo.
+docs/refactor-*.md
+docs/article-draft.md

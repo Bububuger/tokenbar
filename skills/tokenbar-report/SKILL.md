@@ -46,9 +46,56 @@ strictly < **0.30** (Jaccard on 3-char n-grams, chrome stripped). Lower than
 
 # Workflow
 
-Execute these steps in order. Steps 1-2 are interactive (confirm with the
+Execute these steps in order. Steps 0-2 are interactive (confirm with the
 user before continuing). Steps 3-8 are mechanical and don't need check-ins
 unless something fails.
+
+## Step 0 — preflight: ensure TokenBar is installed
+
+This skill reads the local TokenBar SQLite index. If the user has never
+installed TokenBar, there is no database to read and nothing to report on.
+Check first, **before** any other step.
+
+1. Test whether the app is on disk:
+
+   ```bash
+   test -e /Applications/TokenBar.app
+   ```
+
+2. If it exists, skip to Step 1.
+
+3. If it does not exist, ask the user (single question, two choices):
+
+   > TokenBar.app 还没装。要我帮你装吗？
+   >
+   > 我会执行 `brew install --cask Bububuger/tap/tokenbar`，然后跑一次
+   > `tbar rebuild` 把本地 Claude / Codex / Gemini 等 agent 的历史 token
+   > 数据扫进 DB（30 秒到几分钟，看历史多寡），扫完就可以出报告。
+
+4. If the user agrees, install and rebuild:
+
+   ```bash
+   brew tap Bububuger/tap 2>/dev/null || true
+   brew install --cask Bububuger/tap/tokenbar
+   tbar rebuild         # foreground; blocks until full reindex returns
+   ```
+
+   `brew install` succeeds when `/Applications/TokenBar.app` exists and
+   `/opt/homebrew/bin/tbar` is symlinked. `tbar rebuild` runs the full
+   reparse (the CLI equivalent of the app's "Reparse all"), so the DB has
+   data the moment it returns.
+
+5. Confirm the DB picked something up:
+
+   ```bash
+   tbar schema --json | jq '.schema.dataWindow.eventCount'
+   ```
+
+   Expect a positive integer. If it's `0`, the user genuinely has no local
+   agent history yet — stop the skill and tell them so; nothing to report on.
+
+6. If the user declines installation, stop the skill politely — without
+   the local DB there is no data to summarize. Do not fabricate.
 
 ## Step 1 — locate the TokenBar repo
 

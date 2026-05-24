@@ -315,57 +315,120 @@ struct DiagnosticsView: View {
     }
 
     private var warningsCard: some View {
-        TokenBarCard {
+        let scenarios = runtimeModel.sourceWarnings.groupedByScenario()
+        let errorCount = scenarios.filter { $0.severity == .error }.count
+        let warnCount = scenarios.filter { $0.severity == .warning }.count
+        return TokenBarCard {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Actionable Warnings")
+                        Text("Issue Scenarios")
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        Text("Internal indexing notes are hidden. Only source issues that may need your action appear here.")
+                        Text("Same kind of issue grouped into one row. Number on the right is occurrences across all files.")
                             .font(.caption2)
                             .foregroundStyle(TokenBarStyle.muted)
                     }
                     Spacer()
-                    Text("\(runtimeModel.sourceWarnings.count)")
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(runtimeModel.sourceWarnings.isEmpty ? TokenBarStyle.faint : TokenBarStyle.warn)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background((runtimeModel.sourceWarnings.isEmpty ? TokenBarStyle.surfaceRaised : TokenBarStyle.warn.opacity(0.12)), in: Capsule())
+                    HStack(spacing: 6) {
+                        if errorCount > 0 {
+                            scenarioBadge(label: "ERROR", count: errorCount, tone: .error)
+                        }
+                        if warnCount > 0 {
+                            scenarioBadge(label: "WARN", count: warnCount, tone: .warning)
+                        }
+                        if errorCount == 0 && warnCount == 0 {
+                            scenarioBadge(label: "", count: 0, tone: .clean)
+                        }
+                    }
                 }
 
-                if runtimeModel.sourceWarnings.isEmpty {
-                    Text("No source issues need action from the latest refresh.")
+                if scenarios.isEmpty {
+                    Text("No source issues from the latest refresh.")
                         .font(.caption)
                         .foregroundStyle(TokenBarStyle.muted)
                 } else {
                     VStack(spacing: 0) {
-                        ForEach(Array(runtimeModel.sourceWarnings.prefix(10).enumerated()), id: \.offset) { _, warning in
-                            VStack(alignment: .leading, spacing: 3) {
-                                HStack(spacing: 8) {
-                                    Text(warning.sourceName)
-                                        .font(.system(size: 11.5, weight: .semibold))
-                                    if let line = warning.lineNumber {
-                                        Text("line \(line)")
-                                            .font(.system(size: 10.5, design: .monospaced))
-                                            .foregroundStyle(TokenBarStyle.faint)
-                                    }
-                                    Spacer()
-                                }
-                                Text(warning.message)
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .foregroundStyle(TokenBarStyle.warn)
-                                    .lineLimit(2)
-                                Text(warning.sourcePath)
-                                    .font(.system(size: 10.5, design: .monospaced))
-                                    .foregroundStyle(TokenBarStyle.faint)
-                                    .lineLimit(1)
-                            }
-                            .padding(.vertical, 8)
-                            .overlay(Divider().overlay(TokenBarStyle.line.opacity(0.55)), alignment: .bottom)
+                        ForEach(scenarios) { scenario in
+                            scenarioRow(scenario)
+                                .padding(.vertical, 8)
+                                .overlay(Divider().overlay(TokenBarStyle.line.opacity(0.55)), alignment: .bottom)
                         }
                     }
                 }
+            }
+        }
+    }
+
+    private enum ScenarioBadgeTone { case error, warning, clean }
+
+    private func scenarioBadge(label: String, count: Int, tone: ScenarioBadgeTone) -> some View {
+        let color: Color = {
+            switch tone {
+            case .error: return TokenBarStyle.error
+            case .warning: return TokenBarStyle.warn
+            case .clean: return TokenBarStyle.faint
+            }
+        }()
+        let display: String = tone == .clean ? "✓ clean" : "\(label) · \(count)"
+        return Text(display)
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .foregroundStyle(tone == .clean ? TokenBarStyle.faint : color)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(
+                tone == .clean ? TokenBarStyle.surfaceRaised : color.opacity(0.14),
+                in: Capsule()
+            )
+    }
+
+    @ViewBuilder
+    private func scenarioRow(_ s: WarningScenario) -> some View {
+        let color: Color = s.severity == .error ? TokenBarStyle.error : TokenBarStyle.warn
+        let occurrenceText = "\(s.occurrenceCount) event\(s.occurrenceCount == 1 ? "" : "s") affected"
+        let fileSummary: String = {
+            switch s.affectedPaths.count {
+            case 0: return ""
+            case 1: return "across 1 file"
+            default: return "across \(s.affectedPaths.count) files"
+            }
+        }()
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(s.severity.rawValue.uppercased())
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .tracking(0.6)
+                    .foregroundStyle(color)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+                Text(s.sourceName)
+                    .font(.system(size: 11.5, weight: .semibold))
+                Spacer()
+                Text(occurrenceText)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .monospacedDigit()
+                    .foregroundStyle(color)
+            }
+            Text(s.kind)
+                .font(.system(size: 12.5, design: .monospaced))
+                .foregroundStyle(TokenBarStyle.foreground)
+            HStack(spacing: 8) {
+                Text(fileSummary)
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(TokenBarStyle.faint)
+                if let line = s.firstLineNumber {
+                    Text("first @ line \(line)")
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(TokenBarStyle.faint)
+                }
+                Spacer()
+            }
+            if let firstPath = s.affectedPaths.first {
+                Text(firstPath)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(TokenBarStyle.faint.opacity(0.85))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
         }
     }

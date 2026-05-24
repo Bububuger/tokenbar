@@ -90,6 +90,7 @@
 		B89A76FB0B1AE8C7C1E8B263 /* SavedPromptCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9B148F57A8B58DB1832330D /* SavedPromptCommand.swift */; };
 		B8CDF19581BBE78FE52398FD /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1801E11671AEE46809EA4DF /* SettingsView.swift */; };
 		B96EF109FE693BBC042B2008 /* CodexDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8D7D0940208FB972B748ADE /* CodexDataSource.swift */; };
+		BA358A795E26A4A5A899975E /* WarningScenarioTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8CAF38178F208EEAA36C084 /* WarningScenarioTests.swift */; };
 		BADC4DBB7790A2D8A5019C7A /* TokenBarCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = CE68C5C4D63519C0D1AA1A2F /* TokenBarCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		BDE7EC58DB434BC731455A30 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20B7464755AA27280E0EE84C /* ContentView.swift */; };
 		C2EB4EF734E32CC8DE3543DD /* PromptTemplateLinterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0152A458ED7AB993AD3E52 /* PromptTemplateLinterTests.swift */; };
@@ -121,6 +122,7 @@
 		EACE7763523E9439D3866958 /* NumberFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9A0F6AEB885BCE6F103C31B /* NumberFormatting.swift */; };
 		ED1F9D55FC88994235528356 /* SettingsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83E9ECD7DE10A044CF683405 /* SettingsStoreTests.swift */; };
 		F1369207724DC3439D36E295 /* CommandRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5690CB2D54374228511B9A04 /* CommandRegistry.swift */; };
+		F1A57BAEA5A12CF30F4F306E /* WarningScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B5075D84490225A9132F0E /* WarningScenario.swift */; };
 		F2BB2DEBE5F95204590F692A /* claude-session-negative.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = 2A5473E6812342DEEFC40E1D /* claude-session-negative.jsonl */; };
 		F399FF1D01A34853D855AAAC /* TokenBarStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF819579F4B51CD6A9BAADD /* TokenBarStyle.swift */; };
 		F4671274DDC84F2C9F5AB501 /* ClaudeDataSourceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5863E6130F52FC6586240919 /* ClaudeDataSourceTests.swift */; };
@@ -247,6 +249,7 @@
 		762BA852FD58B520EC8D3EE6 /* MetaCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetaCommands.swift; sourceTree = "<group>"; };
 		7770B0E89506D75BB6790080 /* ShimmerModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShimmerModifier.swift; sourceTree = "<group>"; };
 		7793CB76AAD8722029F32DA2 /* PromptTemplateLinter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptTemplateLinter.swift; sourceTree = "<group>"; };
+		77B5075D84490225A9132F0E /* WarningScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WarningScenario.swift; sourceTree = "<group>"; };
 		785139EAFB43B35A42E4811E /* AggregateCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AggregateCommands.swift; sourceTree = "<group>"; };
 		78B66F467DE269E740E23548 /* claude-session-day-boundary.jsonl */ = {isa = PBXFileReference; path = "claude-session-day-boundary.jsonl"; sourceTree = "<group>"; };
 		78DAF68F567794C4B5B5EC83 /* session-single-model.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "session-single-model.json"; sourceTree = "<group>"; };
@@ -284,6 +287,7 @@
 		AC238696F84C85AA63788187 /* PromptBodyEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptBodyEditor.swift; sourceTree = "<group>"; };
 		AD741663A590583349753736 /* Support.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support.swift; sourceTree = "<group>"; };
 		B6AD6E56855D8563279DFBDE /* GeminiDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiDataSource.swift; sourceTree = "<group>"; };
+		B8CAF38178F208EEAA36C084 /* WarningScenarioTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WarningScenarioTests.swift; sourceTree = "<group>"; };
 		BBD71284044C8CD7A5D764E2 /* BuiltInSources.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuiltInSources.swift; sourceTree = "<group>"; };
 		BFD76D93CAD9212DACBF79B1 /* claude-session-mega.jsonl */ = {isa = PBXFileReference; path = "claude-session-mega.jsonl"; sourceTree = "<group>"; };
 		C1801E11671AEE46809EA4DF /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -448,6 +452,7 @@
 				55E7F2B634B057D08DC38F52 /* UsageEventSource.swift */,
 				3305CDF55991739679F3959B /* UsageRepository.swift */,
 				FAD8276CB0DA9B13316F04F0 /* UsageStore.swift */,
+				77B5075D84490225A9132F0E /* WarningScenario.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -555,6 +560,7 @@
 				8350DE0668F07E1A23EFC9F4 /* Sprint9IncrementalTests.swift */,
 				A2FA1D7C158B1F8EC47C1D45 /* Sprint10P0Tests.swift */,
 				8621DA3B89F27B97A415C272 /* Sprint10PerfTests.swift */,
+				B8CAF38178F208EEAA36C084 /* WarningScenarioTests.swift */,
 				60524FCD185E7912E01C66CA /* Fixtures */,
 			);
 			path = TokenBarCoreTests;
@@ -962,6 +968,7 @@
 				D1D3D49AC60BCE39F39FDDCE /* UsageModels.swift in Sources */,
 				D229333A7D0C07CA95D74B1E /* UsageRepository.swift in Sources */,
 				DEEB891E641DA1D4AF882640 /* UsageStore.swift in Sources */,
+				F1A57BAEA5A12CF30F4F306E /* WarningScenario.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -995,6 +1002,7 @@
 				A5608066D8E17BDC39914DA7 /* Sprint10PerfTests.swift in Sources */,
 				B7AB350D987A12E680E0D3F5 /* Sprint8StorageTests.swift in Sources */,
 				11BD35E76314C84AABA18971 /* Sprint9IncrementalTests.swift in Sources */,
+				BA358A795E26A4A5A899975E /* WarningScenarioTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

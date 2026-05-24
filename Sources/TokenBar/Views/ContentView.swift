@@ -116,8 +116,14 @@ struct ContentView: View {
     }
 
     private var warningCount: Int {
-        // CL-P0-022: snapshot.warningCount is the single source of truth.
-        runtimeModel.snapshot.warningCount
+        // Sidebar badge surfaces **error-severity scenarios only** — warnings
+        // (line-level recoverable issues like "partial trailing JSONL line")
+        // still appear inside the Diagnostics detail page but don't pile up
+        // on the sidebar number. Same logic mirrored in PopoverSnapshot.
+        runtimeModel.sourceWarnings
+            .groupedByScenario()
+            .filter { $0.severity == .error }
+            .count
     }
 
     private var sidebarProjects: [UsageBreakdown] {

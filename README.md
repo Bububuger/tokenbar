@@ -47,7 +47,7 @@ You're paying for Claude, Codex, Gemini and a long tail of CLI agents that all s
 | 💰 | **Real cost, by model** | USD per million tokens, with per-model price overrides and instant delta recompute. <br/> *每百万 token 美元计价、支持自定义覆盖；改完立刻全局重算。* |
 | 🔒 | **Local-only** | No agents, no sidecars, no account. *"Local-first. Nothing ever leaves your machine."* <br/> *无 Agent、无 sidecar、无账号 —— 一切数据都在本机 SQLite。* |
 | 🔎 | **Drill into the source** | Click the popover, slice by project · agent · model · session · prompt. <br/> *点开 Popover 即可按 项目 · Agent · 模型 · 会话 · Prompt 任意切片下钻。* |
-| 🎴 | **`tokenbar-report` skill** | Spotify-Wrapped-style yearly recap across **6 personas** (Cultivation · Wuxia · Three-Body · Outlaws · Stand-up · JoJo) — pick a card, get a different lens on the same dataset. <br/> *Spotify Wrapped 风格年度回顾，6 个截然不同的人格视角（修仙 / 武侠 / 三体 / 水浒 / 脱口秀 / JoJo），抽卡随机切换。* |
+| 🎴 | **`tokenbar-report` skill** | Wrapped-style yearly recap across **3 anime power-system personas** (BLEACH · Hunter × Hunter · JOJO) — pick a card, get a different lens on the same dataset; lens-isolation gate keeps the three reports < 30% overlap. <br/> *年度回顾以三个动漫能力体系人格切镜头（死神 / 猎人 / JOJO），抽卡随机切换；强制视角隔离 < 30% 重合度。* |
 | 🛠 | **`tbar` CLI** | Fourteen subcommands — twelve read queries (`events`, `prompts`, `projects`, `sessions`, `models`, `agents`, `summary`, `timeline`, `sources`, `checkpoints`, `warnings`, `schema`), plus `rebuild` (write, full reindex) and `prompt` (saved-template `/tbar:<slug>` integration). <br/> *十四条命令，与 App 同一份本地索引；`rebuild` 是 CLI 版「Reparse all」，`prompt` 直通菜单栏保存的 `/tbar:<slug>` 模板。* |
 
 <p align="center">
@@ -63,14 +63,17 @@ You're paying for Claude, Codex, Gemini and a long tail of CLI agents that all s
 TokenBar ships with **six** zero-config engines. Every tile is "Local-first. Nothing ever leaves your machine." — TokenBar only reads the files these CLIs already write themselves.
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Claude%20Code-D97757?logo=anthropic&logoColor=white&style=for-the-badge" alt="Claude Code" />
-  <img src="https://img.shields.io/badge/Codex-412991?logo=openai&logoColor=white&style=for-the-badge" alt="Codex" />
-  <img src="https://img.shields.io/badge/Gemini%20CLI-4285F4?logo=googlegemini&logoColor=white&style=for-the-badge" alt="Gemini CLI" />
-  <br/>
-  <img src="https://img.shields.io/badge/Hermes-FFB347?style=for-the-badge&logoColor=white" alt="Hermes" />
-  <img src="https://img.shields.io/badge/OpenClaw-1F2937?style=for-the-badge&logoColor=white" alt="OpenClaw" />
-  <img src="https://img.shields.io/badge/OpenCode-22C55E?style=for-the-badge&logoColor=white" alt="OpenCode" />
+  <img src="docs/assets/sources-grid.png" alt="Claude Code · Codex · Gemini CLI · Hermes · OpenClaw · OpenCode" width="100%" />
 </p>
+
+| Source | Default path |
+|---|---|
+| **Claude Code** | `~/.claude/projects/**/*.jsonl` |
+| **Codex** (gpt-5 / gpt-5-codex) | `~/.codex/sessions/**/*.jsonl` |
+| **Gemini CLI** | `~/.gemini/tmp/**/chats/*.json` |
+| **Hermes** | `~/.hermes/state.db` |
+| **OpenClaw** | `~/.openclaw/agents/**/sessions/*.jsonl` |
+| **OpenCode** | `~/.local/share/opencode/opencode.db` |
 
 **Custom sources / 自定义数据源** — *"Point TokenBar at any agent that writes JSONL or sqlite locally."* Configure path glob + field mapping in `Settings → Custom Sources`. Schema validation runs before save, so a bad path can't poison the index.
 
@@ -79,20 +82,6 @@ TokenBar ships with **six** zero-config engines. Every tile is "Local-first. Not
   <br/>
   <sub><i>Click the menu bar — every source, every project, every model, in one popover.</i></sub>
 </p>
-
-<br />
-
-## 🤖 Meet "bar" / 认识吉祥物
-
-> One mascot, twenty-eight poses. The brand mark became a creature — **chassis** is the body, the **three bars** are the chest, the **lime live row pulses** with today's tokens.
-
-<p align="center">
-  <img src="docs/assets/mascot-strip.png" alt="bar — eight of the twenty-eight poses: wave, chart, detective, work, excited, trophy, headphones, dance" width="100%" />
-</p>
-
-Every UI state has a face: **wave** on launch, **chart** when it talks data, **detective** for diagnostics, **work** during a session, **excited** when you hit a milestone, **trophy** when budget closes green, **headphones** in focus mode, **dance** for the install celebration.
-
-> **中文**：吉祥物叫"bar"。机身就是品牌图标，胸口的三条柱状图就是品牌符号，中间那条 lime 会跟着今日 token 实时脉动。28 个姿势对应 28 种 App 状态 —— 启动挥手、加载思考、达标举奖杯、超支冒汗。
 
 <br />
 
@@ -158,18 +147,15 @@ Run `tbar help` or `tbar <command> --help` for filters, sort fields, and row sch
 
 ## 🎴 `tokenbar-report` skill / 年度回顾报告
 
-A Claude Code skill that turns your `tbar` data into a **Spotify-Wrapped-style HTML deck** with six different narrative lenses:
+A Claude Code skill that turns your `tbar` data into a **Wrapped-style HTML deck** through three anime power-system lenses — each persona has a distinct grammar (*rank · classify · quote*), so the same dataset reads honestly differently in each report.
 
-| Idx | Persona | 风格 | The lens it owns |
+| Idx | Persona | 视角 | The lens it owns (vocabulary the others can't touch) |
 |---|---|---|---|
-| 01 | **修仙 / Cultivation** | 仙侠世界观 | 灵根 · 心境 · 飞升轨迹 |
-| 02 | **武侠 / Wuxia** | 江湖纪事 | 门派 · 内功 · 江湖恩怨 |
-| 03 | **三体 / Three-Body** | 黑暗森林 | 文明等级 · 智子封锁 · 黑暗森林打击 |
-| 04 | **水浒 / 108 Outlaws** | 聚义堂 | 排座次 · 绰号 · 山头 |
-| 05 | **脱口秀 / Stand-up** | 单口喜剧 | 段子 · call-back · 笑点密度 |
-| 06 | **JoJo** | 替身漫画分镜 | 6 轴 A–E 替身能力图，配真实 prompt 引文 |
+| 01 | **死神 / BLEACH** | 护廷十三队·副队长档案 | 灵压 (tokens) · 斩击 (prompts) · 番队所辖 (projects) · 始解 / 卍解 持有者定位 |
+| 02 | **HxH / Hunter × Hunter** | 念能力分析师·查定 | 主导系测定（强化 / 放出 / 操作 / 具现化 / 变化 / 特质）· 制约と誓约 · 自创 named ability + 修业进度 |
+| 03 | **JOJO / Stand Stats** | Bruno × 荣格·替身研究员 | 6 轴 A–E 替身评级 · prompt 原文引文 + timestamp · 心理画像 |
 
-Each persona has its **own visual theme** and a **per-persona data lens** — the same dataset, six honestly different reads. The landing `index.html` is a card-draw page that **reshuffles on every reload**, so the experience is different every time you open it.
+Each persona has its **own visual theme** and a **forbidden vocabulary** — BLEACH can't say *念能力* or *替身*; HxH can't say *斩魄刀* or *Stand*; JOJO is the only one allowed to quote prompt fragments. After rendering, a Jaccard-overlap gate verifies max pairwise overlap is **strictly < 30%** (3-char n-grams, chrome stripped), so the three reports really do feel different. The landing `index.html` is a card-draw page that **reshuffles on every reload**.
 
 ```bash
 # Invoke via Claude Code (the skill lives in skills/tokenbar-report/SKILL.md):
@@ -178,7 +164,7 @@ Each persona has its **own visual theme** and a **per-persona data lens** — th
 "show me what I used Claude/Codex for this year"
 ```
 
-Output lands at `~/Desktop/tokenbar-report-YYYY-MM-DD/` — one folder, seven HTML files, fully offline, infinitely re-renderable.
+Output lands at `~/Desktop/tokenbar-report-YYYY-MM-DD/` — one folder, four HTML files (`index.html` + three personas), fully offline, infinitely re-renderable.
 
 > Full spec lives in [`skills/tokenbar-report/`](skills/tokenbar-report/).
 
@@ -221,7 +207,7 @@ Sources/
 Tests/
   TokenBarCoreTests/ swift-testing coverage for parsers + aggregation
 skills/
-  tokenbar-report/   Claude Code skill (six personas, card-draw landing)
+  tokenbar-report/   Claude Code skill (3 anime-power-system personas, card-draw landing)
 script/              build / test / run / release / tbar wrapper
 docs/assets/         README hero + demo videos
 ```

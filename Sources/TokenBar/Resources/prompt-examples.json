@@ -1,0 +1,42 @@
+[
+  {
+    "title": "Commit message generator",
+    "description": "Read staged diff, propose a Conventional Commits message.",
+    "bodyPreview": "Generate a conventional-commits message for the staged diff below.\n\nDiff:\n!`git diff --cached`\n\nUser context: $ARGUMENTS"
+  },
+  {
+    "title": "Code review (one file)",
+    "description": "Review one file. Focus on correctness + perf.",
+    "bodyPreview": "Review $ARGUMENTS for correctness, performance, naming.\n- Flag incorrect error handling.\n- Flag blocking sync calls in async contexts.\n- Suggest fixes inline."
+  },
+  {
+    "title": "Compare two paths",
+    "description": "Positional-args: diff $0 against $1.",
+    "bodyPreview": "Compare $0 against $1. Summarize:\n1. Structural diffs.\n2. User-visible behavior diffs.\n3. Which to ship and why."
+  },
+  {
+    "title": "Branch summary",
+    "description": "Inline shell: summarize current branch commits.",
+    "bodyPreview": "Branch: !`git rev-parse --abbrev-ref HEAD`\n\nLast 10:\n!`git log -10 --oneline`\n\nSummarize the branch and what's still in flight. Focus: $ARGUMENTS"
+  },
+  {
+    "title": "Skill explainer (env-aware)",
+    "description": "Uses ${CLAUDE_SKILL_DIR} for docs lookups.",
+    "bodyPreview": "Skill: $ARGUMENTS\n\nLoad ${CLAUDE_SKILL_DIR}/$ARGUMENTS/SKILL.md if present.\nExplain:\n- What it does (1 paragraph).\n- When NOT to use it.\n- The #1 gotcha."
+  },
+  {
+    "title": "Test failure triage",
+    "description": "Shell block — pull failures and triage them.",
+    "bodyPreview": "Triage failing tests.\n\n```!\nswift test 2>&1 | grep -E '(✘|FAIL)' | head -20\n```\n\nFor each: propose the smallest honest fix."
+  },
+  {
+    "title": "Refactor sketch",
+    "description": "Read a file, propose a refactor plan.",
+    "bodyPreview": "Target: $ARGUMENTS\n\nPropose a refactor:\n1. Top 3 code smells (with justification).\n2. Target shape (function signatures only).\n3. Migration plan that stays green.\n\nNo code — just the plan."
+  },
+  {
+    "title": "Postmortem from logs",
+    "description": "Last-hour logs → 3-question postmortem.",
+    "bodyPreview": "Window: $0 → $1 (UTC).\n\n!`log show --start \"$0\" --end \"$1\" --info`\n\nAnswer:\n1. What went wrong?\n2. Why did checks miss it?\n3. One change to prevent recurrence?"
+  }
+]

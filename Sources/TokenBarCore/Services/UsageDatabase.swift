@@ -254,6 +254,14 @@ public final class UsageDatabase: @unchecked Sendable {
             END;
             """)
         }
+        migrator.registerMigration("v11_saved_prompt_frontmatter_fields") { db in
+            // Variables-First Editor (prompt-editor-v2): expose argument-hint
+            // and allowed-tools as first-class fields. NULL hint means the
+            // frontmatter key is omitted; allowed_tools is a comma-separated
+            // ASCII list (empty string means "no key written").
+            try db.execute(sql: "ALTER TABLE saved_prompts ADD COLUMN argument_hint TEXT;")
+            try db.execute(sql: "ALTER TABLE saved_prompts ADD COLUMN allowed_tools TEXT;")
+        }
         return migrator
     }
 }

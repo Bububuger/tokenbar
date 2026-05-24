@@ -136,6 +136,68 @@ struct SavedPromptCommandSyncTests {
         #expect(!contents.contains("original"))
     }
 
+    @Test
+    func argumentHintWrittenToFrontmatterWhenPresent() throws {
+        let root = temporaryCommandsRoot()
+        let sync = SavedPromptCommandSync(commandsRoot: root)
+        var p = makePrompt(slug: "with-hint", title: "Commit msg", body: "Body")
+        p.argumentHint = "<file or diff>"
+        try sync.apply(p, previousSlug: nil)
+        let contents = try String(contentsOf: root.appendingPathComponent("with-hint.md"), encoding: .utf8)
+        #expect(contents.contains("argument-hint: <file or diff>"))
+    }
+
+    @Test
+    func argumentHintOmittedWhenNil() throws {
+        let root = temporaryCommandsRoot()
+        let sync = SavedPromptCommandSync(commandsRoot: root)
+        let p = makePrompt(slug: "no-hint", title: "x", body: "y")
+        try sync.apply(p, previousSlug: nil)
+        let contents = try String(contentsOf: root.appendingPathComponent("no-hint.md"), encoding: .utf8)
+        #expect(contents.contains("argument-hint") == false)
+    }
+
+    @Test
+    func allowedToolsWrittenAsBracketList() throws {
+        let root = temporaryCommandsRoot()
+        let sync = SavedPromptCommandSync(commandsRoot: root)
+        var p = makePrompt(slug: "with-tools", title: "x", body: "y")
+        p.allowedTools = ["Read", "Bash", "Grep"]
+        try sync.apply(p, previousSlug: nil)
+        let contents = try String(contentsOf: root.appendingPathComponent("with-tools.md"), encoding: .utf8)
+        #expect(contents.contains("allowed-tools: [Read, Bash, Grep]"))
+    }
+
+    @Test
+    func allowedToolsOmittedWhenEmpty() throws {
+        let root = temporaryCommandsRoot()
+        let sync = SavedPromptCommandSync(commandsRoot: root)
+        let p = makePrompt(slug: "no-tools", title: "x", body: "y")
+        try sync.apply(p, previousSlug: nil)
+        let contents = try String(contentsOf: root.appendingPathComponent("no-tools.md"), encoding: .utf8)
+        #expect(contents.contains("allowed-tools") == false)
+    }
+
+    @Test
+    func frontmatterKeyOrderingIsStable() throws {
+        let root = temporaryCommandsRoot()
+        let sync = SavedPromptCommandSync(commandsRoot: root)
+        var p = makePrompt(slug: "all-fields", title: "Title", body: "Body")
+        p.argumentHint = "<x>"
+        p.allowedTools = ["Read"]
+        try sync.apply(p, previousSlug: nil)
+        let contents = try String(contentsOf: root.appendingPathComponent("all-fields.md"), encoding: .utf8)
+        let expected = """
+        ---
+        description: Title
+        argument-hint: <x>
+        allowed-tools: [Read]
+        ---
+        Body
+        """
+        #expect(contents == expected)
+    }
+
     private func makePrompt(slug: String, title: String, body: String) -> SavedPrompt {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         return SavedPrompt(

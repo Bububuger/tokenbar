@@ -498,6 +498,15 @@ public struct SavedPrompt: Identifiable, Sendable, Hashable {
     public let createdAt: Date
     public var updatedAt: Date
 
+    /// Maps to frontmatter `argument-hint:`. nil ⇒ key not written.
+    /// Surfaces as the autocomplete hint in Claude Code's `/menu` (e.g. `<file>`).
+    public var argumentHint: String?
+
+    /// Maps to frontmatter `allowed-tools:`. Empty set ⇒ key not written
+    /// (Claude Code falls back to prompt-on-first-use). Order is preserved
+    /// for stable serialization.
+    public var allowedTools: [String]
+
     public init(
         id: String,
         slug: String,
@@ -505,7 +514,9 @@ public struct SavedPrompt: Identifiable, Sendable, Hashable {
         body: String,
         sourcePromptId: String?,
         createdAt: Date,
-        updatedAt: Date
+        updatedAt: Date,
+        argumentHint: String? = nil,
+        allowedTools: [String] = []
     ) {
         self.id = id
         self.slug = slug
@@ -514,6 +525,8 @@ public struct SavedPrompt: Identifiable, Sendable, Hashable {
         self.sourcePromptId = sourcePromptId
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.argumentHint = argumentHint
+        self.allowedTools = allowedTools
     }
 }
 

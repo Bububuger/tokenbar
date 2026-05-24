@@ -22,3 +22,7 @@ docs/design-prd/tokenbar/uploads/
 # kept on disk for reference, not pushed to the public repo.
 docs/refactor-*.md
 docs/article-draft.md
+
+# Claude Code working state (scheduled-task locks, worktrees etc.) —
+# created automatically when claude-code runs against this repo.
+.claude/

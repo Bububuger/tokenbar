@@ -75,11 +75,32 @@ public struct SavedPromptCommandSync: Sendable {
         commandsRoot.appendingPathComponent("\(slug).md")
     }
 
+    /// Serialize a SavedPrompt to the on-disk slash-command file format.
+    /// Frontmatter keys are written in stable order: `description`, then
+    /// `argument-hint` (if present), then `allowed-tools` (if non-empty).
+    /// Unset optional fields are omitted entirely — `argumentHint == nil`
+    /// produces no `argument-hint:` line at all so old prompts roundtrip
+    /// byte-for-byte.
     private func render(_ prompt: SavedPrompt) -> String {
         let description = prompt.title
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespaces)
-        let frontmatter = "---\ndescription: \(description)\n---\n"
+
+        var lines: [String] = ["---", "description: \(description)"]
+
+        if let hint = prompt.argumentHint, !hint.isEmpty {
+            lines.append("argument-hint: \(hint)")
+        }
+
+        if !prompt.allowedTools.isEmpty {
+            // Comma-separated bracket form: `[Read, Bash]`. Whitespace after
+            // comma keeps it readable in `cat` and survives YAML parsing.
+            let inner = prompt.allowedTools.joined(separator: ", ")
+            lines.append("allowed-tools: [\(inner)]")
+        }
+
+        lines.append("---")
+        let frontmatter = lines.joined(separator: "\n") + "\n"
         return frontmatter + prompt.body
     }
 }

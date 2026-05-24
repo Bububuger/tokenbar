@@ -42,7 +42,8 @@ let package = Package(
             path: "Sources/TokenBar",
             // CL-P2-010..013: Localizable.strings + RTL test fixture bundled
             // with the app. Resources live in Sources/TokenBar/L10n.
-            resources: [.process("L10n")]
+            // Resources/ adds the Prompt Templates editor's bundled examples.
+            resources: [.process("L10n"), .process("Resources")]
         ),
         .executableTarget(
             name: "TokenBarProbe",

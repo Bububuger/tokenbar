@@ -933,7 +933,8 @@ public struct UsageRepository: Sendable {
     public func allSavedPrompts() throws -> [SavedPrompt] {
         try database.queue.read { db in
             let rows = try Row.fetchAll(db, sql: """
-            SELECT id, slug, title, body, source_prompt_id, created_at, updated_at
+            SELECT id, slug, title, body, source_prompt_id, created_at, updated_at,
+                   argument_hint, allowed_tools
             FROM saved_prompts
             ORDER BY updated_at DESC
             """)
@@ -946,7 +947,8 @@ public struct UsageRepository: Sendable {
             let row = try Row.fetchOne(
                 db,
                 sql: """
-                SELECT id, slug, title, body, source_prompt_id, created_at, updated_at
+                SELECT id, slug, title, body, source_prompt_id, created_at, updated_at,
+                       argument_hint, allowed_tools
                 FROM saved_prompts WHERE slug = ?
                 """,
                 arguments: [slug]
@@ -957,16 +959,24 @@ public struct UsageRepository: Sendable {
 
     public func upsertSavedPrompt(_ prompt: SavedPrompt) throws {
         try database.queue.write { db in
+            // Empty allowedTools serializes to NULL so a SELECT against a v10
+            // row (pre-migration backup) and a v11 row with no tools look the
+            // same in code.
+            let toolsString: String? = prompt.allowedTools.isEmpty
+                ? nil
+                : prompt.allowedTools.joined(separator: ",")
             try db.execute(
                 sql: """
-                INSERT INTO saved_prompts (id, slug, title, body, source_prompt_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO saved_prompts (id, slug, title, body, source_prompt_id, created_at, updated_at, argument_hint, allowed_tools)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     slug = excluded.slug,
                     title = excluded.title,
                     body = excluded.body,
                     source_prompt_id = excluded.source_prompt_id,
-                    updated_at = excluded.updated_at
+                    updated_at = excluded.updated_at,
+                    argument_hint = excluded.argument_hint,
+                    allowed_tools = excluded.allowed_tools
                 """,
                 arguments: [
                     prompt.id,
@@ -976,6 +986,8 @@ public struct UsageRepository: Sendable {
                     prompt.sourcePromptId,
                     prompt.createdAt.tokenBarMillisecondsSince1970,
                     prompt.updatedAt.tokenBarMillisecondsSince1970,
+                    prompt.argumentHint,
+                    toolsString,
                 ]
             )
         }
@@ -988,14 +1000,21 @@ public struct UsageRepository: Sendable {
     }
 
     private func savedPrompt(from row: Row) -> SavedPrompt {
-        SavedPrompt(
+        let toolsRaw: String? = row["allowed_tools"]
+        let tools: [String] = toolsRaw?
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty } ?? []
+        return SavedPrompt(
             id: row["id"],
             slug: row["slug"],
             title: row["title"],
             body: row["body"],
             sourcePromptId: row["source_prompt_id"],
             createdAt: Date.tokenBarDate(millisecondsSince1970: row["created_at"]),
-            updatedAt: Date.tokenBarDate(millisecondsSince1970: row["updated_at"])
+            updatedAt: Date.tokenBarDate(millisecondsSince1970: row["updated_at"]),
+            argumentHint: row["argument_hint"],
+            allowedTools: tools
         )
     }
 

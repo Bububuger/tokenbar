@@ -91,6 +91,19 @@ enum TokenBarStyle {
     static let warn = Color(nsColor: .systemYellow)
     static let error = Color(nsColor: .systemRed)
 
+    /// Prompt-template editor syntax-highlight palette (acceptance §3.1).
+    /// Exposed as static NSColors so AppKit (NSTextView) and SwiftUI can both
+    /// pull from the same source — keeps the snapshot-test contract stable.
+    enum PromptTokenColor {
+        static let arguments = NSColor(red: 0.831, green: 0.969, blue: 0.416, alpha: 1)   // #D4F76A
+        static let positional = NSColor(red: 0.133, green: 0.780, blue: 0.776, alpha: 1)  // #22C7C6
+        static let env = NSColor(red: 0.482, green: 0.769, blue: 0.878, alpha: 1)         // #7BC4E0
+        static let shell = NSColor(red: 0.984, green: 0.659, blue: 0.337, alpha: 1)       // #FBA856
+        static let warning = NSColor(red: 1.0, green: 0.706, blue: 0.329, alpha: 1)       // #FFB454
+        static let error = NSColor(red: 0.957, green: 0.333, blue: 0.373, alpha: 1)       // #F4555F
+        static let frontmatter = NSColor(red: 0.357, green: 0.404, blue: 0.439, alpha: 1) // #5B6770
+    }
+
     static let appBackground = Color(nsColor: NSColor(name: "TokenBarAppBackground") { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             ? NSColor(red: 0.035, green: 0.075, blue: 0.095, alpha: 1)

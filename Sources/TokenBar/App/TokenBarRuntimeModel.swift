@@ -235,8 +235,15 @@ final class TokenBarRuntimeModel: ObservableObject {
     /// hint and the menubar-glyph red dot. `nil` when running latest or when
     /// the check is disabled / hasn't run / failed.
     @Published private(set) var availableUpdate: UpdateCheckResult?
+    /// Drives the popover-footer download UI. `idle` when no download
+    /// in-flight; `downloading` carries `0…1` for the progress bar;
+    /// `completed` exposes the on-disk DMG path so a follow-up click can
+    /// `NSWorkspace.open` it; `failed` shows the error inline.
+    @Published private(set) var updateDownloadState: AppUpdateDownloadState = .idle
     private let updateChecker = UpdateChecker()
+    private let updateDownloader = AppUpdateDownloader()
     private var updateCheckTask: Task<Void, Never>?
+    private var updateDownloadTask: Task<Void, Never>?
 
     init(
         settingsStore: SettingsStore,
@@ -366,6 +373,56 @@ final class TokenBarRuntimeModel: ObservableObject {
         if let result = await updateChecker.checkNow() {
             availableUpdate = result.isNewer ? result : nil
         }
+    }
+
+    /// Kick off the in-app update download. Sets `updateDownloadState` to
+    /// `.downloading(0)` and streams progress until `.completed` (on which
+    /// the popover button flips to "Install" / opens the DMG for the user).
+    func downloadAvailableUpdate() {
+        guard let update = availableUpdate, let dmgURL = update.dmgURL else {
+            return
+        }
+        updateDownloadTask?.cancel()
+        updateDownloadState = .downloading(progress: 0)
+        let downloader = updateDownloader
+        let version = update.latestVersion
+        let sink = UpdateDownloadSink(model: self)
+        updateDownloadTask = Task {
+            do {
+                let destination = try await downloader.download(
+                    from: dmgURL,
+                    version: version,
+                    onProgress: { progress in sink.publishProgress(progress) }
+                )
+                sink.publishOutcome(.completed(localURL: destination))
+            } catch {
+                sink.publishOutcome(.failed(message: error.localizedDescription))
+            }
+        }
+    }
+
+    /// Called by the popover after the user clicks the post-download
+    /// "Install" affordance. Returns the local DMG URL the view should
+    /// hand off to `NSWorkspace.open` (which mounts it + opens Finder).
+    func consumeCompletedUpdate() -> URL? {
+        if case .completed(let url) = updateDownloadState {
+            return url
+        }
+        return nil
+    }
+
+    func resetUpdateDownloadState() {
+        updateDownloadTask?.cancel()
+        updateDownloadTask = nil
+        updateDownloadState = .idle
+    }
+
+    fileprivate func applyDownloadProgress(_ progress: Double) {
+        updateDownloadState = .downloading(progress: progress)
+    }
+
+    fileprivate func applyDownloadOutcome(_ outcome: AppUpdateDownloadState) {
+        updateDownloadState = outcome
     }
 
     private func observeSystemPowerEvents() {
@@ -2274,5 +2331,26 @@ final class TokenBarRuntimeModel: ObservableObject {
             usageStore: usageStore,
             sources: sources
         )
+    }
+}
+
+/// Sendable bridge from the URLSession progress callback (sync, off-main)
+/// into the `@MainActor`-isolated runtime model. Holding the model via a
+/// nonisolated unowned ref keeps the captures Sendable-clean without leaking
+/// the lifetime into a long-lived background queue.
+private final class UpdateDownloadSink: @unchecked Sendable {
+    private weak var model: TokenBarRuntimeModel?
+    init(model: TokenBarRuntimeModel) { self.model = model }
+
+    func publishProgress(_ progress: Double) {
+        Task { @MainActor [weak model] in
+            model?.applyDownloadProgress(progress)
+        }
+    }
+
+    func publishOutcome(_ outcome: AppUpdateDownloadState) {
+        Task { @MainActor [weak model] in
+            model?.applyDownloadOutcome(outcome)
+        }
     }
 }

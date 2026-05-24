@@ -5,13 +5,17 @@ public struct UpdateCheckResult: Sendable, Hashable {
     public let currentVersion: String
     public let latestVersion: String
     public let releaseURL: URL
+    /// Direct download URL for the macOS DMG asset on the GitHub release.
+    /// `nil` when the release exposes no DMG (e.g. cli-only release).
+    public let dmgURL: URL?
     /// True iff `latestVersion` parses as a newer semver than `currentVersion`.
     public let isNewer: Bool
 
-    public init(currentVersion: String, latestVersion: String, releaseURL: URL, isNewer: Bool) {
+    public init(currentVersion: String, latestVersion: String, releaseURL: URL, dmgURL: URL?, isNewer: Bool) {
         self.currentVersion = currentVersion
         self.latestVersion = latestVersion
         self.releaseURL = releaseURL
+        self.dmgURL = dmgURL
         self.isNewer = isNewer
     }
 }
@@ -98,10 +102,20 @@ public actor UpdateChecker {
         let latestVersion = tag.trimmingCharacters(in: CharacterSet(charactersIn: "v"))
         let releaseURL = (payload["html_url"] as? String).flatMap(URL.init(string:))
             ?? URL(string: "https://github.com/\(repository)/releases/latest")!
+        let assets = payload["assets"] as? [[String: Any]] ?? []
+        let dmgURL: URL? = assets
+            .compactMap { asset -> URL? in
+                guard let name = asset["name"] as? String, name.hasSuffix(".dmg"),
+                      let downloadURL = (asset["browser_download_url"] as? String).flatMap(URL.init(string:))
+                else { return nil }
+                return downloadURL
+            }
+            .first
         return UpdateCheckResult(
             currentVersion: currentVersion,
             latestVersion: latestVersion,
             releaseURL: releaseURL,
+            dmgURL: dmgURL,
             isNewer: Self.compare(latestVersion, isNewerThan: currentVersion)
         )
     }

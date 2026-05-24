@@ -1467,43 +1467,94 @@ private struct OnboardingCard: View {
     }
 }
 
-/// Popover-footer version label. Shows the running app version pulled from
-/// `Info.plist`; turns into a clickable affordance when a newer release is
-/// available (driven by `runtimeModel.availableUpdate`). Click opens the
-/// GitHub release page in the browser.
+/// Popover-footer version label. Three modes:
+///
+/// 1. No update available → "v1.3.1", click opens GitHub releases page.
+/// 2. Update available + idle → "v1.3.1 → 1.4.0 [Download]", click starts
+///    in-app download with a progress bar replacing the button.
+/// 3. Download completed → "v1.3.1 → 1.4.0 [Install]", click opens the DMG
+///    (mounts it + reveals in Finder so the user can drag-replace the app).
 struct TokenBarVersionLabel: View {
     @EnvironmentObject var runtimeModel: TokenBarRuntimeModel
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        Button(action: handleTap) {
-            HStack(spacing: 4) {
-                Text("v\(currentVersion)")
-                    .font(.system(size: 10.5, design: .monospaced))
-                if let update = runtimeModel.availableUpdate {
-                    Text("→ \(update.latestVersion)")
-                        .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(TokenBarStyle.accent)
+        HStack(spacing: 6) {
+            Button(action: openReleaseNotes) {
+                HStack(spacing: 4) {
+                    Text("v\(currentVersion)")
+                        .font(.system(size: 10.5, design: .monospaced))
+                    if let update = runtimeModel.availableUpdate {
+                        Text("→ \(update.latestVersion)")
+                            .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(TokenBarStyle.accent)
+                    }
                 }
             }
+            .buttonStyle(.plain)
+            .help(runtimeModel.availableUpdate == nil
+                  ? "Open releases page on GitHub"
+                  : "Open release notes for v\(runtimeModel.availableUpdate!.latestVersion)")
+
+            if runtimeModel.availableUpdate != nil {
+                updateActionView
+            }
         }
-        .buttonStyle(.plain)
-        .help(runtimeModel.availableUpdate == nil
-              ? "Open releases page on GitHub"
-              : "Update \(runtimeModel.availableUpdate!.latestVersion) available — click for release notes")
+    }
+
+    @ViewBuilder
+    private var updateActionView: some View {
+        switch runtimeModel.updateDownloadState {
+        case .idle:
+            if runtimeModel.availableUpdate?.dmgURL != nil {
+                Button("Download", action: { runtimeModel.downloadAvailableUpdate() })
+                    .buttonStyle(.borderless)
+                    .controlSize(.mini)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(TokenBarStyle.accent)
+            }
+        case .downloading(let progress):
+            HStack(spacing: 4) {
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .frame(width: 64)
+                Text("\(Int(progress * 100))%")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(TokenBarStyle.muted)
+            }
+        case .completed:
+            Button("Install", action: openDownloadedDMG)
+                .buttonStyle(.borderless)
+                .controlSize(.mini)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(TokenBarStyle.accent)
+                .help("Open the downloaded DMG; drag TokenBar.app to /Applications/")
+        case .failed(let message):
+            Button("Retry") { runtimeModel.downloadAvailableUpdate() }
+                .buttonStyle(.borderless)
+                .controlSize(.mini)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(TokenBarStyle.error)
+                .help("Download failed: \(message). Click to retry.")
+        }
     }
 
     private var currentVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     }
 
-    private func handleTap() {
+    private func openReleaseNotes() {
         if let url = runtimeModel.availableUpdate?.releaseURL {
             openURL(url)
         } else {
             openURL(URL(string: "https://github.com/Bububuger/tokenbar/releases/latest")!)
         }
         Task { await runtimeModel.checkForUpdatesNow() }
+    }
+
+    private func openDownloadedDMG() {
+        guard let dmg = runtimeModel.consumeCompletedUpdate() else { return }
+        NSWorkspace.shared.open(dmg)
     }
 }
 

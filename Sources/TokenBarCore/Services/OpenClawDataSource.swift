@@ -5,6 +5,18 @@ public enum OpenClawDataSource {
         rootDirectory: String = "~/.openclaw",
         fileManager: FileManager = .default
     ) throws -> [URL] {
+        return try DiscoveryCache.cached(key: "openclaw|\(rootDirectory)") {
+            try uncachedDiscoverSessionFiles(
+                rootDirectory: rootDirectory,
+                fileManager: fileManager
+            )
+        }
+    }
+
+    private static func uncachedDiscoverSessionFiles(
+        rootDirectory: String,
+        fileManager: FileManager
+    ) throws -> [URL] {
         let expandedRoot = CodexDataSource.expandHome(in: rootDirectory)
         let agentsRoot = URL(fileURLWithPath: expandedRoot, isDirectory: true)
             .appendingPathComponent("agents", isDirectory: true)

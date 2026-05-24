@@ -91,7 +91,12 @@ public actor CheckpointEngine {
         if let result = await self.trigger(trigger, startedAt: startedAt, referenceDate: referenceDate, calendar: calendar, onSourceProgress: onSourceProgress) {
             return result
         }
-        let state = await store.state(referenceDate: referenceDate, calendar: calendar, includePrompts: stateIncludesPrompts)
+        let state = await store.state(
+            referenceDate: referenceDate,
+            calendar: calendar,
+            includePrompts: stateIncludesPrompts,
+            includeEvents: true
+        )
         return CheckpointRunResult(state: state, failure: nil, checkpoint: state.lastCheckpoint)
     }
 

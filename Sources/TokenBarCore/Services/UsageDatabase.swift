@@ -221,6 +221,39 @@ public final class UsageDatabase: @unchecked Sendable {
             """)
             try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_saved_prompts_updated ON saved_prompts(updated_at DESC);")
         }
+        migrator.registerMigration("v10_add_prompts_fts") { db in
+            // FTS5 full-text search index. Previously prompt search ran
+            // `LOWER(content) LIKE '%x%'` which is a per-keystroke full
+            // table scan (~10MB of UTF-8 walked on 5k-prompt projects).
+            try db.execute(sql: """
+            CREATE VIRTUAL TABLE IF NOT EXISTS prompts_fts USING fts5(
+                content,
+                content='prompts',
+                content_rowid='rowid',
+                tokenize='porter unicode61'
+            );
+            """)
+            try db.execute(sql: """
+            INSERT INTO prompts_fts(rowid, content)
+            SELECT rowid, content FROM prompts;
+            """)
+            try db.execute(sql: """
+            CREATE TRIGGER IF NOT EXISTS prompts_fts_ai AFTER INSERT ON prompts BEGIN
+                INSERT INTO prompts_fts(rowid, content) VALUES (new.rowid, new.content);
+            END;
+            """)
+            try db.execute(sql: """
+            CREATE TRIGGER IF NOT EXISTS prompts_fts_ad AFTER DELETE ON prompts BEGIN
+                INSERT INTO prompts_fts(prompts_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+            END;
+            """)
+            try db.execute(sql: """
+            CREATE TRIGGER IF NOT EXISTS prompts_fts_au AFTER UPDATE ON prompts BEGIN
+                INSERT INTO prompts_fts(prompts_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+                INSERT INTO prompts_fts(rowid, content) VALUES (new.rowid, new.content);
+            END;
+            """)
+        }
         return migrator
     }
 }

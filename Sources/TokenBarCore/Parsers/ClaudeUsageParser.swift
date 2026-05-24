@@ -1,33 +1,9 @@
 import Foundation
 
-public struct ClaudeParseWarning: Sendable, Hashable {
-    public let sourcePath: String
-    public let lineNumber: Int
-    public let message: String
+public typealias ClaudeParseWarning = ParseWarning
+public typealias ClaudeParseResult = ParseResult
 
-    public init(sourcePath: String, lineNumber: Int, message: String) {
-        self.sourcePath = sourcePath
-        self.lineNumber = lineNumber
-        self.message = message
-    }
-}
-
-public struct ClaudeParseResult: Sendable, Hashable {
-    public let events: [UsageEvent]
-    public let prompts: [PromptRecord]
-    public let warnings: [ClaudeParseWarning]
-
-    public init(events: [UsageEvent], prompts: [PromptRecord] = [], warnings: [ClaudeParseWarning]) {
-        self.events = events
-        self.prompts = prompts
-        self.warnings = warnings
-    }
-}
-
-private enum ClaudeParserThrottle {
-    static let activeSliceSeconds: TimeInterval = 0.004
-    static let lineInterval = 8
-}
+private typealias ClaudeParserThrottle = JSONLThrottleTunables
 
 public enum ClaudeUsageParser {
     public static func parse(fileURL: URL, fallbackProjectSlug: String) throws -> ClaudeParseResult {
@@ -127,7 +103,7 @@ public enum ClaudeUsageParser {
                     inputTokens: inputTokens,
                     outputTokens: outputTokens,
                     cacheTokens: cacheCreationTokens + cacheReadTokens,
-                    reasoningTokens: nil,
+                    reasoningTokens: 0,
                     modelName: modelName,
                     sourcePath: sourcePath,
                     parser: .claudeCode,
@@ -212,7 +188,7 @@ public enum ClaudeUsageParser {
                         inputTokens: inputClamp.value,
                         outputTokens: outputClamp.value,
                         cacheTokens: cacheCreationClamp.value + cacheReadClamp.value,
-                        reasoningTokens: nil,
+                        reasoningTokens: 0,
                         modelName: modelName,
                         sourcePath: sourcePath,
                         parser: .claudeCode,
@@ -222,7 +198,7 @@ public enum ClaudeUsageParser {
             }
 
             linesSinceThrottle += 1
-            if let resourceThrottle, linesSinceThrottle >= ClaudeParserThrottle.lineInterval {
+            if let resourceThrottle, linesSinceThrottle >= ClaudeParserThrottle.parserLineInterval {
                 let active = Date().timeIntervalSince(sliceStartedAt)
                 if active >= ClaudeParserThrottle.activeSliceSeconds {
                     await resourceThrottle.rest(afterActive: active)

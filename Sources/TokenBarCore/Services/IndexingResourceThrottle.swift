@@ -86,3 +86,23 @@ public protocol ResourceBudgetedUsageEventSource: UsageEventSource {
         resourceThrottle: IndexingResourceThrottle?
     ) async throws -> UsageSourceLoadResult
 }
+
+/// Tunables used by JSONL parsers + the incremental reader to slice their
+/// work into throttle-able chunks. Centralized here so each parser does not
+/// have to redeclare the same constants and stay in sync.
+public enum JSONLThrottleTunables {
+    /// Active-work slice before yielding to the throttle. Same for every
+    /// JSONL parser and for the chunked reader.
+    public static let activeSliceSeconds: TimeInterval = 0.004
+    /// How many JSONL lines a parser processes between throttle checks.
+    public static let parserLineInterval: Int = 8
+    /// How many lines the chunked reader processes between throttle checks.
+    /// Higher than `parserLineInterval` because reader work is mostly IO,
+    /// so each "line" is cheaper than parse work.
+    public static let readerLineInterval: Int = 16
+    /// Bytes read per call when no throttle is wired (fast path).
+    public static let unthrottledChunkSize: Int = 1024 * 1024
+    /// Bytes read per call when a throttle is active. Smaller chunks let
+    /// the throttle catch up more responsively.
+    public static let throttledChunkSize: Int = 64 * 1024
+}

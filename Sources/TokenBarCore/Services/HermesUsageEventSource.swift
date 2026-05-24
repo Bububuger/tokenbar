@@ -4,6 +4,7 @@ import GRDB
 public struct HermesUsageEventSource: InspectableUsageEventSource, @unchecked Sendable {
     public let sourceName = "Hermes"
     public let rootPath: String
+    public let agent: AgentKind = .hermes
     private let fileManager: FileManager
 
     public init(rootPath: String = "~/.hermes/state.db", fileManager: FileManager = .default) {
@@ -222,7 +223,13 @@ public enum HermesUsageParser {
         var events: [UsageEvent] = []
         for row in sessionRows {
             let sessionID: String = row["id"]
-            let projectName: String = row["source"] ?? "hermes"
+            let sessionSource: String = row["source"] ?? "hermes"
+            // `sessions.source` is "cli" for every session on real Hermes
+            // installs (37/37 on one verified machine), so it collapses every
+            // session into one bucket on the project axis. Recover a real
+            // project name by scanning messages for the first `"cwd": "..."`
+            // pattern (tool calls emit this) and basenaming it.
+            let projectName = derivedProjectName(forSession: sessionID, db: db) ?? sessionSource
             let inputTokens: Int = row["input_tokens"] ?? 0
             let outputTokens: Int = row["output_tokens"] ?? 0
             let cacheReadTokens: Int = row["cache_read_tokens"] ?? 0
@@ -391,6 +398,40 @@ public enum HermesUsageParser {
             return doubleValue > 10_000_000_000 ? .milliseconds : .seconds
         }
         return .seconds
+    }
+
+    /// Hermes' `sessions.source` is always "cli" on real installs — every
+    /// session ends up under one bucket on the project axis. Recover a
+    /// meaningful project by finding the first tool-call message that
+    /// embeds a `"cwd"` JSON field and returning its basename. Returns nil
+    /// (callers fall back to `source`) when no cwd is present.
+    static func derivedProjectName(forSession sessionID: String, db: Database) -> String? {
+        let pattern = "%\"cwd\":%"
+        guard let row = try? Row.fetchOne(
+            db,
+            sql: "SELECT content FROM messages WHERE session_id = ? AND content LIKE ? LIMIT 1",
+            arguments: [sessionID, pattern]
+        ) else {
+            return nil
+        }
+        let content: String = row["content"] ?? ""
+        guard let cwd = extractCWD(from: content) else { return nil }
+        let basename = (cwd as NSString).lastPathComponent
+        return basename.isEmpty ? nil : basename
+    }
+
+    /// Pulls the first `"cwd": "..."` value out of a JSON-ish blob. Handles
+    /// both standard JSON (`"cwd": "/path"`) and embedded variants.
+    static func extractCWD(from content: String) -> String? {
+        guard let range = content.range(of: "\"cwd\"") else { return nil }
+        let after = content[range.upperBound...]
+        // Skip `:` and whitespace, then read the string value.
+        guard let colon = after.firstIndex(of: ":") else { return nil }
+        let valueStart = after[after.index(after: colon)...].drop { $0 == " " }
+        guard valueStart.first == "\"" else { return nil }
+        let body = valueStart.dropFirst()
+        guard let closeQuote = body.firstIndex(of: "\"") else { return nil }
+        return String(body[..<closeQuote])
     }
 
     private static func sqliteTimestamp(from date: Date, scale: TimestampScale) -> Double {

@@ -3,6 +3,7 @@ import Foundation
 public struct OpenCodeUsageEventSource: InspectableUsageEventSource, @unchecked Sendable {
     public let sourceName = "OpenCode"
     public let rootPath: String
+    public let agent: AgentKind = .openCode
     private let fileManager: FileManager
 
     public init(

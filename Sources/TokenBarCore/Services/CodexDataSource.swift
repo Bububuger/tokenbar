@@ -8,6 +8,25 @@ public enum CodexDataSource {
         calendar: Calendar = Calendar(identifier: .gregorian),
         fileManager: FileManager = .default
     ) throws -> [URL] {
+        let cacheKey = "codex|\(rootDirectory)|\(daysBack.map(String.init) ?? "all")"
+        return try DiscoveryCache.cached(key: cacheKey) {
+            try uncachedDiscoverRolloutFiles(
+                rootDirectory: rootDirectory,
+                referenceDate: referenceDate,
+                daysBack: daysBack,
+                calendar: calendar,
+                fileManager: fileManager
+            )
+        }
+    }
+
+    private static func uncachedDiscoverRolloutFiles(
+        rootDirectory: String,
+        referenceDate: Date,
+        daysBack: Int?,
+        calendar: Calendar,
+        fileManager: FileManager
+    ) throws -> [URL] {
         let rootPath = expandHome(in: rootDirectory)
         let rootURL = URL(fileURLWithPath: rootPath, isDirectory: true)
 

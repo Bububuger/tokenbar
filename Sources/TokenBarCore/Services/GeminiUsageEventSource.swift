@@ -3,6 +3,7 @@ import Foundation
 public struct GeminiUsageEventSource: InspectableUsageEventSource, @unchecked Sendable {
     public let sourceName = "Gemini CLI"
     public let rootPath: String
+    public let agent: AgentKind = .geminiCLI
     private let fileManager: FileManager
 
     public init(rootPath: String = "~/.gemini", fileManager: FileManager = .default) {

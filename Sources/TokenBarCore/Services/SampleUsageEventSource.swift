@@ -3,6 +3,7 @@ import Foundation
 public struct SampleUsageEventSource: InspectableUsageEventSource {
     public let sourceName = "Sample"
     public let rootPath = "sample://tokenbar"
+    public let agent: AgentKind = .claudeCode
 
     public init() {}
 

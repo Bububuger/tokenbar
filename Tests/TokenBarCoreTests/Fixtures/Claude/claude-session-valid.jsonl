@@ -1,24 +1,3 @@
-# TokenBar
-
-This directory is the TokenBar product codebase.
-
-Current source of truth for product planning:
-
-
-Current bootstrap:
-
-- Xcode-generated macOS app target (`project.yml` -> `TokenBar.xcodeproj`)
-- `TokenBarCore` domain layer with deterministic sample data
-- real `swift-testing` coverage for the aggregation layer
-- SwiftUI app shell with menu bar extra, main window, and settings placeholder
-- `script/build.sh`, `script/test.sh`, `script/build_and_run.sh`
-- `script/autoresearch_acceptance.sh`
-- project-local Xcode env bootstrap via `script/xcode_env.sh`
-
-Current launch behavior:
-
-- the repo now builds a real development-signed Xcode app target
-- on this machine, direct terminal launch still depends on macOS Developer Mode
-- `script/build_and_run.sh` therefore falls back to asking Xcode to run the
-  `TokenBar` scheme when terminal-launched developer apps are blocked by system
-  policy
+{"type":"user","timestamp":"2026-05-06T11:59:58.051Z","sessionId":"s1","cwd":"/Users/javis/Documents/workspace/openclaw","message":{"role":"user","content":"please summarize this project"}}
+{"type":"assistant","timestamp":"2026-05-06T12:00:01.000Z","sessionId":"s1","cwd":"/Users/javis/Documents/workspace/openclaw","message":{"model":"claude-sonnet-4-5-20250929","role":"assistant","usage":{"input_tokens":10,"output_tokens":8,"cache_creation_input_tokens":2658,"cache_read_input_tokens":25000}}}
+{"type":"assistant","timestamp":"2026-05-06T12:00:09.000Z","sessionId":"s1","cwd":"/Users/javis/Documents/workspace/openclaw","message":{"model":"claude-sonnet-4-5-20250929","role":"assistant","usage":{"input_tokens":5,"output_tokens":12,"cache_creation_input_tokens":0,"cache_read_input_tokens":30000}}}

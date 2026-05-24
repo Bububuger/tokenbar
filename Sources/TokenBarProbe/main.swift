@@ -25,14 +25,7 @@ struct TokenBarProbe {
         let calendar = Calendar(identifier: .gregorian)
         let now = Date()
 
-        let sources: [any InspectableUsageEventSource] = [
-            CodexUsageEventSource(),
-            ClaudeUsageEventSource(),
-            HermesUsageEventSource(),
-            GeminiUsageEventSource(),
-            OpenClawUsageEventSource(),
-            OpenCodeUsageEventSource(),
-        ]
+        let sources = BuiltInSources.all()
 
         let rebuilder = IndexRebuilder(sources: sources, store: store)
         let result = await rebuilder.rebuild(indexedAt: now, referenceDate: now, calendar: calendar)
@@ -132,7 +125,7 @@ struct TokenBarProbe {
             let store = try UsageStore(databaseURL: UsageDatabase.defaultDatabaseURL())
             let calendar = Calendar(identifier: .gregorian)
             let started = Date()
-            let state = await store.state(referenceDate: started, calendar: calendar, includePrompts: false)
+            let state = await store.state(referenceDate: started, calendar: calendar, includePrompts: false, includeEvents: true)
             let events = state.events
             let customSources = (try? await store.customSources()) ?? []
             let enabledCustomSources = customSources.filter(\.enabled)

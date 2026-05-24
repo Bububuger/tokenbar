@@ -5,6 +5,89 @@ import Testing
 
 struct Sprint8StorageTests {
     @Test
+    func builtInSourcesIncludesAllSixAgents() {
+        let sources = BuiltInSources.all()
+        let agents = Set(sources.map(\.agent))
+        #expect(sources.count == 6)
+        #expect(agents == Set<AgentKind>([.codex, .claudeCode, .hermes, .geminiCLI, .openclaw, .openCode]))
+    }
+
+    /// Regression: prompt search must hit the FTS5 index (v10 migration),
+    /// not the old `LOWER(content) LIKE '%x%'` full table scan.
+    @Test
+    func promptSearchUsesFTSIndexAndReturnsCorrectCount() throws {
+        let dbURL = temporaryDatabaseURL()
+        let repository = try UsageRepository(databaseURL: dbURL)
+        let referenceDate = fixedDate()
+        let calendar = Calendar(identifier: .gregorian)
+
+        // Seed 200 prompts. 50 of them mention "build" in content.
+        var prompts: [PromptRecord] = []
+        for i in 0..<200 {
+            let mentionsBuild = i % 4 == 0   // 50 of 200
+            let content = mentionsBuild
+                ? "let's build the new feature in tokenbar"
+                : "general conversation about something else"
+            prompts.append(PromptRecord(
+                id: "fts-\(i)",
+                eventId: nil,
+                agent: .codex,
+                projectName: "tokenbar",
+                sessionId: "fts-session-\(i)",
+                timestamp: calendar.date(byAdding: .minute, value: -i, to: referenceDate)!,
+                content: content,
+                contentHash: "fts-hash-\(i)",
+                sourcePath: "/tmp/fts.jsonl"
+            ))
+        }
+
+        _ = try repository.insertCheckpoint(
+            trigger: "fts-test",
+            startedAt: referenceDate,
+            endedAt: referenceDate,
+            events: [],
+            prompts: prompts,
+            nextWatermarks: [],
+            warnings: [],
+            error: nil
+        )
+
+        let start = Date()
+        let page = try repository.projectPromptHistoryPage(
+            projectName: "tokenbar",
+            limit: 10,
+            offset: 0,
+            includeContent: true,
+            query: "build"
+        )
+        let elapsed = Date().timeIntervalSince(start)
+
+        #expect(page.totalCount == 50)
+        #expect(page.prompts.count == 10)
+        // 200-prompt seed is small; assert generous bound that would fail
+        // only if FTS regressed back to full scan over many KB.
+        #expect(elapsed < 0.2)
+    }
+
+    @Test
+    func discoveryCacheServesRepeatCallsWithinTTL() throws {
+        DiscoveryCache.reset()
+        let dir = temporaryDirectory()
+        let nested = dir.appendingPathComponent("project-a", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try "{}".write(to: nested.appendingPathComponent("session.jsonl"), atomically: true, encoding: .utf8)
+
+        let baselineMiss = DiscoveryCache.missCount
+        _ = try ClaudeDataSource.discoverSessionFiles(rootDirectory: dir.path)
+        _ = try ClaudeDataSource.discoverSessionFiles(rootDirectory: dir.path)
+        _ = try ClaudeDataSource.discoverSessionFiles(rootDirectory: dir.path)
+
+        // 3 calls into the same source within TTL: one miss + two hits.
+        #expect(DiscoveryCache.missCount == baselineMiss + 1)
+        #expect(DiscoveryCache.hitCount >= 2)
+    }
+
+    @Test
     func migrationCreatesRequiredTables() throws {
         let dbURL = temporaryDatabaseURL()
         let repository = try UsageRepository(databaseURL: dbURL)
@@ -1212,6 +1295,98 @@ struct Sprint8StorageTests {
         #expect(result.prompts.count == 1)
         #expect(result.prompts.first?.content == "real prompt")
         #expect(result.prompts.first?.projectName == "discord")
+    }
+
+    /// Regression: real Hermes installs have `sessions.source = 'cli'` for
+    /// every row, so the project axis used to collapse into one bucket.
+    /// `derivedProjectName(forSession:)` recovers per-session projects by
+    /// finding the first `"cwd"` JSON field in messages.
+    @Test
+    func hermesParserDerivesProjectFromCWDInMessages() throws {
+        let dbURL = temporaryDatabaseURL()
+        let queue = try DatabaseQueue(path: dbURL.path)
+        try queue.write { db in
+            try db.execute(sql: """
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                source TEXT NOT NULL,
+                started_at REAL NOT NULL,
+                input_tokens INTEGER,
+                output_tokens INTEGER,
+                cache_read_tokens INTEGER,
+                cache_write_tokens INTEGER,
+                reasoning_tokens INTEGER
+            )
+            """)
+            try db.execute(sql: """
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                timestamp REAL NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT
+            )
+            """)
+            // Three sessions, all with source="cli" but distinct cwd in
+            // a tool-call-style message. Each should resolve to a unique
+            // project basename.
+            try db.execute(sql: """
+            INSERT INTO sessions (id, source, started_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens) VALUES
+                ('s1', 'cli', 1770000000.0, 10, 5, 0, 0, 0),
+                ('s2', 'cli', 1770000100.0, 20, 8, 0, 0, 0),
+                ('s3', 'cli', 1770000200.0, 30, 12, 0, 0, 0)
+            """)
+            try db.execute(sql: #"""
+            INSERT INTO messages (session_id, timestamp, role, content) VALUES
+                ('s1', 1770000000.0, 'assistant', '{"tool":"bash","args":{"cwd":"/Users/me/projects/my-mcp-server","cmd":"ls"}}'),
+                ('s2', 1770000100.0, 'assistant', '{"tool":"bash","args":{"cwd":"/Users/me/projects/tokenbar","cmd":"swift test"}}'),
+                ('s3', 1770000200.0, 'assistant', '{"tool":"edit","cwd":"/Users/me/work/my-cli-tool/src","path":"main.swift"}')
+            """#)
+        }
+
+        let result = try HermesUsageParser.parse(databaseURL: dbURL)
+
+        let projects = Set(result.events.map(\.projectName))
+        #expect(result.events.count == 3)
+        #expect(projects == Set(["my-mcp-server", "tokenbar", "src"]))
+    }
+
+    @Test
+    func hermesParserFallsBackToSourceWhenNoCWDInMessages() throws {
+        let dbURL = temporaryDatabaseURL()
+        let queue = try DatabaseQueue(path: dbURL.path)
+        try queue.write { db in
+            try db.execute(sql: """
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                source TEXT NOT NULL,
+                started_at REAL NOT NULL,
+                input_tokens INTEGER,
+                output_tokens INTEGER,
+                cache_read_tokens INTEGER,
+                cache_write_tokens INTEGER,
+                reasoning_tokens INTEGER
+            )
+            """)
+            try db.execute(sql: """
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                timestamp REAL NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT
+            )
+            """)
+            try db.execute(sql: """
+            INSERT INTO sessions (id, source, started_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens) VALUES
+                ('s1', 'cli', 1770000000.0, 10, 5, 0, 0, 0)
+            """)
+            try db.execute(sql: "INSERT INTO messages (session_id, timestamp, role, content) VALUES ('s1', 1770000000.0, 'user', 'just talking, no tool call')")
+        }
+
+        let result = try HermesUsageParser.parse(databaseURL: dbURL)
+        #expect(result.events.count == 1)
+        #expect(result.events[0].projectName == "cli")
     }
 
     @Test

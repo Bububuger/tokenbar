@@ -3,6 +3,7 @@ import Foundation
 public struct ClaudeUsageEventSource: InspectableUsageEventSource, ResourceBudgetedUsageEventSource, @unchecked Sendable {
     public let sourceName = "Claude Code"
     public let rootPath: String
+    public let agent: AgentKind = .claudeCode
     public let daysBack: Int?
     private let fileManager: FileManager
 
@@ -38,72 +39,23 @@ public struct ClaudeUsageEventSource: InspectableUsageEventSource, ResourceBudge
             daysBack: daysBack,
             fileManager: fileManager
         )
-
-        var events: [UsageEvent] = []
-        var prompts: [PromptRecord] = []
-        var nextWatermarks: [SourceWatermark] = []
-        var warnings: [UsageSourceWarning] = []
-
-        for file in files {
-            let slug = ClaudeDataSource.projectSlug(for: file, rootDirectory: rootPath)
-            let incremental = try await JSONLIncrementalReader.read(
-                fileURL: file,
-                sourceName: sourceName,
-                agent: .claudeCode,
-                watermark: watermarks[file.path],
-                now: referenceDate,
-                resourceThrottle: resourceThrottle
-            )
-            warnings.append(contentsOf: incremental.warnings)
-            if incremental.lines.isEmpty {
-                nextWatermarks.append(
-                    SourceWatermark(
-                        sourcePath: incremental.nextWatermark.sourcePath,
-                        agent: incremental.nextWatermark.agent,
-                        lastMtime: incremental.nextWatermark.lastMtime,
-                        lastByteOffset: incremental.nextWatermark.lastByteOffset,
-                        lastEventId: watermarks[file.path]?.lastEventId,
-                        lastInode: incremental.nextWatermark.lastInode,
-                        updatedAt: incremental.nextWatermark.updatedAt
-                    )
-                )
-                continue
-            }
-
-            let result = await ClaudeUsageParser.parse(
-                lines: incremental.lines,
-                fileURL: file,
+        let rootDirectory = rootPath
+        return try await JSONLWatermarkLoader.load(
+            files: files,
+            agent: agent,
+            sourceName: sourceName,
+            watermarks: watermarks,
+            referenceDate: referenceDate,
+            resourceThrottle: resourceThrottle
+        ) { lines, fileURL in
+            let slug = ClaudeDataSource.projectSlug(for: fileURL, rootDirectory: rootDirectory)
+            return await ClaudeUsageParser.parse(
+                lines: lines,
+                fileURL: fileURL,
                 fallbackProjectSlug: slug,
                 resourceThrottle: resourceThrottle
             )
-            events.append(contentsOf: result.events)
-            prompts.append(contentsOf: result.prompts)
-            nextWatermarks.append(
-                SourceWatermark(
-                    sourcePath: incremental.nextWatermark.sourcePath,
-                    agent: incremental.nextWatermark.agent,
-                    lastMtime: incremental.nextWatermark.lastMtime,
-                    lastByteOffset: incremental.nextWatermark.lastByteOffset,
-                    lastEventId: result.events.last?.id ?? watermarks[file.path]?.lastEventId,
-                    lastInode: incremental.nextWatermark.lastInode,
-                    updatedAt: incremental.nextWatermark.updatedAt
-                )
-            )
-            warnings.append(contentsOf: result.warnings.map {
-                UsageSourceWarning(
-                    sourceName: sourceName,
-                    sourcePath: $0.sourcePath,
-                    lineNumber: $0.lineNumber,
-                    message: $0.message
-                )
-            })
-
-            if let resourceThrottle {
-                await resourceThrottle.rest(afterActive: 0.002)
-            }
         }
-
-        return UsageSourceLoadResult(events: events, prompts: prompts, nextWatermarks: nextWatermarks, warnings: warnings)
     }
 
     public func status(referenceDate: Date, calendar: Calendar) async -> UsageDataSourceStatus {

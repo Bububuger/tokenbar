@@ -58,6 +58,34 @@ struct SavedPromptCommandSyncTests {
         try sync.remove(slug: "never-existed")
     }
 
+    /// Locks the invariant that deleting a saved prompt removes BOTH the DB
+    /// row and the on-disk `~/.claude/commands/tbar/<slug>.md` file. Runs
+    /// the two-step deletion in the same shape `TokenBarRuntimeModel.deleteSavedPrompt`
+    /// uses today, so if a future refactor removes either step the test fails.
+    @Test
+    func deleteSyncsBothDBAndFile() async throws {
+        let dbURL = temporaryDatabaseURL()
+        let commandsRoot = temporaryCommandsRoot()
+        let store = try UsageStore(databaseURL: dbURL)
+        let sync = SavedPromptCommandSync(commandsRoot: commandsRoot)
+        let prompt = makePrompt(slug: "to-delete", title: "t", body: "b")
+
+        try await store.upsertSavedPrompt(prompt)
+        try sync.apply(prompt, previousSlug: nil)
+
+        let onDisk = commandsRoot.appendingPathComponent("to-delete.md")
+        #expect(FileManager.default.fileExists(atPath: onDisk.path))
+        #expect(try await store.allSavedPrompts().count == 1)
+
+        // Mirror the runtime model's two-step deletion. If either step is
+        // dropped, one of the post-conditions below will fail.
+        try await store.deleteSavedPrompt(id: prompt.id)
+        try sync.remove(slug: prompt.slug)
+
+        #expect(try await store.allSavedPrompts().isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: onDisk.path))
+    }
+
     @Test
     func slugRenameRemovesPreviousFileAndWritesNew() throws {
         let root = temporaryCommandsRoot()
@@ -124,6 +152,11 @@ struct SavedPromptCommandSyncTests {
     private func temporaryCommandsRoot() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("tokenbar-sync-tests-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    private func temporaryDatabaseURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("tokenbar-sync-tests-\(UUID().uuidString).sqlite")
     }
 
     // MARK: - tb → tbar directory migration

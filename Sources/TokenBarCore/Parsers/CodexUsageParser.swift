@@ -1,33 +1,9 @@
 import Foundation
 
-public struct CodexParseWarning: Sendable, Hashable {
-    public let sourcePath: String
-    public let lineNumber: Int
-    public let message: String
+public typealias CodexParseWarning = ParseWarning
+public typealias CodexParseResult = ParseResult
 
-    public init(sourcePath: String, lineNumber: Int, message: String) {
-        self.sourcePath = sourcePath
-        self.lineNumber = lineNumber
-        self.message = message
-    }
-}
-
-public struct CodexParseResult: Sendable, Hashable {
-    public let events: [UsageEvent]
-    public let prompts: [PromptRecord]
-    public let warnings: [CodexParseWarning]
-
-    public init(events: [UsageEvent], prompts: [PromptRecord] = [], warnings: [CodexParseWarning]) {
-        self.events = events
-        self.prompts = prompts
-        self.warnings = warnings
-    }
-}
-
-private enum CodexParserThrottle {
-    static let activeSliceSeconds: TimeInterval = 0.004
-    static let lineInterval = 8
-}
+private typealias CodexParserThrottle = JSONLThrottleTunables
 
 private final class LockedISO8601TimestampParser: @unchecked Sendable {
     private let lock = NSLock()
@@ -54,6 +30,20 @@ private final class LockedISO8601TimestampParser: @unchecked Sendable {
 
 public enum CodexUsageParser {
     private static let timestampParser = LockedISO8601TimestampParser()
+
+    /// Dedup signature for back-to-back `token_count` events that carry
+    /// identical `last_token_usage` payloads. Codex's `event_msg` stream
+    /// emits the same payload twice (initial + render-complete) ~7 lines
+    /// apart, so summing the deltas across raw events double-counts every
+    /// turn — observed as a 1.16-1.19× over-count for input tokens on
+    /// real rollouts. Skipping the duplicate emission keeps the per-turn
+    /// time distribution while restoring the ground-truth totals.
+    fileprivate struct UsageDedupKey: Equatable {
+        let input: Int
+        let cache: Int
+        let output: Int
+        let reasoning: Int?
+    }
 
     public static func parse(fileURL: URL) throws -> CodexParseResult {
         let text = try String(contentsOf: fileURL, encoding: .utf8)
@@ -82,6 +72,7 @@ public enum CodexUsageParser {
         var events: [UsageEvent] = []
         var prompts: [PromptRecord] = []
         var warnings: [CodexParseWarning] = []
+        var lastEmittedUsage: UsageDedupKey?
 
         for line in lines {
             let lineNumber = line.lineNumber
@@ -163,6 +154,19 @@ public enum CodexUsageParser {
             let inputTokens = inputClamp.value
             let outputTokens = outputClamp.value
             let cacheTokens = cacheClamp.value
+            let reasoningTokens = usage["reasoning_output_tokens"] as? Int
+
+            // Codex emits the same `last_token_usage` twice within ~7 lines
+            // (initial + render-complete). Skip exact-match repeats to avoid
+            // the 1.16-1.19× over-count observed on real rollouts.
+            let dedupKey = UsageDedupKey(
+                input: inputTokens, cache: cacheTokens,
+                output: outputTokens, reasoning: reasoningTokens
+            )
+            if let prior = lastEmittedUsage, prior == dedupKey {
+                continue
+            }
+            lastEmittedUsage = dedupKey
 
             let timestamp = parseTimestamp(object["timestamp"] as? String) ?? .distantPast
             let normalizedProjectPath = projectPath
@@ -182,7 +186,7 @@ public enum CodexUsageParser {
                     inputTokens: inputTokens,
                     outputTokens: outputTokens,
                     cacheTokens: cacheTokens,
-                    reasoningTokens: usage["reasoning_output_tokens"] as? Int,
+                    reasoningTokens: reasoningTokens,
                     modelName: modelName,
                     sourcePath: sourcePath,
                     parser: .codex,
@@ -209,6 +213,7 @@ public enum CodexUsageParser {
         var events: [UsageEvent] = []
         var prompts: [PromptRecord] = []
         var warnings: [CodexParseWarning] = []
+        var lastEmittedUsage: UsageDedupKey?
         var sliceStartedAt = Date()
         var linesSinceThrottle = 0
 
@@ -273,35 +278,49 @@ public enum CodexUsageParser {
                 if inputClamp.wasNegative || outputClamp.wasNegative || cacheClamp.wasNegative {
                     warnings.append(CodexParseWarning(sourcePath: sourcePath, lineNumber: lineNumber, message: "negative token count clamped to 0"))
                 }
-                let timestamp = parseTimestamp(object["timestamp"] as? String) ?? .distantPast
-                let normalizedProjectPath = projectPath
-                let normalizedProjectName = normalizedProjectPath
-                    .map { URL(fileURLWithPath: $0).lastPathComponent }
-                    .flatMap { $0.isEmpty ? nil : $0 }
-                    ?? "unknown"
+                let reasoningTokens = usage["reasoning_output_tokens"] as? Int
 
-                events.append(
-                    UsageEvent(
-                        id: "\(sourcePath)#\(lineNumber)",
-                        agent: .codex,
-                        projectPath: normalizedProjectPath,
-                        projectName: normalizedProjectName,
-                        sessionId: sessionID ?? fileURL.deletingPathExtension().lastPathComponent,
-                        timestamp: timestamp,
-                        inputTokens: inputClamp.value,
-                        outputTokens: outputClamp.value,
-                        cacheTokens: cacheClamp.value,
-                        reasoningTokens: usage["reasoning_output_tokens"] as? Int,
-                        modelName: modelName,
-                        sourcePath: sourcePath,
-                        parser: .codex,
-                        confidence: 1.0
-                    )
+                // Dedup back-to-back identical token_count emissions
+                // (Codex emits the same `last_token_usage` twice). See
+                // `UsageDedupKey` docs.
+                let dedupKey = UsageDedupKey(
+                    input: inputClamp.value, cache: cacheClamp.value,
+                    output: outputClamp.value, reasoning: reasoningTokens
                 )
+                if let prior = lastEmittedUsage, prior == dedupKey {
+                    // skip duplicate; still counts as a throttle line below
+                } else {
+                    lastEmittedUsage = dedupKey
+                    let timestamp = parseTimestamp(object["timestamp"] as? String) ?? .distantPast
+                    let normalizedProjectPath = projectPath
+                    let normalizedProjectName = normalizedProjectPath
+                        .map { URL(fileURLWithPath: $0).lastPathComponent }
+                        .flatMap { $0.isEmpty ? nil : $0 }
+                        ?? "unknown"
+
+                    events.append(
+                        UsageEvent(
+                            id: "\(sourcePath)#\(lineNumber)",
+                            agent: .codex,
+                            projectPath: normalizedProjectPath,
+                            projectName: normalizedProjectName,
+                            sessionId: sessionID ?? fileURL.deletingPathExtension().lastPathComponent,
+                            timestamp: timestamp,
+                            inputTokens: inputClamp.value,
+                            outputTokens: outputClamp.value,
+                            cacheTokens: cacheClamp.value,
+                            reasoningTokens: reasoningTokens,
+                            modelName: modelName,
+                            sourcePath: sourcePath,
+                            parser: .codex,
+                            confidence: 1.0
+                        )
+                    )
+                }
             }
 
             linesSinceThrottle += 1
-            if let resourceThrottle, linesSinceThrottle >= CodexParserThrottle.lineInterval {
+            if let resourceThrottle, linesSinceThrottle >= CodexParserThrottle.parserLineInterval {
                 let active = Date().timeIntervalSince(sliceStartedAt)
                 if active >= CodexParserThrottle.activeSliceSeconds {
                     await resourceThrottle.rest(afterActive: active)

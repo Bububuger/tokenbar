@@ -1,0 +1,5 @@
+{"timestamp":"2026-03-27T09:22:45.179Z","type":"session_meta","payload":{"id":"dedup-session","cwd":"/tmp/dedup-test","model":"gpt-5-codex"}}
+{"timestamp":"2026-03-27T09:23:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":0,"total_tokens":110}}}}
+{"timestamp":"2026-03-27T09:23:02.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":0,"total_tokens":110}}}}
+{"timestamp":"2026-03-27T09:23:30.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":200,"cached_input_tokens":50,"output_tokens":15,"reasoning_output_tokens":2,"total_tokens":265}}}}
+{"timestamp":"2026-03-27T09:23:32.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":200,"cached_input_tokens":50,"output_tokens":15,"reasoning_output_tokens":2,"total_tokens":265}}}}

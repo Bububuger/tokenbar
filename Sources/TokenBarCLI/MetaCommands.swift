@@ -40,29 +40,22 @@ enum SourcesCommand {
         let allPrompts = try repository.allPrompts()
         let customSourceRecords = try repository.listCustomSources()
 
-        let builtIn: [(name: String, agent: AgentKind, source: any InspectableUsageEventSource)] = [
-            ("Codex", .codex, CodexUsageEventSource(daysBack: nil)),
-            ("Claude", .claudeCode, ClaudeUsageEventSource(daysBack: nil)),
-            ("Hermes", .hermes, HermesUsageEventSource()),
-            ("Gemini", .geminiCLI, GeminiUsageEventSource()),
-            ("OpenClaw", .openclaw, OpenClawUsageEventSource()),
-            ("OpenCode", .openCode, OpenCodeUsageEventSource()),
-        ]
+        let builtIn = BuiltInSources.all()
 
         var rows: [Row] = []
         let calendar = Calendar(identifier: .gregorian)
         let referenceDate = Date()
 
-        for entry in builtIn {
-            let status = await entry.source.status(referenceDate: referenceDate, calendar: calendar)
-            let agentEvents = allEvents.filter { $0.agent == entry.agent }
-            let agentPrompts = allPrompts.filter { $0.agent == entry.agent }
+        for source in builtIn {
+            let status = await source.status(referenceDate: referenceDate, calendar: calendar)
+            let agentEvents = allEvents.filter { $0.agent == source.agent }
+            let agentPrompts = allPrompts.filter { $0.agent == source.agent }
             let latest = agentEvents.max(by: { $0.timestamp < $1.timestamp })?.timestamp
             rows.append(Row(
                 name: status.sourceName,
                 type: "builtin",
                 engine: nil,
-                agent: entry.agent.rawValue,
+                agent: source.agent.rawValue,
                 rootPath: status.rootPath,
                 globPattern: nil,
                 enabled: true,

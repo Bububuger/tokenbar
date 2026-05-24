@@ -155,13 +155,20 @@ public actor UsageStore {
         indexedAt: Date,
         referenceDate: Date,
         calendar: Calendar,
-        lastRebuildError newLastRebuildError: String? = nil
+        lastRebuildError newLastRebuildError: String? = nil,
+        includePrompts: Bool = false,
+        includeEvents: Bool = false
     ) -> UsageStoreState {
         warnings = userActionableWarnings(newWarnings)
         lastIndexedAt = indexedAt
         lastRebuildError = newLastRebuildError
         _ = try? repository.replaceEvents(newEvents)
-        return makeState(referenceDate: referenceDate, calendar: calendar, includePrompts: true)
+        return makeState(
+            referenceDate: referenceDate,
+            calendar: calendar,
+            includePrompts: includePrompts,
+            includeEvents: includeEvents
+        )
     }
 
     @discardableResult
@@ -219,18 +226,34 @@ public actor UsageStore {
     public func recordFailure(
         _ message: String,
         referenceDate: Date,
-        calendar: Calendar
+        calendar: Calendar,
+        includePrompts: Bool = false,
+        includeEvents: Bool = true
     ) -> UsageStoreState {
         lastRebuildError = message
-        return makeState(referenceDate: referenceDate, calendar: calendar, includePrompts: true)
+        // Events preserved (callers like CheckpointEngine surface them in
+        // IndexRebuildResult). Prompts skipped — was hardcoded true, no
+        // caller in tree needs the full prompt content on failure.
+        return makeState(
+            referenceDate: referenceDate,
+            calendar: calendar,
+            includePrompts: includePrompts,
+            includeEvents: includeEvents
+        )
     }
 
     public func state(
         referenceDate: Date = Date(),
         calendar: Calendar = Calendar(identifier: .gregorian),
-        includePrompts: Bool = true
+        includePrompts: Bool = false,
+        includeEvents: Bool = false
     ) -> UsageStoreState {
-        makeState(referenceDate: referenceDate, calendar: calendar, includePrompts: includePrompts)
+        makeState(
+            referenceDate: referenceDate,
+            calendar: calendar,
+            includePrompts: includePrompts,
+            includeEvents: includeEvents
+        )
     }
 
     public func projectEvents(projectName: String, limit: Int? = nil) throws -> [UsageEvent] {
@@ -310,10 +333,22 @@ public actor UsageStore {
     private func makeState(
         referenceDate: Date,
         calendar: Calendar,
-        includePrompts: Bool
+        includePrompts: Bool,
+        includeEvents: Bool = true
     ) -> UsageStoreState {
-        let events = (try? repository.allEvents()) ?? []
         let signatures = (try? repository.collectionSignatures()) ?? nil
+        // Lazy event/prompt load: callers that only need snapshot+counts skip
+        // pulling the full content. Was unconditionally full-table per call.
+        let events: [UsageEvent]
+        let snapshotFallbackEvents: [UsageEvent]
+        if includeEvents {
+            let loaded = (try? repository.allEvents()) ?? []
+            events = loaded
+            snapshotFallbackEvents = loaded
+        } else {
+            events = []
+            snapshotFallbackEvents = []
+        }
         let prompts = includePrompts
             ? (try? repository.allPrompts()) ?? []
             : []
@@ -324,14 +359,17 @@ public actor UsageStore {
         let effectiveLastIndexedAt = lastIndexedAt ?? latestCheckpoint?.startedAt
         let effectiveRebuildError = lastRebuildError ?? latestCheckpoint?.error
         let baseSnapshot = (try? repository.makeSnapshot(referenceDate: referenceDate, calendar: calendar))
-            ?? UsageAggregator.makeSnapshot(from: events, referenceDate: referenceDate, calendar: calendar)
+            ?? UsageAggregator.makeSnapshot(from: snapshotFallbackEvents, referenceDate: referenceDate, calendar: calendar)
         // CL-P0-022: snapshot.warningCount is the single source of truth used
         // by Popover footer, Sidebar Diagnostics badge, and Diagnostics view.
         let snapshot = baseSnapshot.with(warningCount: effectiveWarnings.count)
+        let eventCount = includeEvents
+            ? events.count
+            : signatures?.eventCount ?? events.count
         return UsageStoreState(
             events: events,
             prompts: prompts,
-            eventCount: events.count,
+            eventCount: eventCount,
             promptCount: includePrompts
                 ? prompts.count
                 : signatures?.promptCount ?? 0,

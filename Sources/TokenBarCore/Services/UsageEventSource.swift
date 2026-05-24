@@ -66,5 +66,9 @@ public extension UsageEventSource {
 
 public protocol InspectableUsageEventSource: UsageEventSource {
     var rootPath: String { get }
+    /// The agent kind this source emits events for. Lets callers iterate
+    /// `BuiltInSources.all()` and pair each source with its `AgentKind`
+    /// without maintaining a side table of (sourceName → agent).
+    var agent: AgentKind { get }
     func status(referenceDate: Date, calendar: Calendar) async -> UsageDataSourceStatus
 }

@@ -43,11 +43,7 @@ enum RebuildCommand {
         let resourceThrottle = options.background || options.cpuPercent != nil
             ? IndexingResourceThrottle(budget: IndexingResourceBudget(cpuPercent: options.cpuPercent ?? IndexingResourceBudget.backgroundCPUPercent))
             : nil
-        let builtInSources: [any InspectableUsageEventSource] = [
-            CodexUsageEventSource(daysBack: nil),
-            ClaudeUsageEventSource(daysBack: nil),
-            HermesUsageEventSource(),
-        ]
+        let builtInSources = BuiltInSources.all()
         let customSources = (try? await store.customSources())
             .map { records in
                 records
@@ -102,11 +98,10 @@ enum RebuildCommand {
         if output.background {
             print("  Mode: background (~\(formatCPUPercent(output.cpuPercent ?? IndexingResourceBudget.backgroundCPUPercent)) CPU budget)")
         }
-        print("  Sources: Codex ~/.codex/sessions, Claude ~/.claude/projects, Hermes ~/.hermes/state.db")
-        print("  Discovered files:")
+        print("  Sources (\(output.sources.count)):")
         for source in output.sources {
             let readable = source.isReadable ? "readable" : "not readable"
-            print("    \(source.name): \(source.discoveredFileCount) (\(readable))")
+            print("    - \(source.name) \(source.rootPath) — \(source.discoveredFileCount) files (\(readable))")
         }
         print("  Events: \(output.eventCount) | Prompts: \(output.promptCount)")
         print("  Input tokens: \(output.inputTokens)")

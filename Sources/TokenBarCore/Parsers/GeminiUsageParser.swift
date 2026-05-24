@@ -117,9 +117,13 @@ public enum GeminiUsageParser {
                 sessionId: sessionId,
                 timestamp: timestamp,
                 inputTokens: inputClamp.value,
-                outputTokens: outputClamp.value + thoughtsClamp.value + toolClamp.value,
+                // Surface `thoughts` as reasoningTokens to match Codex /
+                // OpenCode / Hermes convention. `tool` stays folded into
+                // outputTokens (it's the model's tool-call payload size,
+                // not a distinct reasoning dimension).
+                outputTokens: outputClamp.value + toolClamp.value,
                 cacheTokens: cacheClamp.value,
-                reasoningTokens: nil,
+                reasoningTokens: thoughtsClamp.value,
                 modelName: modelName,
                 sourcePath: sourcePath,
                 parser: .gemini,

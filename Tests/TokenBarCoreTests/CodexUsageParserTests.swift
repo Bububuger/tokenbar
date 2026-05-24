@@ -58,6 +58,24 @@ struct CodexUsageParserTests {
         #expect(result.warnings.count == 2)
     }
 
+    /// Regression: Codex emits the same `last_token_usage` payload twice
+    /// per turn (initial + render-complete). Parser must collapse them so
+    /// totals match reality — real rollouts showed a 1.16-1.19x over-count
+    /// without this dedup.
+    @Test
+    func parserDedupesConsecutiveIdenticalTokenCountPayloads() throws {
+        let result = try CodexUsageParser.parse(fileURL: fixtureURL(named: "session-dedup"))
+
+        // Fixture has 4 token_count events but only 2 distinct payloads;
+        // duplicates of each must collapse.
+        #expect(result.events.count == 2)
+        #expect(result.events[0].inputTokens == 100)
+        #expect(result.events[1].inputTokens == 200)
+        // Total input must equal sum of distinct payloads, not the doubled raw.
+        let totalInput = result.events.reduce(0) { $0 + $1.inputTokens }
+        #expect(totalInput == 300)
+    }
+
     private func fixtureURL(named name: String) throws -> URL {
         guard let url = fixtureBundle.url(forResource: name, withExtension: "jsonl") else {
             throw FixtureError.missing(name)

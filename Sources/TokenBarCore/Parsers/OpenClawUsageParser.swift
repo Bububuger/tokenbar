@@ -1,26 +1,7 @@
 import Foundation
 
-public struct OpenClawParseWarning: Sendable, Hashable {
-    public let sourcePath: String
-    public let lineNumber: Int
-    public let message: String
-
-    public init(sourcePath: String, lineNumber: Int, message: String) {
-        self.sourcePath = sourcePath
-        self.lineNumber = lineNumber
-        self.message = message
-    }
-}
-
-public struct OpenClawParseResult: Sendable, Hashable {
-    public let events: [UsageEvent]
-    public let warnings: [OpenClawParseWarning]
-
-    public init(events: [UsageEvent], warnings: [OpenClawParseWarning]) {
-        self.events = events
-        self.warnings = warnings
-    }
-}
+public typealias OpenClawParseWarning = ParseWarning
+public typealias OpenClawParseResult = ParseResult
 
 /// Parses `~/.openclaw/agents/*/sessions/*.jsonl`. Session header (`type:
 /// "session"`) carries the project `cwd` and session id; assistant messages
@@ -110,7 +91,7 @@ public enum OpenClawUsageParser {
                 inputTokens: input,
                 outputTokens: output,
                 cacheTokens: cacheTokens,
-                reasoningTokens: nil,
+                reasoningTokens: 0,
                 modelName: model,
                 sourcePath: sourcePath,
                 parser: .openclaw,

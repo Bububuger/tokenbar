@@ -212,13 +212,13 @@ final class TokenBarRuntimeModel: ObservableObject {
     private var checkpointSourceSignature = ""
     private var hasBootstrapped = false
     private var lastAutomaticRefreshAt: Date?
-    private var activeRefreshTrigger: String?
-    private var pendingRefreshTrigger: String?
+    private var activeRefreshTrigger: RefreshTrigger?
+    private var pendingRefreshTrigger: RefreshTrigger?
     /// Triggers whose next instance is already produced by an upstream
     /// scheduler (file watcher / interval timer). When they collide with an
     /// in-flight refresh, drop them rather than coalescing — the next periodic
     /// run will pick up the same work.
-    private static let lossyRefreshTriggers: Set<String> = ["file-change", "interval"]
+    private static let lossyRefreshTriggers: Set<RefreshTrigger> = [.fileChange, .interval]
     private var suppressSourceChangesUntil: Date?
     private var intervalRefreshTask: Task<Void, Never>?
     // CL-P0-026: scheduled to fire just after local midnight so the Today KPI
@@ -317,7 +317,7 @@ final class TokenBarRuntimeModel: ObservableObject {
             // would otherwise stay invisible until a file is touched.
             Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(750))
-                await self?.refresh(trigger: "bootstrap-background")
+                await self?.refresh(trigger: .bootstrapBackground)
                 self?.isBootstrapping = false
             }
         }
@@ -335,7 +335,7 @@ final class TokenBarRuntimeModel: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { await self?.refresh(trigger: "wake") }
+            Task { await self?.refresh(trigger: .wake) }
         }
     }
 
@@ -358,7 +358,7 @@ final class TokenBarRuntimeModel: ObservableObject {
             await MainActor.run {
                 self.dayChangedAt = Date()
             }
-            await self.refresh(trigger: "midnight-rollover")
+            await self.refresh(trigger: .midnightRollover)
             await MainActor.run {
                 self.scheduleNextMidnightRollover()
             }
@@ -387,7 +387,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         await applyRetention(referenceDate: now)
         TokenBarTelemetry.timing("runtime.load_persisted.stage.apply_retention", startedAt: stageStarted)
         stageStarted = Date()
-        let state = await usageStore.state(referenceDate: now, calendar: calendar, includePrompts: false)
+        let state = await usageStore.state(referenceDate: now, calendar: calendar, includePrompts: false, includeEvents: true)
         TokenBarTelemetry.timing(
             "runtime.load_persisted.stage.usage_store_state",
             startedAt: stageStarted,
@@ -467,7 +467,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         )
     }
 
-    func refresh(trigger: String = "manual") async {
+    func refresh(trigger: RefreshTrigger = .manual) async {
         let started = Date()
         guard !indexingState.isActive else {
             // Same coalesce rule as the `activeRefreshTrigger` skip below:
@@ -572,7 +572,7 @@ final class TokenBarRuntimeModel: ObservableObject {
             progressHandler = nil
         }
         let runResult = await engine.run(
-            trigger: trigger,
+            trigger: trigger.rawValue,
             startedAt: now,
             referenceDate: now,
             calendar: Calendar(identifier: .gregorian),
@@ -598,7 +598,7 @@ final class TokenBarRuntimeModel: ObservableObject {
             metadata: "trigger=\(trigger)"
         )
         stageStarted = Date()
-        let state = await usageStore.state(referenceDate: now, calendar: Calendar(identifier: .gregorian), includePrompts: false)
+        let state = await usageStore.state(referenceDate: now, calendar: Calendar(identifier: .gregorian), includePrompts: false, includeEvents: true)
         TokenBarTelemetry.timing(
             "runtime.refresh.stage.usage_store_state",
             startedAt: stageStarted,
@@ -724,9 +724,9 @@ final class TokenBarRuntimeModel: ObservableObject {
             checkedFiles: 0,
             eventsIndexed: 0,
             promptsIndexed: 0,
-            message: "Initial indexing with a \(Int(IndexingResourceBudget.initialIndexCPUPercent))% CPU budget",
+            message: "Initial indexing with a \(Int(IndexingResourceBudget.initialIndex.cpuPercent))% CPU budget",
             activeSourceName: nil,
-            cpuBudgetPercent: IndexingResourceBudget.initialIndexCPUPercent
+            cpuBudgetPercent: IndexingResourceBudget.initialIndex.cpuPercent
         )
         refreshState = .refreshing
         diagnostics = diagnosticsSnapshot(
@@ -737,7 +737,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         )
         TokenBarTelemetry.event(
             "initial_index.start",
-            metadata: "reason=\(reason) sources=\(sources.count) cpu_budget=\(IndexingResourceBudget.initialIndexCPUPercent)",
+            metadata: "reason=\(reason) sources=\(sources.count) cpu_budget=\(IndexingResourceBudget.initialIndex.cpuPercent)",
             success: true
         )
 
@@ -942,7 +942,7 @@ final class TokenBarRuntimeModel: ObservableObject {
                 stateIncludesPrompts: false
             )
         } else {
-            finalState = await usageStore.state(referenceDate: finishedAt, calendar: calendar, includePrompts: false)
+            finalState = await usageStore.state(referenceDate: finishedAt, calendar: calendar, includePrompts: false, includeEvents: true)
         }
         publishStoreState(
             finalState,
@@ -1447,7 +1447,7 @@ final class TokenBarRuntimeModel: ObservableObject {
                 await publishCurrentStoreState(refreshState: .refreshing)
             }
             customSources = await loadCustomSources()
-            let trigger = existing == nil ? "custom-source-add" : "custom-source-deduplicate"
+            let trigger: RefreshTrigger = .customSource(action: existing == nil ? .add : .deduplicate)
             publishCustomSourceRefreshQueued(trigger: trigger, sources: [source])
             scheduleCustomSourceRefresh(trigger: trigger)
             TokenBarTelemetry.event(
@@ -1500,7 +1500,7 @@ final class TokenBarRuntimeModel: ObservableObject {
             if requiresReindex {
                 await publishCurrentStoreState(refreshState: .refreshing)
             }
-            let trigger = deduplicated ? "custom-source-deduplicate" : "custom-source-update"
+            let trigger: RefreshTrigger = .customSource(action: deduplicated ? .deduplicate : .update)
             publishCustomSourceRefreshQueued(trigger: trigger, sources: [updated])
             scheduleCustomSourceRefresh(trigger: trigger)
             TokenBarTelemetry.event(
@@ -1516,7 +1516,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         }
     }
 
-    private func scheduleCustomSourceRefresh(trigger: String) {
+    private func scheduleCustomSourceRefresh(trigger: RefreshTrigger) {
         Task { [weak self] in
             guard let self else { return }
             await self.restartFileWatcher()
@@ -1542,7 +1542,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         do {
             try await usageStore.reparseAll()
             let referenceDate = Date()
-            let state = await usageStore.state(referenceDate: referenceDate, calendar: Calendar(identifier: .gregorian), includePrompts: false)
+            let state = await usageStore.state(referenceDate: referenceDate, calendar: Calendar(identifier: .gregorian), includePrompts: false, includeEvents: true)
             publishStoreState(
                 state,
                 statuses: diagnostics.dataSourceStatuses,
@@ -1552,7 +1552,7 @@ final class TokenBarRuntimeModel: ObservableObject {
             startInitialIndexing(reason: "reparse-all")
             TokenBarTelemetry.event(
                 "diagnostics.reparse_all",
-                metadata: "mode=initial_index cpu_budget=\(IndexingResourceBudget.initialIndexCPUPercent)",
+                metadata: "mode=initial_index cpu_budget=\(IndexingResourceBudget.initialIndex.cpuPercent)",
                 success: true,
                 elapsed: Date().timeIntervalSince(started)
             )
@@ -1567,7 +1567,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         let started = Date()
         do {
             try await usageStore.wipePrompts()
-            await refresh(trigger: "wipe-prompts")
+            await refresh(trigger: .wipePrompts)
             TokenBarTelemetry.event("diagnostics.wipe_prompts", success: true, elapsed: Date().timeIntervalSince(started))
         } catch {
             TokenBarTelemetry.event("diagnostics.wipe_prompts", success: false, elapsed: Date().timeIntervalSince(started), error: String(describing: error))
@@ -1579,7 +1579,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         let started = Date()
         do {
             try await usageStore.reparseSource(sourcePath)
-            await refresh(trigger: "reparse-source")
+            await refresh(trigger: .reparseSource)
             TokenBarTelemetry.event("diagnostics.reparse_source", metadata: "source=\(sourcePath)", success: true, elapsed: Date().timeIntervalSince(started))
         } catch {
             TokenBarTelemetry.event("diagnostics.reparse_source", metadata: "source=\(sourcePath)", success: false, elapsed: Date().timeIntervalSince(started), error: String(describing: error))
@@ -1588,7 +1588,7 @@ final class TokenBarRuntimeModel: ObservableObject {
 
     private func applyRetentionAndReload(referenceDate: Date) async {
         await applyRetention(referenceDate: referenceDate)
-        let state = await usageStore.state(referenceDate: referenceDate, calendar: Calendar(identifier: .gregorian), includePrompts: false)
+        let state = await usageStore.state(referenceDate: referenceDate, calendar: Calendar(identifier: .gregorian), includePrompts: false, includeEvents: true)
         events = state.events
         prompts = []
         publishCollectionMetadata(from: state)
@@ -1654,7 +1654,7 @@ final class TokenBarRuntimeModel: ObservableObject {
             }
             customSources = await loadCustomSources()
             await restartFileWatcher()
-            await refresh(trigger: "custom-source-toggle")
+            await refresh(trigger: .customSource(action: .toggle))
             TokenBarTelemetry.event("custom_source.toggle", metadata: "name=\(updated.name) enabled=\(updated.enabled)", success: true, elapsed: Date().timeIntervalSince(started))
         } catch {
             TokenBarTelemetry.event("custom_source.toggle", metadata: "name=\(updated.name)", success: false, elapsed: Date().timeIntervalSince(started), error: String(describing: error))
@@ -1668,7 +1668,7 @@ final class TokenBarRuntimeModel: ObservableObject {
             customSources = await loadCustomSources()
             await publishCurrentStoreState(refreshState: .refreshing)
             await restartFileWatcher()
-            await refresh(trigger: "custom-source-remove")
+            await refresh(trigger: .customSource(action: .remove))
             TokenBarTelemetry.event("custom_source.remove", metadata: "id=\(id)", success: true, elapsed: Date().timeIntervalSince(started))
         } catch {
             TokenBarTelemetry.event("custom_source.remove", metadata: "id=\(id)", success: false, elapsed: Date().timeIntervalSince(started), error: String(describing: error))
@@ -1677,7 +1677,7 @@ final class TokenBarRuntimeModel: ObservableObject {
 
     private func publishCurrentStoreState(refreshState nextRefreshState: RefreshState) async {
         let referenceDate = Date()
-        let state = await usageStore.state(referenceDate: referenceDate, calendar: Calendar(identifier: .gregorian), includePrompts: false)
+        let state = await usageStore.state(referenceDate: referenceDate, calendar: Calendar(identifier: .gregorian), includePrompts: false, includeEvents: true)
         publishStoreState(
             state,
             statuses: diagnostics.dataSourceStatuses,
@@ -1772,7 +1772,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         )
     }
 
-    private func publishCustomSourceRefreshQueued(trigger: String, sources: [CustomSourceRecord]) {
+    private func publishCustomSourceRefreshQueued(trigger: RefreshTrigger, sources: [CustomSourceRecord]) {
         guard !indexingState.isActive else { return }
         let visibleSources = sources.isEmpty ? customSources : sources
         indexingState = TokenBarIndexingState(
@@ -1795,7 +1795,8 @@ final class TokenBarRuntimeModel: ObservableObject {
             promptsIndexed: 0,
             message: refreshIndexingMessage(for: trigger, phase: .queued),
             activeSourceName: nil,
-            cpuBudgetPercent: IndexingResourceBudget.initialIndexCPUPercent
+            // custom-source-* triggers route to .initialIndex (see backgroundThrottle)
+            cpuBudgetPercent: IndexingResourceBudget.initialIndex.cpuPercent
         )
         refreshState = .refreshing
         diagnostics = diagnosticsSnapshot(
@@ -1807,7 +1808,7 @@ final class TokenBarRuntimeModel: ObservableObject {
     }
 
     private func publishRefreshIndexingDiscovery(
-        trigger: String,
+        trigger: RefreshTrigger,
         sources: [any InspectableUsageEventSource],
         startedAt: Date,
         resourceThrottle: IndexingResourceThrottle?
@@ -1833,12 +1834,12 @@ final class TokenBarRuntimeModel: ObservableObject {
             promptsIndexed: 0,
             message: refreshIndexingMessage(for: trigger, phase: .discovering),
             activeSourceName: nil,
-            cpuBudgetPercent: resourceThrottle != nil ? IndexingResourceBudget.initialIndexCPUPercent : nil
+            cpuBudgetPercent: resourceThrottle?.budget.cpuPercent
         )
     }
 
     private func publishRefreshIndexingProgress(
-        trigger: String,
+        trigger: RefreshTrigger,
         statuses: [UsageDataSourceStatus],
         startedAt: Date,
         resourceThrottle: IndexingResourceThrottle?
@@ -1859,7 +1860,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         // `.refreshing` (not in `isActive`) so it doesn't accidentally block
         // its own coalesced follow-ups and so the card reads "Catching up"
         // instead of "Building local index".
-        let phase: TokenBarIndexingPhase = trigger == "bootstrap-background" ? .refreshing : .indexing
+        let phase: TokenBarIndexingPhase = trigger == .bootstrapBackground ? .refreshing : .indexing
         indexingState = TokenBarIndexingState(
             phase: phase,
             sources: sourceStates,
@@ -1868,15 +1869,19 @@ final class TokenBarRuntimeModel: ObservableObject {
             checkedFiles: statuses.reduce(0) { $0 + $1.discoveredFileCount },
             eventsIndexed: 0,
             promptsIndexed: 0,
-            message: refreshIndexingMessage(for: trigger, phase: .indexing),
+            message: refreshIndexingMessage(
+                for: trigger,
+                phase: .indexing,
+                cpuBudgetPercent: resourceThrottle?.budget.cpuPercent
+            ),
             activeSourceName: nil,
-            cpuBudgetPercent: resourceThrottle != nil ? IndexingResourceBudget.initialIndexCPUPercent : nil
+            cpuBudgetPercent: resourceThrottle?.budget.cpuPercent
         )
         publishDiagnosticsDuringInitialIndex(statuses: statuses, rebuildError: nil)
     }
 
     private func publishRefreshIndexingCompletion(
-        trigger: String,
+        trigger: RefreshTrigger,
         statuses: [UsageDataSourceStatus],
         result: CheckpointRunResult,
         endedAt: Date
@@ -1931,15 +1936,20 @@ final class TokenBarRuntimeModel: ObservableObject {
         }
     }
 
-    private func refreshIndexingMessage(for trigger: String, phase: TokenBarIndexingPhase) -> String {
-        let noun = trigger == "reparse-source" ? "source" : "custom sources"
+    private func refreshIndexingMessage(
+        for trigger: RefreshTrigger,
+        phase: TokenBarIndexingPhase,
+        cpuBudgetPercent: Double? = nil
+    ) -> String {
+        let noun = trigger == .reparseSource ? "source" : "custom sources"
         switch phase {
         case .queued:
             return "\(noun.capitalized) saved. Waiting for the indexer."
         case .discovering:
             return "Discovering \(noun) before indexing."
         case .indexing:
-            return "Indexing \(noun) with a \(Int(IndexingResourceBudget.initialIndexCPUPercent))% CPU budget."
+            let budget = cpuBudgetPercent ?? IndexingResourceBudget.initialIndex.cpuPercent
+            return "Indexing \(noun) with a \(Int(budget))% CPU budget."
         case .completed:
             return "\(noun.capitalized) index is ready."
         case .failed:
@@ -1961,17 +1971,18 @@ final class TokenBarRuntimeModel: ObservableObject {
         indexingState.activeSourceName = sources.first(where: { $0.phase == .scanning })?.sourceName
     }
 
-    private func shouldShowRefreshIndexingProgress(for trigger: String) -> Bool {
-        (trigger.hasPrefix("custom-source-") && trigger != "custom-source-remove")
-            || trigger == "reparse-source"
-            || trigger == "bootstrap-background"
+    private func shouldShowRefreshIndexingProgress(for trigger: RefreshTrigger) -> Bool {
+        if case .customSource(let action) = trigger {
+            return action != .remove
+        }
+        return trigger == .reparseSource || trigger == .bootstrapBackground
     }
 
     private func progressSources(
         from sources: [any InspectableUsageEventSource],
-        trigger: String
+        trigger: RefreshTrigger
     ) -> [any InspectableUsageEventSource] {
-        guard trigger.hasPrefix("custom-source-") else { return sources }
+        guard trigger.isCustomSource else { return sources }
         let builtInKeys = Set(builtInSources.map { sourceKey(name: $0.sourceName, rootPath: $0.rootPath) })
         let custom = sources.filter { !builtInKeys.contains(sourceKey(name: $0.sourceName, rootPath: $0.rootPath)) }
         return custom.isEmpty ? sources : custom
@@ -1979,9 +1990,9 @@ final class TokenBarRuntimeModel: ObservableObject {
 
     private func progressStatuses(
         from statuses: [UsageDataSourceStatus],
-        trigger: String
+        trigger: RefreshTrigger
     ) -> [UsageDataSourceStatus] {
-        guard trigger.hasPrefix("custom-source-") else { return statuses }
+        guard trigger.isCustomSource else { return statuses }
         let builtInKeys = Set(builtInSources.map { sourceKey(name: $0.sourceName, rootPath: $0.rootPath) })
         let custom = statuses.filter { !builtInKeys.contains(sourceKey(name: $0.sourceName, rootPath: $0.rootPath)) }
         return custom.isEmpty ? statuses : custom
@@ -2142,14 +2153,14 @@ final class TokenBarRuntimeModel: ObservableObject {
         return engine
     }
 
-    private func backgroundThrottle(for trigger: String) -> IndexingResourceThrottle? {
-        if trigger.hasPrefix("custom-source-") || trigger == "reparse-source" {
+    private func backgroundThrottle(for trigger: RefreshTrigger) -> IndexingResourceThrottle? {
+        if trigger.isCustomSource || trigger == .reparseSource {
             return IndexingResourceThrottle(budget: .initialIndex)
         }
         switch trigger {
-        case "bootstrap-background":
+        case .bootstrapBackground:
             return IndexingResourceThrottle(budget: .bootstrapCatchup)
-        case "reparse-all", "file-change":
+        case .reparseAll, .fileChange:
             return IndexingResourceThrottle(budget: .background)
         default:
             return nil
@@ -2161,8 +2172,9 @@ final class TokenBarRuntimeModel: ObservableObject {
         let customPaths = customSources
             .filter(\.enabled)
             .map(\.directory)
+        let builtInPaths = BuiltInSources.all().map(\.rootPath)
         let watcher = RecursiveFSEventsWatcher(
-            paths: ["~/.codex/sessions", "~/.claude/projects", "~/.hermes", "~/.gemini", "~/.openclaw", "~/.local/share/opencode"] + customPaths
+            paths: builtInPaths + customPaths
         ) { [weak self] in
             await self?.handleSourceChange()
         }
@@ -2197,7 +2209,7 @@ final class TokenBarRuntimeModel: ObservableObject {
 
         let elapsed = lastAutomaticRefreshAt.map { now.timeIntervalSince($0) } ?? cadence
         guard elapsed < cadence else {
-            await refresh(trigger: "file-change")
+            await refresh(trigger: .fileChange)
             return
         }
         guard intervalRefreshTask == nil else { return }
@@ -2206,7 +2218,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         intervalRefreshTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard !Task.isCancelled else { return }
-            await self?.refresh(trigger: "interval")
+            await self?.refresh(trigger: .interval)
         }
         updateRefreshState()
     }
@@ -2216,19 +2228,8 @@ final class TokenBarRuntimeModel: ObservableObject {
         let usageStore = (try? UsageStore(databaseURL: UsageDatabase.defaultDatabaseURL())) ?? UsageStore()
         let useSampleData = ProcessInfo.processInfo.environment["TOKENBAR_USE_SAMPLE_DATA"] == "1"
         let sources: [any InspectableUsageEventSource] = useSampleData
-            ? [
-                SampleUsageEventSource(),
-            ]
-            : [
-                // OpenClaw moved to front so first-time indexing surfaces
-                // quickly even when Codex (~5k files) is queued behind it.
-                OpenClawUsageEventSource(),
-                CodexUsageEventSource(),
-                ClaudeUsageEventSource(),
-                HermesUsageEventSource(),
-                GeminiUsageEventSource(),
-                OpenCodeUsageEventSource(),
-            ]
+            ? [SampleUsageEventSource()]
+            : BuiltInSources.all()
         return TokenBarRuntimeModel(
             settingsStore: settingsStore,
             usageStore: usageStore,

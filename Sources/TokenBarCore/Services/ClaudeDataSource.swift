@@ -7,6 +7,27 @@ public enum ClaudeDataSource {
         daysBack: Int? = nil,
         fileManager: FileManager = .default
     ) throws -> [URL] {
+        // Coalesce repeat calls within a refresh cycle. `loadEvents` and
+        // `status()` both call here, plus the runtime collects statuses
+        // twice per refresh — this cuts the call count from ~12+ per refresh
+        // to ~6 on the hot path.
+        let cacheKey = "claude|\(rootDirectory)|\(daysBack.map(String.init) ?? "all")"
+        return try DiscoveryCache.cached(key: cacheKey) {
+            try uncachedDiscoverSessionFiles(
+                rootDirectory: rootDirectory,
+                referenceDate: referenceDate,
+                daysBack: daysBack,
+                fileManager: fileManager
+            )
+        }
+    }
+
+    private static func uncachedDiscoverSessionFiles(
+        rootDirectory: String,
+        referenceDate: Date,
+        daysBack: Int?,
+        fileManager: FileManager
+    ) throws -> [URL] {
         let rootPath = expandHome(in: rootDirectory)
         let rootURL = URL(fileURLWithPath: rootPath, isDirectory: true)
         let cutoff = daysBack.map { referenceDate.addingTimeInterval(-Double($0) * 24 * 60 * 60) }

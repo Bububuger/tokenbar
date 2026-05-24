@@ -1,24 +1,4 @@
-# TokenBar
-
-This directory is the TokenBar product codebase.
-
-Current source of truth for product planning:
-
-
-Current bootstrap:
-
-- Xcode-generated macOS app target (`project.yml` -> `TokenBar.xcodeproj`)
-- `TokenBarCore` domain layer with deterministic sample data
-- real `swift-testing` coverage for the aggregation layer
-- SwiftUI app shell with menu bar extra, main window, and settings placeholder
-- `script/build.sh`, `script/test.sh`, `script/build_and_run.sh`
-- `script/autoresearch_acceptance.sh`
-- project-local Xcode env bootstrap via `script/xcode_env.sh`
-
-Current launch behavior:
-
-- the repo now builds a real development-signed Xcode app target
-- on this machine, direct terminal launch still depends on macOS Developer Mode
-- `script/build_and_run.sh` therefore falls back to asking Xcode to run the
-  `TokenBar` scheme when terminal-launched developer apps are blocked by system
-  policy
+{"timestamp":"2026-03-27T09:22:45.179Z","type":"session_meta","payload":{"id":"019d-model-ctx","timestamp":"2026-03-27T09:22:44.885Z","cwd":"/tmp/multi-model","model":"gemini-2.5-pro","originator":"Codex Desktop"}}
+{"timestamp":"2026-03-27T09:23:14.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":0,"total_tokens":110}}}}
+{"timestamp":"2026-03-27T09:23:30.000Z","type":"turn_context","payload":{"model":"gpt-4.1-mini","cwd":"/tmp/multi-model"}}
+{"timestamp":"2026-03-27T09:24:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":200,"cached_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":220}}}}

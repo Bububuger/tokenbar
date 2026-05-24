@@ -32,12 +32,7 @@ public struct JSONLIncrementalReadResult: Sendable, Hashable {
     public let warnings: [UsageSourceWarning]
 }
 
-private enum JSONLReaderThrottle {
-    static let activeSliceSeconds: TimeInterval = 0.004
-    static let lineInterval = 16
-    static let unthrottledChunkSize = 1024 * 1024
-    static let throttledChunkSize = 64 * 1024
-}
+private typealias JSONLReaderThrottle = JSONLThrottleTunables
 
 public enum JSONLIncrementalReader {
     public static func fingerprint(at path: String) throws -> FileFingerprint {
@@ -303,7 +298,7 @@ public enum JSONLIncrementalReader {
             currentLineNumber += 1
             linesSinceThrottle += 1
 
-            if let resourceThrottle, linesSinceThrottle >= JSONLReaderThrottle.lineInterval {
+            if let resourceThrottle, linesSinceThrottle >= JSONLReaderThrottle.readerLineInterval {
                 let active = Date().timeIntervalSince(sliceStartedAt)
                 if active >= JSONLReaderThrottle.activeSliceSeconds {
                     await resourceThrottle.rest(afterActive: active)

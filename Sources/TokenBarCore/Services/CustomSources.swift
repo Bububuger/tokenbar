@@ -23,6 +23,7 @@ public struct CustomSourceRegistry: Sendable {
 public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Sendable {
     public let sourceName: String
     public let rootPath: String
+    public var agent: AgentKind { record.engine.agentKind }
     public let record: CustomSourceRecord
     private let fileManager: FileManager
 

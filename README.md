@@ -25,7 +25,7 @@ Live tokens, real cost — by project, by agent, by model. **0 upload · 0 signu
 
 <br />
 
-<img src="docs/assets/product.jpg" alt="TokenBar — see your AI token spend, live" width="100%" />
+<img src="docs/assets/promo-trio.png" alt="TokenBar — menu bar to deep dive, one app" width="100%" />
 
 </div>
 
@@ -50,6 +50,12 @@ You're paying for Claude, Codex, Gemini and a long tail of CLI agents that all s
 | 🎴 | **`tokenbar-report` skill** | Spotify-Wrapped-style yearly recap across **6 personas** (Cultivation · Wuxia · Three-Body · Outlaws · Stand-up · JoJo) — pick a card, get a different lens on the same dataset. <br/> *Spotify Wrapped 风格年度回顾，6 个截然不同的人格视角（修仙 / 武侠 / 三体 / 水浒 / 脱口秀 / JoJo），抽卡随机切换。* |
 | 🛠 | **`tbar` CLI** | Fourteen subcommands — twelve read queries (`events`, `prompts`, `projects`, `sessions`, `models`, `agents`, `summary`, `timeline`, `sources`, `checkpoints`, `warnings`, `schema`), plus `rebuild` (write, full reindex) and `prompt` (saved-template `/tbar:<slug>` integration). <br/> *十四条命令，与 App 同一份本地索引；`rebuild` 是 CLI 版「Reparse all」，`prompt` 直通菜单栏保存的 `/tbar:<slug>` 模板。* |
 
+<p align="center">
+  <img src="docs/assets/promo-overview.png" alt="Drill in: per-project, per-agent, per-hour" width="80%" />
+  <br/>
+  <sub><i>Drill in — per project · per agent · per hour. The same number, six lenses.</i></sub>
+</p>
+
 <br />
 
 ## 🔌 Supported Sources / 已支持的数据源
@@ -67,6 +73,26 @@ TokenBar ships with **six** zero-config engines. Every tile is "Local-first. Not
 </p>
 
 **Custom sources / 自定义数据源** — *"Point TokenBar at any agent that writes JSONL or sqlite locally."* Configure path glob + field mapping in `Settings → Custom Sources`. Schema validation runs before save, so a bad path can't poison the index.
+
+<p align="center">
+  <img src="docs/assets/promo-popover.png" alt="See your tokens, live in your menu bar" width="80%" />
+  <br/>
+  <sub><i>Click the menu bar — every source, every project, every model, in one popover.</i></sub>
+</p>
+
+<br />
+
+## 🤖 Meet "bar" / 认识吉祥物
+
+> One mascot, twenty-eight poses. The brand mark became a creature — **chassis** is the body, the **three bars** are the chest, the **lime live row pulses** with today's tokens.
+
+<p align="center">
+  <img src="docs/assets/mascot-strip.png" alt="bar — eight of the twenty-eight poses: wave, chart, detective, work, excited, trophy, headphones, dance" width="100%" />
+</p>
+
+Every UI state has a face: **wave** on launch, **chart** when it talks data, **detective** for diagnostics, **work** during a session, **excited** when you hit a milestone, **trophy** when budget closes green, **headphones** in focus mode, **dance** for the install celebration.
+
+> **中文**：吉祥物叫"bar"。机身就是品牌图标，胸口的三条柱状图就是品牌符号，中间那条 lime 会跟着今日 token 实时脉动。28 个姿势对应 28 种 App 状态 —— 启动挥手、加载思考、达标举奖杯、超支冒汗。
 
 <br />
 
@@ -233,5 +259,9 @@ Separately, [`LEGAL.md`](LEGAL.md) establishes a **comment-language priority** r
 <br />
 
 <div align="center">
+
+<img src="docs/assets/mascot-wave.png" alt="bar waving goodbye" width="100" />
+
 <sub>Made for people who want to know what their AI tools actually cost — without giving up another byte to find out.</sub>
+
 </div>

@@ -10,8 +10,7 @@
 #   tells Homebrew to symlink that path into /opt/homebrew/bin/tbar (or
 #   /usr/local/bin/tbar on Intel), so users get the CLI on $PATH for free.
 #
-# Install:
-#   brew tap   <your-org>/tap
+# Install (single fully-qualified line — auto-taps if not yet tapped):
 #   brew install --cask <your-org>/tap/tokenbar
 #
 # Verify:

@@ -83,8 +83,7 @@ TokenBar ships with **six** zero-config engines. Local-only data — TokenBar on
 ### Homebrew (recommended)
 
 ```bash
-brew tap Bububuger/tap
-brew install --cask tokenbar
+brew install --cask Bububuger/tap/tokenbar
 ```
 
 One DMG, two surfaces: `/Applications/TokenBar.app` (the menu-bar app) and `$(brew --prefix)/bin/tbar` (the CLI, symlinked from inside the .app bundle). `brew uninstall --cask tokenbar` removes both.

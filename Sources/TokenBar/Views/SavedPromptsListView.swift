@@ -91,7 +91,7 @@ struct SavedPromptsListView: View {
                     Text(prompt.title.isEmpty ? prompt.slug : prompt.title)
                         .font(.system(size: 14, weight: .semibold))
                     Spacer()
-                    Text("/tb:\(prompt.slug)")
+                    Text("/tbar:\(prompt.slug)")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(TokenBarStyle.muted)
                 }

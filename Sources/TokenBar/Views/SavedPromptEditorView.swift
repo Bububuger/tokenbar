@@ -63,10 +63,10 @@ struct SavedPromptEditorView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Apply writes plaintext body to ~/.claude/commands/tb/\(slug.isEmpty ? "<slug>" : slug).md.")
+                Text("Apply writes plaintext body to ~/.claude/commands/tbar/\(slug.isEmpty ? "<slug>" : slug).md.")
                     .font(.caption2)
                     .foregroundStyle(TokenBarStyle.muted)
-                Text("To trigger as /tb:\(slug.isEmpty ? "<slug>" : slug) in Claude Code, start a new session after Apply.")
+                Text("To trigger as /tbar:\(slug.isEmpty ? "<slug>" : slug) in Claude Code, start a new session after Apply.")
                     .font(.caption2)
                     .foregroundStyle(TokenBarStyle.muted)
                 Text("Variables: use $ARGUMENTS where the user-supplied context should be inserted.")

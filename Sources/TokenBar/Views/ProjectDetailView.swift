@@ -791,7 +791,7 @@ struct ProjectDetailView: View {
                 .opacity(allowReveal ? 1 : 0.35)
                 .help(allowReveal
                       ? (existingTemplate != nil
-                          ? "Edit saved template (/tb:\(existingTemplate?.slug ?? ""))"
+                          ? "Edit saved template (/tbar:\(existingTemplate?.slug ?? ""))"
                           : "Save as reusable Claude Code slash command template")
                       : "Reveal prompt text before saving as a template")
             }

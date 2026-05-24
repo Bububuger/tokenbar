@@ -231,6 +231,12 @@ final class TokenBarRuntimeModel: ObservableObject {
     private var initialIndexTask: Task<Void, Never>?
     private let savedPromptCommandSync = SavedPromptCommandSync()
     @Published private(set) var dayChangedAt: Date?
+    /// Set when a newer GitHub release is available. Drives the popover-footer
+    /// hint and the menubar-glyph red dot. `nil` when running latest or when
+    /// the check is disabled / hasn't run / failed.
+    @Published private(set) var availableUpdate: UpdateCheckResult?
+    private let updateChecker = UpdateChecker()
+    private var updateCheckTask: Task<Void, Never>?
 
     init(
         settingsStore: SettingsStore,
@@ -305,6 +311,9 @@ final class TokenBarRuntimeModel: ObservableObject {
             elapsed: Date().timeIntervalSince(started),
             error: diagnostics.rebuildError
         )
+        // GitHub-releases version check. Once per launch, then every 24h.
+        // Opt-out via `tokenbar.updateCheckEnabled = false` in UserDefaults.
+        startUpdateCheckLoop()
         if shouldRunInitialIndexing {
             startInitialIndexing(reason: "cold-start")
             // `indexingState` now drives the "still measuring" affordance;
@@ -329,6 +338,36 @@ final class TokenBarRuntimeModel: ObservableObject {
 
     /// CL-P1-036: after a sleep/wake cycle, trigger a refresh so the menubar
     /// briefly enters stale → idle instead of showing stale data for an hour.
+    private func startUpdateCheckLoop() {
+        updateCheckTask?.cancel()
+        updateCheckTask = Task { [weak self] in
+            // Initial check 5s after launch — let bootstrap finish first.
+            try? await Task.sleep(for: .seconds(5))
+            while !Task.isCancelled {
+                if let self {
+                    if let result = await self.updateChecker.checkNow() {
+                        await MainActor.run {
+                            self.availableUpdate = result.isNewer ? result : nil
+                        }
+                    }
+                }
+                // 24h between checks. URLSession.shared call so a sleep/wake
+                // cycle won't block; if the device is suspended the next
+                // wake observer (`observeSystemPowerEvents`) already does a
+                // refresh that exercises the same code path next tick.
+                try? await Task.sleep(for: .seconds(24 * 60 * 60))
+            }
+        }
+    }
+
+    /// Force-check on user demand (popover label click). Updates
+    /// `availableUpdate` regardless of the 24h throttle.
+    func checkForUpdatesNow() async {
+        if let result = await updateChecker.checkNow() {
+            availableUpdate = result.isNewer ? result : nil
+        }
+    }
+
     private func observeSystemPowerEvents() {
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,

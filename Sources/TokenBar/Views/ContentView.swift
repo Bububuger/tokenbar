@@ -712,8 +712,7 @@ private struct TokenBarSidebar: View {
                     .fill(dotColor)
                     .frame(width: 6, height: 6)
                     .shadow(color: dotColor.opacity(0.55), radius: 5)
-                Text("v0.1.0")
-                    .font(.system(size: 10.5, design: .monospaced))
+                TokenBarVersionLabel()
                 Spacer()
                 Text(lastIndexedAt == nil ? "first scan…" : tokenbarRelativeTime(lastIndexedAt))
                     .font(.system(size: 10.5, design: .monospaced))
@@ -1465,6 +1464,46 @@ private struct OnboardingCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+}
+
+/// Popover-footer version label. Shows the running app version pulled from
+/// `Info.plist`; turns into a clickable affordance when a newer release is
+/// available (driven by `runtimeModel.availableUpdate`). Click opens the
+/// GitHub release page in the browser.
+struct TokenBarVersionLabel: View {
+    @EnvironmentObject var runtimeModel: TokenBarRuntimeModel
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        Button(action: handleTap) {
+            HStack(spacing: 4) {
+                Text("v\(currentVersion)")
+                    .font(.system(size: 10.5, design: .monospaced))
+                if let update = runtimeModel.availableUpdate {
+                    Text("→ \(update.latestVersion)")
+                        .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(TokenBarStyle.accent)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .help(runtimeModel.availableUpdate == nil
+              ? "Open releases page on GitHub"
+              : "Update \(runtimeModel.availableUpdate!.latestVersion) available — click for release notes")
+    }
+
+    private var currentVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+    }
+
+    private func handleTap() {
+        if let url = runtimeModel.availableUpdate?.releaseURL {
+            openURL(url)
+        } else {
+            openURL(URL(string: "https://github.com/Bububuger/tokenbar/releases/latest")!)
+        }
+        Task { await runtimeModel.checkForUpdatesNow() }
     }
 }
 

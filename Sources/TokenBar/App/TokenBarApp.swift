@@ -105,9 +105,17 @@ private struct TokenBarStatusItem: View {
             Image(nsImage: TokenBarMenuBarGlyphImage.template(progress: todayFillProgress))
                 .renderingMode(.template)
                 .overlay(alignment: .topTrailing) {
+                    // Priority: failed > stale > update-available. Refresh
+                    // problems win the dot because they imply data may lie.
                     if runtimeModel.refreshState == .failed || runtimeModel.refreshState == .stale {
                         Circle()
                             .fill(runtimeModel.refreshState == .failed ? TokenBarStyle.error : TokenBarStyle.warn)
+                            .frame(width: 4, height: 4)
+                            .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
+                            .offset(x: 1, y: -1)
+                    } else if runtimeModel.availableUpdate != nil {
+                        Circle()
+                            .fill(TokenBarStyle.accent)
                             .frame(width: 4, height: 4)
                             .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
                             .offset(x: 1, y: -1)

@@ -6,12 +6,12 @@
 ### 把每一笔 AI 编码 token，钉在你的菜单栏上。
 
 A macOS menu-bar app that aggregates **Claude Code · Codex · Gemini · Hermes · OpenClaw · OpenCode** usage from your local logs.
-Live tokens, real cost — by project, by agent, by model. **0 upload · 0 signup · 0 account.**
+Live tokens, real cost — by project, by agent, by model. **No data upload · No signup · No account.** (One outbound call: an opt-out 24h GitHub-releases version check.)
 
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-007AFF?logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![Swift 6](https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white)](https://www.swift.org/)
 [![SwiftUI](https://img.shields.io/badge/SwiftUI-MenuBarExtra-2D9CDB?logo=swift&logoColor=white)](https://developer.apple.com/xcode/swiftui/)
-[![Version](https://img.shields.io/badge/version-1.3.0-22c55e)](Resources/Info.plist)
+[![Version](https://img.shields.io/badge/version-1.3.1-22c55e)](Resources/Info.plist)
 [![CI](https://github.com/Bububuger/tokenbar/actions/workflows/ci.yml/badge.svg)](https://github.com/Bububuger/tokenbar/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-D22128?logo=apache&logoColor=white)](LICENSE)
 
@@ -45,7 +45,7 @@ You're paying for Claude, Codex, Gemini and a long tail of CLI agents that all s
 |---|---|---|
 | 🟩 | **Menu-bar first** | A cascade-fill glyph that grows with today's tokens vs. your 30-day peak. A glance, not a tab. <br/> *菜单栏图标会随今日 token 占 30 天峰值的比例「水位上涨」，一眼即看，不必再切窗口。* |
 | 💰 | **Real cost, by model** | USD per million tokens, with per-model price overrides and instant delta recompute. <br/> *每百万 token 美元计价、支持自定义覆盖；改完立刻全局重算。* |
-| 🔒 | **Local-only** | No agents, no sidecars, no account. *"Local-first. Nothing ever leaves your machine."* <br/> *无 Agent、无 sidecar、无账号 —— 一切数据都在本机 SQLite。* |
+| 🔒 | **Local-only data** | No agents, no sidecars, no account. *Your usage data never leaves your machine — TokenBar only reads what's already on disk and writes to a local SQLite.* The only outbound network call is an opt-out 24h GitHub-releases version check (toggle in Settings). <br/> *无 Agent、无 sidecar、无账号；使用数据全程留在本机 SQLite。唯一一次对外网络请求是可关闭的 24h GitHub release 版本检查。* |
 | 🔎 | **Drill into the source** | Click the popover, slice by project · agent · model · session · prompt. <br/> *点开 Popover 即可按 项目 · Agent · 模型 · 会话 · Prompt 任意切片下钻。* |
 | 🎴 | **`tokenbar-report` skill** | Wrapped-style yearly recap across **3 anime power-system personas** (BLEACH · Hunter × Hunter · JOJO) — pick a card, get a different lens on the same dataset; lens-isolation gate keeps the three reports < 30% overlap. <br/> *年度回顾以三个动漫能力体系人格切镜头（死神 / 猎人 / JOJO），抽卡随机切换；强制视角隔离 < 30% 重合度。* |
 | 🛠 | **`tbar` CLI** | Fourteen subcommands — twelve read queries (`events`, `prompts`, `projects`, `sessions`, `models`, `agents`, `summary`, `timeline`, `sources`, `checkpoints`, `warnings`, `schema`), plus `rebuild` (write, full reindex) and `prompt` (saved-template `/tbar:<slug>` integration). <br/> *十四条命令，与 App 同一份本地索引；`rebuild` 是 CLI 版「Reparse all」，`prompt` 直通菜单栏保存的 `/tbar:<slug>` 模板。* |
@@ -60,7 +60,7 @@ You're paying for Claude, Codex, Gemini and a long tail of CLI agents that all s
 
 ## 🔌 Supported Sources / 已支持的数据源
 
-TokenBar ships with **six** zero-config engines. Every tile is "Local-first. Nothing ever leaves your machine." — TokenBar only reads the files these CLIs already write themselves.
+TokenBar ships with **six** zero-config engines. Local-only data — TokenBar only reads the files these CLIs already write themselves; nothing about your usage ever ships off your machine.
 
 <p align="center">
   <img src="docs/assets/sources-grid.png" alt="Claude Code · Codex · Gemini CLI · Hermes · OpenClaw · OpenCode" width="100%" />

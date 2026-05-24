@@ -31,7 +31,6 @@ struct SavedPromptEditorView: View {
     @State private var lintTask: Task<Void, Never>?
     @State private var cachedLint: PromptLintResult = .init(tokens: [], diagnostics: [])
     @State private var testArgs: String = ""
-    @State private var shellRunEnabled: Bool = false
     @State private var showExamples = false
     @State private var pendingExample: PromptExample?
 
@@ -54,8 +53,7 @@ struct SavedPromptEditorView: View {
                 editorColumn
                 PromptTemplatePreviewPane(
                     bodyText: bodyText,
-                    testArgs: $testArgs,
-                    shellRunEnabled: $shellRunEnabled
+                    testArgs: $testArgs
                 )
                 .frame(maxWidth: .infinity)
             }

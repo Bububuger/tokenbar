@@ -11,7 +11,7 @@ Live tokens, real cost — by project, by agent, by model. **0 upload · 0 signu
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-007AFF?logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![Swift 6](https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white)](https://www.swift.org/)
 [![SwiftUI](https://img.shields.io/badge/SwiftUI-MenuBarExtra-2D9CDB?logo=swift&logoColor=white)](https://developer.apple.com/xcode/swiftui/)
-[![Version](https://img.shields.io/badge/version-1.1.0-22c55e)](Resources/Info.plist)
+[![Version](https://img.shields.io/badge/version-1.2.1-22c55e)](Resources/Info.plist)
 [![CI](https://github.com/Bububuger/tokenbar/actions/workflows/ci.yml/badge.svg)](https://github.com/Bububuger/tokenbar/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-D22128?logo=apache&logoColor=white)](LICENSE)
 
@@ -48,7 +48,7 @@ You're paying for Claude, Codex, Gemini and a long tail of CLI agents that all s
 | 🔒 | **Local-only** | No agents, no sidecars, no account. *"Local-first. Nothing ever leaves your machine."* <br/> *无 Agent、无 sidecar、无账号 —— 一切数据都在本机 SQLite。* |
 | 🔎 | **Drill into the source** | Click the popover, slice by project · agent · model · session · prompt. <br/> *点开 Popover 即可按 项目 · Agent · 模型 · 会话 · Prompt 任意切片下钻。* |
 | 🎴 | **`tokenbar-report` skill** | Spotify-Wrapped-style yearly recap across **6 personas** (Cultivation · Wuxia · Three-Body · Outlaws · Stand-up · JoJo) — pick a card, get a different lens on the same dataset. <br/> *Spotify Wrapped 风格年度回顾，6 个截然不同的人格视角（修仙 / 武侠 / 三体 / 水浒 / 脱口秀 / JoJo），抽卡随机切换。* |
-| 🛠 | **`tbar` CLI** | Twelve query surfaces — `events`, `prompts`, `projects`, `sessions`, `models`, `agents`, `summary`, `timeline`, `sources`, `checkpoints`, `warnings`, `schema` — all backed by the same local index the app uses. <br/> *十二条查询命令、与 App 同一份本地索引。* |
+| 🛠 | **`tbar` CLI** | Fourteen subcommands — twelve read queries (`events`, `prompts`, `projects`, `sessions`, `models`, `agents`, `summary`, `timeline`, `sources`, `checkpoints`, `warnings`, `schema`), plus `rebuild` (write, full reindex) and `prompt` (saved-template `/tbar:<slug>` integration). <br/> *十四条命令，与 App 同一份本地索引；`rebuild` 是 CLI 版「Reparse all」，`prompt` 直通菜单栏保存的 `/tbar:<slug>` 模板。* |
 
 <br />
 
@@ -56,24 +56,34 @@ You're paying for Claude, Codex, Gemini and a long tail of CLI agents that all s
 
 TokenBar ships with **six** zero-config engines. Every tile is "Local-first. Nothing ever leaves your machine." — TokenBar only reads the files these CLIs already write themselves.
 
-| # | Engine | Default path | Storage |
-|---|---|---|---|
-| 1 | **Claude Code** | `~/.claude/projects` | JSONL |
-| 2 | **Codex** (gpt-5 / gpt-5-codex) | `~/.codex/sessions` | JSONL |
-| 3 | **Gemini CLI** | `~/.gemini/tmp/**/chats/*.json` | JSON |
-| 4 | **Hermes** | `~/.hermes/state.db` | SQLite |
-| 5 | **OpenClaw** | `~/.openclaw/agents/**/sessions/*.jsonl` | JSONL |
-| 6 | **OpenCode** | `~/.local/share/opencode/opencode.db` | SQLite |
+<p align="center">
+  <img src="https://img.shields.io/badge/Claude%20Code-D97757?logo=anthropic&logoColor=white&style=for-the-badge" alt="Claude Code" />
+  <img src="https://img.shields.io/badge/Codex-412991?logo=openai&logoColor=white&style=for-the-badge" alt="Codex" />
+  <img src="https://img.shields.io/badge/Gemini%20CLI-4285F4?logo=googlegemini&logoColor=white&style=for-the-badge" alt="Gemini CLI" />
+  <br/>
+  <img src="https://img.shields.io/badge/Hermes-FFB347?style=for-the-badge&logoColor=white" alt="Hermes" />
+  <img src="https://img.shields.io/badge/OpenClaw-1F2937?style=for-the-badge&logoColor=white" alt="OpenClaw" />
+  <img src="https://img.shields.io/badge/OpenCode-22C55E?style=for-the-badge&logoColor=white" alt="OpenCode" />
+</p>
 
-**Custom sources / 自定义数据源** — *"Point TokenBar at any agent that writes JSONL or sqlite locally."* Configure path glob + field mapping in `Settings → Custom Sources`, persisted at `~/.tokenbar/sources.json`. Schema validation runs before save, so a bad path can't poison the index.
+**Custom sources / 自定义数据源** — *"Point TokenBar at any agent that writes JSONL or sqlite locally."* Configure path glob + field mapping in `Settings → Custom Sources`. Schema validation runs before save, so a bad path can't poison the index.
 
 <br />
 
 ## 📦 Install / 安装
 
-> macOS 14+ · Apple silicon or Intel · Xcode 15 toolchain · ~50 MB free disk for the local SQLite index.
+> macOS 14+ · Apple silicon or Intel · ~50 MB free disk for the local SQLite index.
 
-This repo is currently distributed as **source** (no Homebrew tap or signed DMG yet). One command from a clean clone:
+### Homebrew (recommended)
+
+```bash
+brew tap Bububuger/tap
+brew install --cask tokenbar
+```
+
+One DMG, two surfaces: `/Applications/TokenBar.app` (the menu-bar app) and `$(brew --prefix)/bin/tbar` (the CLI, symlinked from inside the .app bundle). `brew uninstall --cask tokenbar` removes both.
+
+### From source
 
 ```bash
 git clone https://github.com/Bububuger/tokenbar.git
@@ -81,30 +91,42 @@ cd tokenbar
 script/build_and_run.sh --verify     # build, run, and assert the popover renders
 ```
 
-The script generates the Xcode project (`xcodegen generate --spec project.yml`), builds the `TokenBar` scheme, and either launches the binary directly or falls back to asking Xcode to run it if macOS Developer Mode blocks terminal-launched dev apps.
+The script regenerates the Xcode project (`xcodegen generate --spec project.yml`), builds the `TokenBar` scheme, and either launches the binary directly or falls back to asking Xcode to run it if macOS Developer Mode blocks terminal-launched dev apps.
 
 **On first launch:**
 
 1. Grant **Full Disk Access** to TokenBar — only needed for engines whose default path is outside the sandbox (`~/.openclaw`, custom sources). The 6 built-ins are read-only.
-2. Wait for the **bootstrap catch-up** banner — first index of historical sessions takes seconds-to-minutes depending on how many CLIs you've been using.
+2. Wait for the **bootstrap catch-up** banner — first index of historical sessions takes seconds-to-minutes depending on how many CLIs you've been using. Run `tbar rebuild` from the terminal if you want to force a full reparse instead.
 3. Open `Settings → Custom Sources` if you want to point TokenBar at an agent that isn't one of the six built-ins.
 
 <br />
 
 ## 🖥 CLI — `tbar`
 
-Same local SQLite index that the app uses, exposed as a focused query surface. Everything is offline, every command supports `--json` for piping.
+Same local SQLite index that the app uses, exposed as a focused query surface. Everything is offline, every command supports `--json` (and most also `--ndjson`) for piping. If you installed via Homebrew, `tbar` is already on `$PATH`; from source, use `script/tbar` or symlink it into `~/.local/bin/tbar`.
 
 ```bash
-script/tbar summary --days 30                       # totals by project / agent / model
-script/tbar projects --since 2026-04-01 --until now
-script/tbar prompts --agent "Claude Code" --top 20
-script/tbar timeline --bucket hour --days 7
-script/tbar sessions --project tokenbar --json | jq '.[] | select(.tokens > 1e6)'
-script/tbar schema --json | jq '.schema.dataWindow' # what range of data do I actually have?
+tbar summary --days 30                       # totals by project / agent / model
+tbar projects --since 2026-04-01 --until now
+tbar prompts --agent "Claude Code" --limit 20
+tbar timeline --bucket hour --days 7
+tbar sessions --project tokenbar --json | jq '.[] | select(.totalTokens > 1e6)'
+tbar schema --json | jq '.schema.dataWindow'  # what range of data do I actually have?
+tbar prompt list                             # saved /tbar:<slug> templates
+tbar rebuild                                  # CLI equivalent of the app's "Reparse all"
 ```
 
-Twelve commands total — `events`, `prompts`, `projects`, `sessions`, `models`, `agents`, `summary`, `timeline`, `sources`, `checkpoints`, `warnings`, `schema`. Run `script/tbar help` or `script/tbar <command> --help` for full usage. Symlink `script/tbar` into `~/.local/bin/tbar` if you want it on `$PATH`.
+Fourteen commands in total, grouped by purpose:
+
+| Group | Commands |
+|---|---|
+| **Browse rows** | `events` · `prompts` |
+| **Aggregations** | `projects` · `sessions` · `models` · `agents` · `summary` · `timeline` |
+| **Introspection** | `sources` · `checkpoints` · `warnings` · `schema` |
+| **Saved templates** | `prompt list` · `prompt get <slug>` (slugs map to `/tbar:<slug>` slash-commands in chat clients) |
+| **Write** | `rebuild` (the only command that mutates the index — full reparse with `--background` + `--cpu-percent N` knobs) |
+
+Run `tbar help` or `tbar <command> --help` for filters, sort fields, and row schema per command. Filters that work on every read command: `--days`, `--since`, `--until`, `--day`, `--project`, `--agent`, `--model`, `--session`, `--limit`, `--sort`, `--json`, `--ndjson`.
 
 <br />
 

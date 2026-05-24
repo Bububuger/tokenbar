@@ -2103,15 +2103,17 @@ struct HourlyHeatmapView: View {
     var showAxis = true
     @State private var hoveredHour: Int?
 
+    private var currentHour: Int {
+        Calendar.current.component(.hour, from: Date())
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
                 Spacer()
-                TokenBarHoverBadge(
-                    text: hoveredHour.map(hourTooltip) ?? "Hover an hour",
-                    width: 180,
-                    isPlaceholder: hoveredHour == nil
-                )
+                if let hoveredHour {
+                    TokenBarHoverBadge(text: hourTooltip(hoveredHour), width: 180)
+                }
             }
             .frame(height: 20)
             HStack(spacing: 3) {
@@ -2122,7 +2124,7 @@ struct HourlyHeatmapView: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: 15)
                         .overlay {
-                            if hoveredHour == hour {
+                            if (hoveredHour ?? currentHour) == hour {
                                 RoundedRectangle(cornerRadius: 3, style: .continuous)
                                     .stroke(TokenBarStyle.foreground.opacity(0.85), lineWidth: 1)
                             }
@@ -2161,14 +2163,13 @@ struct HourlyHeatmapView: View {
 struct TokenBarHoverBadge: View {
     let text: String
     var width: CGFloat = 320
-    var isPlaceholder = false
 
     var body: some View {
         Text(text)
             .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
             .lineLimit(1)
             .minimumScaleFactor(0.86)
-            .foregroundStyle(isPlaceholder ? TokenBarStyle.faint : TokenBarStyle.foreground)
+            .foregroundStyle(TokenBarStyle.foreground)
             .frame(width: width, alignment: .trailing)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)

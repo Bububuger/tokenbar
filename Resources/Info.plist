@@ -17,7 +17,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.4.1</string>
 	<key>CFBundleVersion</key>
-	<string>1779640982</string>
+	<string>1779642391</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSPrincipalClass</key>

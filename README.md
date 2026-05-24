@@ -66,15 +66,6 @@ TokenBar ships with **six** zero-config engines. Every tile is "Local-first. Not
   <img src="docs/assets/sources-grid.png" alt="Claude Code · Codex · Gemini CLI · Hermes · OpenClaw · OpenCode" width="100%" />
 </p>
 
-| Source | Default path |
-|---|---|
-| **Claude Code** | `~/.claude/projects/**/*.jsonl` |
-| **Codex** (gpt-5 / gpt-5-codex) | `~/.codex/sessions/**/*.jsonl` |
-| **Gemini CLI** | `~/.gemini/tmp/**/chats/*.json` |
-| **Hermes** | `~/.hermes/state.db` |
-| **OpenClaw** | `~/.openclaw/agents/**/sessions/*.jsonl` |
-| **OpenCode** | `~/.local/share/opencode/opencode.db` |
-
 **Custom sources / 自定义数据源** — *"Point TokenBar at any agent that writes JSONL or sqlite locally."* Configure path glob + field mapping in `Settings → Custom Sources`. Schema validation runs before save, so a bad path can't poison the index.
 
 <p align="center">

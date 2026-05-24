@@ -23,8 +23,8 @@ concurrency:
 
 jobs:
   test:
-    name: swift test (macOS 15, Swift 6)
-    runs-on: macos-15
+    name: swift test (macOS 26, Swift 6)
+    runs-on: macos-26
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -50,7 +50,7 @@ jobs:
 
   project-yml:
     name: project.yml regenerates cleanly
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4

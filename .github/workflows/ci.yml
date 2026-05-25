@@ -6,14 +6,12 @@ on:
     paths-ignore:
       - "docs/**"
       - "**/*.md"
-      - "LEGAL.md"
       - "tokenbar.pdf"
   pull_request:
     branches: [main]
     paths-ignore:
       - "docs/**"
       - "**/*.md"
-      - "LEGAL.md"
       - "tokenbar.pdf"
   workflow_dispatch: {}
 

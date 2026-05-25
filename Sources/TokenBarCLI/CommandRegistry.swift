@@ -40,7 +40,7 @@ enum CommandRegistry {
             rowFields: [
                 "id", "timestamp", "agent", "agentDisplayName",
                 "projectName", "projectPath", "sessionId", "modelName",
-                "inputTokens", "outputTokens", "cacheTokens", "totalTokens",
+                "inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens", "totalTokens",
                 "reasoningTokens", "sourcePath", "parser",
             ],
             extras: [],
@@ -71,7 +71,7 @@ enum CommandRegistry {
             sortFields: ["tokens", "name", "lastSeen", "eventCount"],
             rowFields: [
                 "name", "eventCount", "promptCount",
-                "inputTokens", "outputTokens", "cacheTokens", "totalTokens",
+                "inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens", "totalTokens",
                 "firstSeen", "lastSeen", "distinctAgents", "distinctModels",
             ],
             extras: [],
@@ -86,7 +86,7 @@ enum CommandRegistry {
                 "sessionId", "projectName", "agent", "agentDisplayName",
                 "modelName", "firstSeen", "lastSeen",
                 "eventCount", "promptCount",
-                "inputTokens", "outputTokens", "cacheTokens", "totalTokens",
+                "inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens", "totalTokens",
             ],
             extras: [],
             defaultLimit: 100
@@ -98,7 +98,7 @@ enum CommandRegistry {
             sortFields: ["tokens", "name", "eventCount", "cost"],
             rowFields: [
                 "name", "distinctAgents", "eventCount",
-                "inputTokens", "outputTokens", "cacheTokens", "totalTokens",
+                "inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens", "totalTokens",
                 "estimatedCostUSD", "costSource",
             ],
             extras: [],
@@ -117,7 +117,7 @@ enum CommandRegistry {
             sortFields: ["tokens", "name", "eventCount"],
             rowFields: [
                 "kind", "displayName", "eventCount", "promptCount",
-                "inputTokens", "outputTokens", "cacheTokens", "totalTokens",
+                "inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens", "totalTokens",
                 "distinctProjects", "distinctModels",
             ],
             extras: [],
@@ -132,7 +132,7 @@ enum CommandRegistry {
             sortFields: ["tokens", "input", "output", "cache", "count", "cost"],
             rowFields: [
                 "groupBy", "rows",
-                "(per-row) inputTokens, outputTokens, cacheTokens, totalTokens, eventCount, promptCount, estimatedCostUSD, costSource",
+                "(per-row) inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, totalTokens, eventCount, promptCount, estimatedCostUSD, costSource",
             ],
             extras: [
                 "--group-by accepts a comma-separated list. Empty = single global row.",
@@ -149,7 +149,7 @@ enum CommandRegistry {
             sortFields: [],
             rowFields: [
                 "bucket", "groupBy", "buckets",
-                "(per-bucket) bucketStart, label, rows[], inputTokens, outputTokens, cacheTokens, totalTokens, eventCount, promptCount",
+                "(per-bucket) bucketStart, label, rows[], inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, totalTokens, eventCount, promptCount",
             ],
             extras: [],
             defaultLimit: 0

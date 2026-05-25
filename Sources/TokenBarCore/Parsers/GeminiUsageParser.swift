@@ -122,7 +122,8 @@ public enum GeminiUsageParser {
                 // outputTokens (it's the model's tool-call payload size,
                 // not a distinct reasoning dimension).
                 outputTokens: outputClamp.value + toolClamp.value,
-                cacheTokens: cacheClamp.value,
+                cacheReadTokens: cacheClamp.value,
+                cacheCreationTokens: 0,
                 reasoningTokens: thoughtsClamp.value,
                 modelName: modelName,
                 sourcePath: sourcePath,

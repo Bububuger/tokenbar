@@ -159,20 +159,24 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
 public struct UsageSummary: Sendable, Hashable {
     public let inputTokens: Int
     public let outputTokens: Int
-    public let cacheTokens: Int
+    public let cacheReadTokens: Int
+    public let cacheCreationTokens: Int
+
+    public var cacheTokens: Int { cacheReadTokens + cacheCreationTokens }
 
     public var totalTokens: Int {
-        inputTokens + outputTokens + cacheTokens
+        inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens
     }
 
     public var focus: UsageFocus {
         UsageFocus(summary: self)
     }
 
-    public init(inputTokens: Int, outputTokens: Int, cacheTokens: Int) {
+    public init(inputTokens: Int, outputTokens: Int, cacheReadTokens: Int, cacheCreationTokens: Int) {
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
-        self.cacheTokens = cacheTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheCreationTokens = cacheCreationTokens
     }
 }
 
@@ -203,7 +207,7 @@ public struct UsageFocus: Sendable, Hashable {
         self = Self(
             inputShare: Double(summary.inputTokens) / total,
             outputShare: Double(summary.outputTokens) / total,
-            cacheShare: Double(summary.cacheTokens) / total
+            cacheShare: Double(summary.cacheReadTokens + summary.cacheCreationTokens) / total
         )
     }
 
@@ -299,11 +303,12 @@ public struct UsageRangeAggregate: Sendable, Hashable {
     public let rows: [UsageRangeAggregateRow]
 
     public var summary: UsageSummary {
-        rows.reduce(UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0)) { total, row in
+        rows.reduce(UsageSummary(inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0)) { total, row in
             UsageSummary(
                 inputTokens: total.inputTokens + row.summary.inputTokens,
                 outputTokens: total.outputTokens + row.summary.outputTokens,
-                cacheTokens: total.cacheTokens + row.summary.cacheTokens
+                cacheReadTokens: total.cacheReadTokens + row.summary.cacheReadTokens,
+                cacheCreationTokens: total.cacheCreationTokens + row.summary.cacheCreationTokens
             )
         }
     }
@@ -415,12 +420,15 @@ public struct UsageEvent: Identifiable, Sendable, Hashable {
     public let timestamp: Date
     public let inputTokens: Int
     public let outputTokens: Int
-    public let cacheTokens: Int
+    public let cacheReadTokens: Int
+    public let cacheCreationTokens: Int
     public let reasoningTokens: Int?
     public let modelName: String?
     public let sourcePath: String
     public let parser: ParserKind
     public let confidence: Double
+
+    public var cacheTokens: Int { cacheReadTokens + cacheCreationTokens }
 
     public init(
         id: String,
@@ -431,7 +439,8 @@ public struct UsageEvent: Identifiable, Sendable, Hashable {
         timestamp: Date,
         inputTokens: Int,
         outputTokens: Int,
-        cacheTokens: Int,
+        cacheReadTokens: Int,
+        cacheCreationTokens: Int,
         reasoningTokens: Int?,
         modelName: String? = nil,
         sourcePath: String,
@@ -446,7 +455,8 @@ public struct UsageEvent: Identifiable, Sendable, Hashable {
         self.timestamp = timestamp
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
-        self.cacheTokens = cacheTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheCreationTokens = cacheCreationTokens
         self.reasoningTokens = reasoningTokens
         self.modelName = modelName
         self.sourcePath = sourcePath
@@ -690,25 +700,29 @@ public extension CustomSourceRecord {
 public struct CustomSourceFieldMapping: Sendable, Hashable, Codable {
     public var inputTokens: String
     public var outputTokens: String
-    public var cacheTokens: String
+    public var cacheReadTokens: String
+    public var cacheCreationTokens: String
     public var model: String
 
     public init(
         inputTokens: String,
         outputTokens: String,
-        cacheTokens: String,
+        cacheReadTokens: String,
+        cacheCreationTokens: String,
         model: String
     ) {
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
-        self.cacheTokens = cacheTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheCreationTokens = cacheCreationTokens
         self.model = model
     }
 
     public static let `default` = CustomSourceFieldMapping(
         inputTokens: "usage.input_tokens",
         outputTokens: "usage.output_tokens",
-        cacheTokens: "usage.cache_read_tokens",
+        cacheReadTokens: "usage.cache_read_input_tokens",
+        cacheCreationTokens: "usage.cache_creation_input_tokens",
         model: "model"
     )
 }
@@ -775,7 +789,8 @@ public struct UsageSnapshot: Sendable, Hashable {
         UsageSummary(
             inputTokens: last30Days.reduce(0) { $0 + $1.summary.inputTokens },
             outputTokens: last30Days.reduce(0) { $0 + $1.summary.outputTokens },
-            cacheTokens: last30Days.reduce(0) { $0 + $1.summary.cacheTokens }
+            cacheReadTokens: last30Days.reduce(0) { $0 + $1.summary.cacheReadTokens },
+            cacheCreationTokens: last30Days.reduce(0) { $0 + $1.summary.cacheCreationTokens }
         )
     }
 

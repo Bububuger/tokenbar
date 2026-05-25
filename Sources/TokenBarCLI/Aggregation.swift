@@ -56,15 +56,18 @@ struct SortSpec {
 struct TokenBucket {
     var inputTokens = 0
     var outputTokens = 0
-    var cacheTokens = 0
+    var cacheReadTokens = 0
+    var cacheCreationTokens = 0
     var eventCount = 0
 
+    var cacheTokens: Int { cacheReadTokens + cacheCreationTokens }
     var totalTokens: Int { inputTokens + outputTokens + cacheTokens }
 
     mutating func add(_ event: UsageEvent) {
         inputTokens += event.inputTokens
         outputTokens += event.outputTokens
-        cacheTokens += event.cacheTokens
+        cacheReadTokens += event.cacheReadTokens
+        cacheCreationTokens += event.cacheCreationTokens
         eventCount += 1
     }
 }
@@ -91,12 +94,15 @@ enum Aggregation {
         let keys: [String: GroupKeyValue]
         let inputTokens: Int
         let outputTokens: Int
-        let cacheTokens: Int
+        let cacheReadTokens: Int
+        let cacheCreationTokens: Int
         let totalTokens: Int
         let eventCount: Int
         let promptCount: Int
         let estimatedCostUSD: Double
         let costSource: String
+
+        var cacheTokens: Int { cacheReadTokens + cacheCreationTokens }
 
         func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: DynamicCodingKey.self)
@@ -105,7 +111,8 @@ enum Aggregation {
             }
             try container.encode(inputTokens, forKey: DynamicCodingKey("inputTokens"))
             try container.encode(outputTokens, forKey: DynamicCodingKey("outputTokens"))
-            try container.encode(cacheTokens, forKey: DynamicCodingKey("cacheTokens"))
+            try container.encode(cacheReadTokens, forKey: DynamicCodingKey("cacheReadTokens"))
+            try container.encode(cacheCreationTokens, forKey: DynamicCodingKey("cacheCreationTokens"))
             try container.encode(totalTokens, forKey: DynamicCodingKey("totalTokens"))
             try container.encode(eventCount, forKey: DynamicCodingKey("eventCount"))
             try container.encode(promptCount, forKey: DynamicCodingKey("promptCount"))
@@ -149,7 +156,8 @@ enum Aggregation {
                     keys: [:],
                     inputTokens: bucket.inputTokens,
                     outputTokens: bucket.outputTokens,
-                    cacheTokens: bucket.cacheTokens,
+                    cacheReadTokens: bucket.cacheReadTokens,
+                    cacheCreationTokens: bucket.cacheCreationTokens,
                     totalTokens: bucket.totalTokens,
                     eventCount: bucket.eventCount,
                     promptCount: prompts.count,
@@ -179,7 +187,8 @@ enum Aggregation {
                 keys: tuple.toEncodable(),
                 inputTokens: bucket.inputTokens,
                 outputTokens: bucket.outputTokens,
-                cacheTokens: bucket.cacheTokens,
+                cacheReadTokens: bucket.cacheReadTokens,
+                cacheCreationTokens: bucket.cacheCreationTokens,
                 totalTokens: bucket.totalTokens,
                 eventCount: bucket.eventCount,
                 promptCount: promptCount,
@@ -199,10 +208,13 @@ enum Aggregation {
         let rows: [GroupRow]
         let inputTokens: Int
         let outputTokens: Int
-        let cacheTokens: Int
+        let cacheReadTokens: Int
+        let cacheCreationTokens: Int
         let totalTokens: Int
         let eventCount: Int
         let promptCount: Int
+
+        var cacheTokens: Int { cacheReadTokens + cacheCreationTokens }
     }
 
     static func aggregateTimeline(
@@ -245,7 +257,8 @@ enum Aggregation {
                 rows: rows,
                 inputTokens: bucket.inputTokens,
                 outputTokens: bucket.outputTokens,
-                cacheTokens: bucket.cacheTokens,
+                cacheReadTokens: bucket.cacheReadTokens,
+                cacheCreationTokens: bucket.cacheCreationTokens,
                 totalTokens: bucket.totalTokens,
                 eventCount: bucket.eventCount,
                 promptCount: prs.count

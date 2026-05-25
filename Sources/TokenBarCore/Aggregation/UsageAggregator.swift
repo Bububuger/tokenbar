@@ -262,7 +262,8 @@ public enum UsageAggregator {
                     summary: UsageSummary(
                         inputTokens: hours.reduce(0) { $0 + $1.summary.inputTokens },
                         outputTokens: hours.reduce(0) { $0 + $1.summary.outputTokens },
-                        cacheTokens: hours.reduce(0) { $0 + $1.summary.cacheTokens }
+                        cacheReadTokens: hours.reduce(0) { $0 + $1.summary.cacheReadTokens },
+                        cacheCreationTokens: hours.reduce(0) { $0 + $1.summary.cacheCreationTokens }
                     ),
                     intensity: 0
                 )
@@ -334,7 +335,8 @@ public enum UsageAggregator {
         UsageSummary(
             inputTokens: events.reduce(0) { $0 + $1.inputTokens },
             outputTokens: events.reduce(0) { $0 + $1.outputTokens },
-            cacheTokens: events.reduce(0) { $0 + $1.cacheTokens }
+            cacheReadTokens: events.reduce(0) { $0 + $1.cacheReadTokens },
+            cacheCreationTokens: events.reduce(0) { $0 + $1.cacheCreationTokens }
         )
     }
 
@@ -360,7 +362,8 @@ public enum UsageAggregator {
         UsageSummary(
             inputTokens: days.reduce(0) { $0 + $1.summary.inputTokens },
             outputTokens: days.reduce(0) { $0 + $1.summary.outputTokens },
-            cacheTokens: days.reduce(0) { $0 + $1.summary.cacheTokens }
+            cacheReadTokens: days.reduce(0) { $0 + $1.summary.cacheReadTokens },
+            cacheCreationTokens: days.reduce(0) { $0 + $1.summary.cacheCreationTokens }
         )
     }
 

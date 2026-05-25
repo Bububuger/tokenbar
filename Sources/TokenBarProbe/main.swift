@@ -415,11 +415,12 @@ struct TokenBarProbe {
         var totals: [String: UsageSummary] = [:]
         for event in events {
             let sourceName = routeBenchSourceName(for: event, customSources: customSources)
-            let current = totals[sourceName] ?? UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0)
+            let current = totals[sourceName] ?? UsageSummary(inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0)
             totals[sourceName] = UsageSummary(
                 inputTokens: current.inputTokens + event.inputTokens,
                 outputTokens: current.outputTokens + event.outputTokens,
-                cacheTokens: current.cacheTokens + event.cacheTokens
+                cacheReadTokens: current.cacheReadTokens + event.cacheReadTokens,
+                cacheCreationTokens: current.cacheCreationTokens + event.cacheCreationTokens
             )
         }
         return totals
@@ -505,7 +506,7 @@ struct TokenBarProbe {
         var builtInCounts: [AgentKind: Int] = [:]
         var customCounts: [String: Int] = [:]
         var auditTotals: [String: UsageSummary] = [:]
-        var total = UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0)
+        var total = UsageSummary(inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0)
         let allCustomNamesByID = Dictionary(uniqueKeysWithValues: customSources.map { ($0.id, $0.name) })
         let enabledCustomNamesByID = Dictionary(uniqueKeysWithValues: customSources.filter(\.enabled).map { ($0.id, $0.name) })
 
@@ -547,11 +548,12 @@ struct TokenBarProbe {
     }
 
     private static func routeBenchAdd(_ event: UsageEvent, to summary: UsageSummary?) -> UsageSummary {
-        let summary = summary ?? UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0)
+        let summary = summary ?? UsageSummary(inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0)
         return UsageSummary(
             inputTokens: summary.inputTokens + event.inputTokens,
             outputTokens: summary.outputTokens + event.outputTokens,
-            cacheTokens: summary.cacheTokens + event.cacheTokens
+            cacheReadTokens: summary.cacheReadTokens + event.cacheReadTokens,
+            cacheCreationTokens: summary.cacheCreationTokens + event.cacheCreationTokens
         )
     }
 

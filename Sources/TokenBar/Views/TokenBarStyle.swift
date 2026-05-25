@@ -469,7 +469,8 @@ func tokenbarSummary(_ events: [UsageEvent]) -> UsageSummary {
     UsageSummary(
         inputTokens: events.reduce(0) { $0 + $1.inputTokens },
         outputTokens: events.reduce(0) { $0 + $1.outputTokens },
-        cacheTokens: events.reduce(0) { $0 + $1.cacheTokens }
+        cacheReadTokens: events.reduce(0) { $0 + $1.cacheReadTokens },
+        cacheCreationTokens: events.reduce(0) { $0 + $1.cacheCreationTokens }
     )
 }
 
@@ -630,7 +631,7 @@ struct TokenBarOverviewRangeMetrics: Sendable, Hashable {
     static let empty = TokenBarOverviewRangeMetrics(
         selection: "",
         days: [],
-        summary: UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0),
+        summary: UsageSummary(inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0),
         cost: 0,
         projectRows: [],
         agentRows: [],
@@ -698,12 +699,13 @@ struct TokenBarOverviewRangeMetrics: Sendable, Hashable {
         struct ModelAccumulator {
             var inputTokens = 0
             var outputTokens = 0
-            var cacheTokens = 0
+            var cacheReadTokens = 0
+            var cacheCreationTokens = 0
             var cost = 0.0
             var agentTokens: [String: Int] = [:]
 
             var summary: UsageSummary {
-                UsageSummary(inputTokens: inputTokens, outputTokens: outputTokens, cacheTokens: cacheTokens)
+                UsageSummary(inputTokens: inputTokens, outputTokens: outputTokens, cacheReadTokens: cacheReadTokens, cacheCreationTokens: cacheCreationTokens)
             }
         }
 
@@ -739,7 +741,8 @@ struct TokenBarOverviewRangeMetrics: Sendable, Hashable {
             var model = modelTotals[modelName] ?? ModelAccumulator()
             model.inputTokens += row.summary.inputTokens
             model.outputTokens += row.summary.outputTokens
-            model.cacheTokens += row.summary.cacheTokens
+            model.cacheReadTokens += row.summary.cacheReadTokens
+            model.cacheCreationTokens += row.summary.cacheCreationTokens
             model.cost += cost
             model.agentTokens[agentName, default: 0] += tokens
             modelTotals[modelName] = model
@@ -797,11 +800,12 @@ struct TokenBarOverviewRangeMetrics: Sendable, Hashable {
 }
 
 private func tokenbarAdd(_ lhs: UsageSummary?, _ rhs: UsageSummary) -> UsageSummary {
-    let lhs = lhs ?? UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0)
+    let lhs = lhs ?? UsageSummary(inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0)
     return UsageSummary(
         inputTokens: lhs.inputTokens + rhs.inputTokens,
         outputTokens: lhs.outputTokens + rhs.outputTokens,
-        cacheTokens: lhs.cacheTokens + rhs.cacheTokens
+        cacheReadTokens: lhs.cacheReadTokens + rhs.cacheReadTokens,
+        cacheCreationTokens: lhs.cacheCreationTokens + rhs.cacheCreationTokens
     )
 }
 
@@ -939,7 +943,7 @@ struct TokenBarPricingLookup {
             result[Self.key(for: entry.key)] = entry.value.normalized
         }
         defaultsByModel = tokenbarDefaultPricingRows.reduce(into: [:]) { result, row in
-            result[Self.key(for: row.model)] = PricingValues(input: row.input, output: row.output, cache: row.cache).normalized
+            result[Self.key(for: row.model)] = PricingValues(input: row.input, output: row.output, cacheRead: row.cacheRead, cacheCreation: row.cacheCreation).normalized
         }
     }
 
@@ -954,11 +958,13 @@ struct TokenBarPricingLookup {
         if let pricing = values(for: modelName),
            let inputRate = Double(pricing.input),
            let outputRate = Double(pricing.output),
-           let cacheRate = Double(pricing.cache) {
+           let cacheReadRate = Double(pricing.cacheRead),
+           let cacheCreationRate = Double(pricing.cacheCreation) {
             return (
                 Double(event.inputTokens) * inputRate
                 + Double(event.outputTokens) * outputRate
-                + Double(event.cacheTokens) * cacheRate
+                + Double(event.cacheReadTokens) * cacheReadRate
+                + Double(event.cacheCreationTokens) * cacheCreationRate
             ) / 1_000_000
         }
 
@@ -991,11 +997,13 @@ func tokenbarEstimatedCost(
     if let values = pricing.values(for: effectiveModelName),
        let inputRate = Double(values.input),
        let outputRate = Double(values.output),
-       let cacheRate = Double(values.cache) {
+       let cacheReadRate = Double(values.cacheRead),
+       let cacheCreationRate = Double(values.cacheCreation) {
         return (
             Double(summary.inputTokens) * inputRate
                 + Double(summary.outputTokens) * outputRate
-                + Double(summary.cacheTokens) * cacheRate
+                + Double(summary.cacheReadTokens) * cacheReadRate
+                + Double(summary.cacheCreationTokens) * cacheCreationRate
         ) / 1_000_000
     }
     return Double(summary.totalTokens) * agent.defaultCostPerMillionTokens / 1_000_000
@@ -1087,7 +1095,8 @@ func tokenbarModelBreakdowns(
     struct Accumulator {
         var inputTokens = 0
         var outputTokens = 0
-        var cacheTokens = 0
+        var cacheReadTokens = 0
+        var cacheCreationTokens = 0
         var cost = 0.0
         var agentTokens: [String: Int] = [:]
     }
@@ -1100,19 +1109,21 @@ func tokenbarModelBreakdowns(
         let eventTokens = event.inputTokens + event.outputTokens + event.cacheTokens
         current.inputTokens += event.inputTokens
         current.outputTokens += event.outputTokens
-        current.cacheTokens += event.cacheTokens
+        current.cacheReadTokens += event.cacheReadTokens
+        current.cacheCreationTokens += event.cacheCreationTokens
         current.cost += pricing.estimatedCost(for: event)
         current.agentTokens[event.agent.displayName, default: 0] += eventTokens
         grouped[modelName] = current
     }
 
-    let totalTokens = grouped.values.reduce(0) { $0 + $1.inputTokens + $1.outputTokens + $1.cacheTokens }
+    let totalTokens = grouped.values.reduce(0) { $0 + $1.inputTokens + $1.outputTokens + $1.cacheReadTokens + $1.cacheCreationTokens }
 
     return grouped.compactMap { name, accumulator -> TokenBarModelBreakdown? in
         let summary = UsageSummary(
             inputTokens: accumulator.inputTokens,
             outputTokens: accumulator.outputTokens,
-            cacheTokens: accumulator.cacheTokens
+            cacheReadTokens: accumulator.cacheReadTokens,
+            cacheCreationTokens: accumulator.cacheCreationTokens
         )
         guard summary.totalTokens > 0 else { return nil }
         let agentName = accumulator.agentTokens.max { lhs, rhs in
@@ -2155,7 +2166,7 @@ struct HourlyHeatmapView: View {
     }
 
     private func hourTooltip(_ hour: Int) -> String {
-        let summary = normalizedHour(hour)?.summary ?? UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0)
+        let summary = normalizedHour(hour)?.summary ?? UsageSummary(inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0)
         return "\(String(format: "%02d:00", hour)) · \(tokenbarCompactTokens(summary.totalTokens)) total"
     }
 }
@@ -2642,7 +2653,7 @@ private extension UsageDay {
         let today = calendar.startOfDay(for: Date())
         return (0..<count).compactMap { offset in
             guard let date = calendar.date(byAdding: .day, value: offset - count + 1, to: today) else { return nil }
-            return UsageDay(date: date, summary: UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0), intensity: 0)
+            return UsageDay(date: date, summary: UsageSummary(inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0), intensity: 0)
         }
     }
 }

@@ -18,12 +18,15 @@ enum SummaryCommand {
     struct Totals: Encodable {
         let inputTokens: Int
         let outputTokens: Int
-        let cacheTokens: Int
+        let cacheReadTokens: Int
+        let cacheCreationTokens: Int
         let totalTokens: Int
         let eventCount: Int
         let promptCount: Int
         let estimatedCostUSD: Double
         let costSource: String
+
+        var cacheTokens: Int { cacheReadTokens + cacheCreationTokens }
     }
 
     static func parse(cursor: inout ArgumentCursor, options: inout FilterOptions) throws {
@@ -61,7 +64,8 @@ enum SummaryCommand {
         let totals = Totals(
             inputTokens: events.reduce(0) { $0 + $1.inputTokens },
             outputTokens: events.reduce(0) { $0 + $1.outputTokens },
-            cacheTokens: events.reduce(0) { $0 + $1.cacheTokens },
+            cacheReadTokens: events.reduce(0) { $0 + $1.cacheReadTokens },
+            cacheCreationTokens: events.reduce(0) { $0 + $1.cacheCreationTokens },
             totalTokens: events.reduce(0) { $0 + $1.inputTokens + $1.outputTokens + $1.cacheTokens },
             eventCount: events.count,
             promptCount: prompts.count,

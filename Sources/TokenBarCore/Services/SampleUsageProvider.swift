@@ -39,7 +39,8 @@ public enum SampleUsageProvider {
 
                     let inputTokens   = 4_000 + dayOffset * 1_200 + agentIdx * 400
                     let outputTokens  = 2_500 + dayOffset * 700  + agentIdx * 200
-                    let cacheTokens   = inputTokens * 8
+                    let cacheReadTok  = inputTokens * 7
+                    let cacheCreateTok = inputTokens
 
                     events.append(
                         UsageEvent(
@@ -51,7 +52,8 @@ public enum SampleUsageProvider {
                             timestamp:        timestamp,
                             inputTokens:      inputTokens,
                             outputTokens:     outputTokens,
-                            cacheTokens:      cacheTokens,
+                            cacheReadTokens:  cacheReadTok,
+                            cacheCreationTokens: cacheCreateTok,
                             reasoningTokens:  agent == .codex ? 800 : nil,
                             modelName:        model,
                             sourcePath:       "sample://\(agent.rawValue)/\(proj.name)",

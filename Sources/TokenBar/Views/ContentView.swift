@@ -527,7 +527,8 @@ private struct ProjectPageData: Sendable {
         projectEvents.reserveCapacity(min(events.count, 512))
         var inputTokens = 0
         var outputTokens = 0
-        var cacheTokens = 0
+        var cacheReadTokens = 0
+        var cacheCreationTokens = 0
         var latestPath: String?
         var latestPathTimestamp = Date.distantPast
 
@@ -535,7 +536,8 @@ private struct ProjectPageData: Sendable {
             projectEvents.append(event)
             inputTokens += event.inputTokens
             outputTokens += event.outputTokens
-            cacheTokens += event.cacheTokens
+            cacheReadTokens += event.cacheReadTokens
+            cacheCreationTokens += event.cacheCreationTokens
             if let projectPath = event.projectPath,
                !projectPath.isEmpty,
                event.timestamp > latestPathTimestamp {
@@ -547,7 +549,8 @@ private struct ProjectPageData: Sendable {
         let allTimeSummary = UsageSummary(
             inputTokens: inputTokens,
             outputTokens: outputTokens,
-            cacheTokens: cacheTokens
+            cacheReadTokens: cacheReadTokens,
+            cacheCreationTokens: cacheCreationTokens
         )
         let todayEvents = tokenbarEventsInLastDays(events: projectEvents)
         let rangeEvents = tokenbarRangeEvents(events: projectEvents, selection: selection)

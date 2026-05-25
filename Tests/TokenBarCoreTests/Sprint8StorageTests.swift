@@ -373,7 +373,8 @@ struct Sprint8StorageTests {
                     timestamp: Date(timeIntervalSince1970: 1_770_000_000),
                     inputTokens: 1,
                     outputTokens: 2,
-                    cacheTokens: 3,
+                    cacheReadTokens: 3,
+                    cacheCreationTokens: 0,
                     reasoningTokens: nil,
                     modelName: "claude-model",
                     sourcePath: "/tmp/source",
@@ -902,7 +903,7 @@ struct Sprint8StorageTests {
         #expect(listed[0].fieldMapping == .default)
         #expect(listed[0].fieldMapping.inputTokens == "usage.input_tokens")
         #expect(listed[0].fieldMapping.outputTokens == "usage.output_tokens")
-        #expect(listed[0].fieldMapping.cacheTokens == "usage.cache_read_tokens")
+        #expect(listed[0].fieldMapping.cacheReadTokens == "usage.cache_read_input_tokens")
         #expect(listed[0].fieldMapping.model == "model")
     }
 
@@ -921,7 +922,8 @@ struct Sprint8StorageTests {
             fieldMapping: CustomSourceFieldMapping(
                 inputTokens: "foo.input",
                 outputTokens: "foo.output",
-                cacheTokens: "foo.cache",
+                cacheReadTokens: "foo.cache",
+                cacheCreationTokens: "foo.cache_creation",
                 model: "foo.model"
             ),
             createdAt: initialCreatedAt
@@ -945,7 +947,8 @@ struct Sprint8StorageTests {
             fieldMapping: CustomSourceFieldMapping(
                 inputTokens: "bar.input",
                 outputTokens: "bar.output",
-                cacheTokens: "bar.cache",
+                cacheReadTokens: "bar.cache",
+                cacheCreationTokens: "bar.cache_creation",
                 model: "bar.model"
             ),
             createdAt: Date(timeIntervalSince1970: initialCreatedAt.timeIntervalSince1970 + 60)
@@ -1496,7 +1499,8 @@ struct Sprint8StorageTests {
             timestamp: fixedDate(),
             inputTokens: 10,
             outputTokens: 5,
-            cacheTokens: 2,
+            cacheReadTokens: 2,
+            cacheCreationTokens: 0,
             reasoningTokens: nil,
             modelName: nil,
             sourcePath: "/tmp/source.jsonl",
@@ -1550,7 +1554,8 @@ struct Sprint8StorageTests {
             timestamp: timestamp,
             inputTokens: inputTokens,
             outputTokens: outputTokens,
-            cacheTokens: cacheTokens,
+            cacheReadTokens: cacheTokens,
+            cacheCreationTokens: 0,
             reasoningTokens: nil,
             modelName: modelName,
             sourcePath: "/tmp/source.jsonl",

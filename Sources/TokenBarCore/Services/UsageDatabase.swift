@@ -111,7 +111,7 @@ public final class UsageDatabase: @unchecked Sendable {
                 format TEXT NOT NULL,
                 display_agent TEXT NOT NULL,
                 enabled INTEGER NOT NULL DEFAULT 1,
-                field_mapping TEXT NOT NULL DEFAULT '{"inputTokens":"usage.input_tokens","outputTokens":"usage.output_tokens","cacheTokens":"usage.cache_read_tokens","model":"model"}',
+                field_mapping TEXT NOT NULL DEFAULT '{"inputTokens":"usage.input_tokens","outputTokens":"usage.output_tokens","cacheReadTokens":"usage.cache_read_input_tokens","cacheCreationTokens":"usage.cache_creation_input_tokens","model":"model"}',
                 created_at INTEGER NOT NULL
             );
             """)
@@ -157,7 +157,7 @@ public final class UsageDatabase: @unchecked Sendable {
                 }
                 try db.execute(sql: """
                 UPDATE custom_sources
-                SET field_mapping = '{"inputTokens":"usage.input_tokens","outputTokens":"usage.output_tokens","cacheTokens":"usage.cache_read_tokens","model":"model"}'
+                SET field_mapping = '{"inputTokens":"usage.input_tokens","outputTokens":"usage.output_tokens","cacheReadTokens":"usage.cache_read_input_tokens","cacheCreationTokens":"usage.cache_creation_input_tokens","model":"model"}'
                 WHERE field_mapping IS NULL OR LENGTH(TRIM(field_mapping)) = 0
                 """)
             }
@@ -261,6 +261,12 @@ public final class UsageDatabase: @unchecked Sendable {
             // ASCII list (empty string means "no key written").
             try db.execute(sql: "ALTER TABLE saved_prompts ADD COLUMN argument_hint TEXT;")
             try db.execute(sql: "ALTER TABLE saved_prompts ADD COLUMN allowed_tools TEXT;")
+        }
+        migrator.registerMigration("v12_split_cache_tokens") { db in
+            try db.execute(sql: "ALTER TABLE usage_events ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0;")
+            try db.execute(sql: "ALTER TABLE usage_events ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0;")
+            try db.execute(sql: "UPDATE usage_events SET cache_read_tokens = cache_tokens, cache_creation_tokens = 0;")
+            try db.execute(sql: "DELETE FROM source_watermarks;")
         }
         return migrator
     }

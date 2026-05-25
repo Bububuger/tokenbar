@@ -3,15 +3,15 @@ import SwiftUI
 import TokenBarCore
 
 let tokenbarDefaultPricingRows: [PricingRow] = [
-    PricingRow(model: "gpt-5.5", input: "2.5", output: "10", cache: "0.25"),
-    PricingRow(model: "gpt-5-codex", input: "2.5", output: "10", cache: "0.25"),
-    PricingRow(model: "claude-opus-4.7", input: "15", output: "75", cache: "1.5"),
-    PricingRow(model: "claude-sonnet-4.5", input: "3", output: "15", cache: "0.3"),
-    PricingRow(model: "gpt-5-mini", input: "0.25", output: "2", cache: "0.025"),
-    PricingRow(model: "o4-mini", input: "1.1", output: "4.4", cache: "0.275"),
-    PricingRow(model: "claude-haiku-4", input: "0.8", output: "4", cache: "0.08"),
-    PricingRow(model: "hermes-3-70b", input: "0.4", output: "0.8", cache: "0.1"),
-    PricingRow(model: "composer-1", input: "1.2", output: "6", cache: "0.12"),
+    PricingRow(model: "gpt-5.5", input: "2.5", output: "10", cacheRead: "0.25", cacheCreation: "2.5"),
+    PricingRow(model: "gpt-5-codex", input: "2.5", output: "10", cacheRead: "0.25", cacheCreation: "2.5"),
+    PricingRow(model: "claude-opus-4.7", input: "5", output: "25", cacheRead: "0.5", cacheCreation: "6.25"),
+    PricingRow(model: "claude-sonnet-4.5", input: "3", output: "15", cacheRead: "0.3", cacheCreation: "3.75"),
+    PricingRow(model: "gpt-5-mini", input: "0.25", output: "2", cacheRead: "0.025", cacheCreation: "0.25"),
+    PricingRow(model: "o4-mini", input: "1.1", output: "4.4", cacheRead: "0.275", cacheCreation: "1.1"),
+    PricingRow(model: "claude-haiku-4", input: "1", output: "5", cacheRead: "0.1", cacheCreation: "1.25"),
+    PricingRow(model: "hermes-3-70b", input: "0.4", output: "0.8", cacheRead: "0.1", cacheCreation: "0.4"),
+    PricingRow(model: "composer-1", input: "1.2", output: "6", cacheRead: "0.12", cacheCreation: "1.2"),
 ]
 
 struct SettingsView: View {
@@ -30,7 +30,7 @@ struct SettingsView: View {
     @State private var sourceSaveMessage: String?
     @State private var sourcePendingDelete: CustomSourceRecord?
     private let themeOptions = ["Dark", "Light"]
-    private let pricingColumns: [CGFloat] = [208, 96, 96, 96, 95, 128]
+    private let pricingColumns: [CGFloat] = [180, 86, 86, 86, 86, 78, 108]
 
     static let defaultPricingRows = tokenbarDefaultPricingRows
 
@@ -38,7 +38,7 @@ struct SettingsView: View {
         let overrides = decodedOverrides()
         return Self.defaultPricingRows.map { row in
             if let o = overrides[row.model] {
-                return PricingRow(model: row.model, input: o.input, output: o.output, cache: o.cache, source: "override")
+                return PricingRow(model: row.model, input: o.input, output: o.output, cacheRead: o.cacheRead, cacheCreation: o.cacheCreation, source: "override")
             }
             return row
         }
@@ -296,14 +296,15 @@ struct SettingsView: View {
                         priceHead("Model", width: pricingColumns[0])
                         priceHead("Input $/1M", width: pricingColumns[1])
                         priceHead("Output $/1M", width: pricingColumns[2])
-                        priceHead("Cache $/1M", width: pricingColumns[3])
-                        priceHead("Source", width: pricingColumns[4])
-                        priceHead("Actions", width: pricingColumns[5], align: .trailing)
+                        priceHead("CacheRead $/1M", width: pricingColumns[3])
+                        priceHead("CacheCreate $/1M", width: pricingColumns[4])
+                        priceHead("Source", width: pricingColumns[5])
+                        priceHead("Actions", width: pricingColumns[6], align: .trailing)
                     }
-                    Divider().gridCellColumns(6).overlay(TokenBarStyle.line)
+                    Divider().gridCellColumns(7).overlay(TokenBarStyle.line)
                     ForEach(pricingRows) { row in
                         pricingGridRow(row)
-                        Divider().gridCellColumns(6).overlay(TokenBarStyle.line.opacity(0.6))
+                        Divider().gridCellColumns(7).overlay(TokenBarStyle.line.opacity(0.6))
                     }
                 }
             }
@@ -336,11 +337,12 @@ struct SettingsView: View {
                     .frame(width: pricingColumns[0], alignment: .leading)
                 priceField($editBuffer.input, width: pricingColumns[1])
                 priceField($editBuffer.output, width: pricingColumns[2])
-                priceField($editBuffer.cache, width: pricingColumns[3])
+                priceField($editBuffer.cacheRead, width: pricingColumns[3])
+                priceField($editBuffer.cacheCreation, width: pricingColumns[4])
                 Text(row.source == "default" ? "default" : "override")
                     .font(.caption)
                     .foregroundStyle(TokenBarStyle.accent)
-                    .frame(width: pricingColumns[4], alignment: .leading)
+                    .frame(width: pricingColumns[5], alignment: .leading)
                 HStack(spacing: 4) {
                     Button("Save") {
                         saveOverride(row.model, values: editBuffer.normalized)
@@ -351,7 +353,7 @@ struct SettingsView: View {
                     Button("Cancel") { editingModel = nil }
                         .keyboardShortcut(.cancelAction)
                 }
-                .frame(width: pricingColumns[5], alignment: .trailing)
+                .frame(width: pricingColumns[6], alignment: .trailing)
                 .controlSize(.small)
             }
             .padding(.vertical, 9)
@@ -363,17 +365,18 @@ struct SettingsView: View {
                     .frame(width: pricingColumns[0], alignment: .leading)
                 priceCell(row.input, width: pricingColumns[1])
                 priceCell(row.output, width: pricingColumns[2])
-                priceCell(row.cache, width: pricingColumns[3])
+                priceCell(row.cacheRead, width: pricingColumns[3])
+                priceCell(row.cacheCreation, width: pricingColumns[4])
                 Text(row.source)
                     .font(.caption)
                     .foregroundStyle(row.source == "override" ? TokenBarStyle.warn : TokenBarStyle.cache)
-                    .frame(width: pricingColumns[4], alignment: .leading)
+                    .frame(width: pricingColumns[5], alignment: .leading)
                 Button("Edit") {
-                    editBuffer = PricingValues(input: row.input, output: row.output, cache: row.cache)
+                    editBuffer = PricingValues(input: row.input, output: row.output, cacheRead: row.cacheRead, cacheCreation: row.cacheCreation)
                     editingModel = row.model
                 }
                 .controlSize(.small)
-                .frame(width: pricingColumns[5], alignment: .trailing)
+                .frame(width: pricingColumns[6], alignment: .trailing)
             }
             .padding(.vertical, 9)
         }
@@ -382,7 +385,7 @@ struct SettingsView: View {
     private func priceField(_ binding: Binding<String>, width: CGFloat) -> some View {
         TextField("", text: binding)
             .textFieldStyle(.roundedBorder)
-            .font(.system(size: 12, design: .monospaced))
+            .font(.system(size: 11.5, design: .monospaced))
             .frame(width: width)
             .overlay(
                 RoundedRectangle(cornerRadius: 5)
@@ -971,7 +974,7 @@ private struct AddCustomSourceOverlay: View {
             _mappingOpen = State(initialValue: source.fieldMapping != .default)
             _inputField = State(initialValue: source.fieldMapping.inputTokens)
             _outputField = State(initialValue: source.fieldMapping.outputTokens)
-            _cacheField = State(initialValue: source.fieldMapping.cacheTokens)
+            _cacheField = State(initialValue: source.fieldMapping.cacheReadTokens)
             _modelField = State(initialValue: source.fieldMapping.model)
             _detectionState = State(initialValue: .success("Saved source. Run Detect again after changing the path or mapping."))
         } else {
@@ -983,7 +986,7 @@ private struct AddCustomSourceOverlay: View {
             _mappingOpen = State(initialValue: false)
             _inputField = State(initialValue: CustomSourceFieldMapping.default.inputTokens)
             _outputField = State(initialValue: CustomSourceFieldMapping.default.outputTokens)
-            _cacheField = State(initialValue: CustomSourceFieldMapping.default.cacheTokens)
+            _cacheField = State(initialValue: CustomSourceFieldMapping.default.cacheReadTokens)
             _modelField = State(initialValue: CustomSourceFieldMapping.default.model)
             _detectionState = State(initialValue: .idle)
         }
@@ -1355,7 +1358,8 @@ private struct AddCustomSourceOverlay: View {
         return CustomSourceFieldMapping(
             inputTokens: inputField.nonEmptyMapping(defaults.inputTokens),
             outputTokens: outputField.nonEmptyMapping(defaults.outputTokens),
-            cacheTokens: cacheField.nonEmptyMapping(defaults.cacheTokens),
+            cacheReadTokens: cacheField.nonEmptyMapping(defaults.cacheReadTokens),
+            cacheCreationTokens: defaults.cacheCreationTokens,
             model: modelField.nonEmptyMapping(defaults.model)
         )
     }
@@ -1495,7 +1499,7 @@ private struct AddCustomSourceOverlay: View {
             }
             if mappedIntValue(from: object, path: mapping.inputTokens) != nil,
                mappedIntValue(from: object, path: mapping.outputTokens) != nil,
-               mappedIntValue(from: object, path: mapping.cacheTokens) != nil {
+               mappedIntValue(from: object, path: mapping.cacheReadTokens) != nil {
                 return true
             }
         }
@@ -1593,25 +1597,68 @@ struct PricingRow: Identifiable {
     let model: String
     let input: String
     let output: String
-    let cache: String
+    let cacheRead: String
+    let cacheCreation: String
     var source: String = "default"
 }
 
 struct PricingValues: Codable, Hashable {
     var input: String = "0"
     var output: String = "0"
-    var cache: String = "0"
+    var cacheRead: String = "0"
+    var cacheCreation: String = "0"
 
     var isValid: Bool {
-        input.isValidPrice && output.isValidPrice && cache.isValidPrice
+        input.isValidPrice && output.isValidPrice && cacheRead.isValidPrice && cacheCreation.isValidPrice
     }
 
     var normalized: PricingValues {
         .init(
             input: input.trimmedPrice,
             output: output.trimmedPrice,
-            cache: cache.trimmedPrice
+            cacheRead: cacheRead.trimmedPrice,
+            cacheCreation: cacheCreation.trimmedPrice
         )
+    }
+
+    /// Backward-compat: when decoding old 3-field JSON (which has `cache` but
+    /// not `cacheRead`/`cacheCreation`), map the legacy field gracefully.
+    enum CodingKeys: String, CodingKey {
+        case input, output, cacheRead, cacheCreation
+        // Legacy key for old persisted overrides
+        case cache
+    }
+
+    init(input: String = "0", output: String = "0", cacheRead: String = "0", cacheCreation: String = "0") {
+        self.input = input
+        self.output = output
+        self.cacheRead = cacheRead
+        self.cacheCreation = cacheCreation
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        input = try container.decodeIfPresent(String.self, forKey: .input) ?? "0"
+        output = try container.decodeIfPresent(String.self, forKey: .output) ?? "0"
+        if let cr = try container.decodeIfPresent(String.self, forKey: .cacheRead) {
+            cacheRead = cr
+            cacheCreation = try container.decodeIfPresent(String.self, forKey: .cacheCreation) ?? input
+        } else if let legacy = try container.decodeIfPresent(String.self, forKey: .cache) {
+            // Old format: single `cache` field becomes cacheRead; cacheCreation defaults to input rate
+            cacheRead = legacy
+            cacheCreation = try container.decodeIfPresent(String.self, forKey: .cacheCreation) ?? input
+        } else {
+            cacheRead = "0"
+            cacheCreation = input
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(input, forKey: .input)
+        try container.encode(output, forKey: .output)
+        try container.encode(cacheRead, forKey: .cacheRead)
+        try container.encode(cacheCreation, forKey: .cacheCreation)
     }
 }
 

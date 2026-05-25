@@ -1425,7 +1425,8 @@ final class TokenBarRuntimeModel: ObservableObject {
         return UsageSummary(
             inputTokens: projectEvents.reduce(0) { $0 + $1.inputTokens },
             outputTokens: projectEvents.reduce(0) { $0 + $1.outputTokens },
-            cacheTokens: projectEvents.reduce(0) { $0 + $1.cacheTokens }
+            cacheReadTokens: projectEvents.reduce(0) { $0 + $1.cacheReadTokens },
+            cacheCreationTokens: projectEvents.reduce(0) { $0 + $1.cacheCreationTokens }
         )
     }
 

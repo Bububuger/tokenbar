@@ -13,12 +13,15 @@ enum ProjectsCommand {
         let promptCount: Int
         let inputTokens: Int
         let outputTokens: Int
-        let cacheTokens: Int
+        let cacheReadTokens: Int
+        let cacheCreationTokens: Int
         let totalTokens: Int
         let firstSeen: String?
         let lastSeen: String?
         let distinctAgents: [String]
         let distinctModels: [String]
+
+        var cacheTokens: Int { cacheReadTokens + cacheCreationTokens }
     }
 
     static func parse(cursor: inout ArgumentCursor, options: inout FilterOptions) throws {
@@ -70,7 +73,8 @@ enum ProjectsCommand {
                 promptCount: promptByProject[name] ?? 0,
                 inputTokens: accumulator.inputTokens,
                 outputTokens: accumulator.outputTokens,
-                cacheTokens: accumulator.cacheTokens,
+                cacheReadTokens: accumulator.cacheReadTokens,
+                cacheCreationTokens: accumulator.cacheCreationTokens,
                 totalTokens: accumulator.totalTokens,
                 firstSeen: accumulator.firstSeen.map(CLIOutput.iso),
                 lastSeen: accumulator.lastSeen.map(CLIOutput.iso),
@@ -151,19 +155,22 @@ struct ProjectsResult: Encodable {
 private struct ProjectAccumulator {
     var inputTokens = 0
     var outputTokens = 0
-    var cacheTokens = 0
+    var cacheReadTokens = 0
+    var cacheCreationTokens = 0
     var eventCount = 0
     var firstSeen: Date?
     var lastSeen: Date?
     var agents: Set<String> = []
     var models: Set<String> = []
 
+    var cacheTokens: Int { cacheReadTokens + cacheCreationTokens }
     var totalTokens: Int { inputTokens + outputTokens + cacheTokens }
 
     mutating func add(_ event: UsageEvent) {
         inputTokens += event.inputTokens
         outputTokens += event.outputTokens
-        cacheTokens += event.cacheTokens
+        cacheReadTokens += event.cacheReadTokens
+        cacheCreationTokens += event.cacheCreationTokens
         eventCount += 1
         if firstSeen == nil || event.timestamp < (firstSeen ?? .distantFuture) {
             firstSeen = event.timestamp
@@ -200,8 +207,11 @@ enum SessionsCommand {
         let promptCount: Int
         let inputTokens: Int
         let outputTokens: Int
-        let cacheTokens: Int
+        let cacheReadTokens: Int
+        let cacheCreationTokens: Int
         let totalTokens: Int
+
+        var cacheTokens: Int { cacheReadTokens + cacheCreationTokens }
     }
 
     struct Result: Encodable {
@@ -237,7 +247,7 @@ enum SessionsCommand {
         let prompts = CLIFilters.filterPrompts(allPrompts, options: options)
 
         struct Bucket {
-            var inputTokens = 0, outputTokens = 0, cacheTokens = 0
+            var inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, cacheCreationTokens = 0
             var eventCount = 0
             var firstSeen: Date?
             var lastSeen: Date?
@@ -255,7 +265,8 @@ enum SessionsCommand {
             bucket.projectName = event.projectName
             bucket.inputTokens += event.inputTokens
             bucket.outputTokens += event.outputTokens
-            bucket.cacheTokens += event.cacheTokens
+            bucket.cacheReadTokens += event.cacheReadTokens
+            bucket.cacheCreationTokens += event.cacheCreationTokens
             bucket.eventCount += 1
             if bucket.firstSeen == nil || event.timestamp < (bucket.firstSeen ?? .distantFuture) {
                 bucket.firstSeen = event.timestamp
@@ -300,8 +311,9 @@ enum SessionsCommand {
                 promptCount: promptCounts[key] ?? 0,
                 inputTokens: bucket.inputTokens,
                 outputTokens: bucket.outputTokens,
-                cacheTokens: bucket.cacheTokens,
-                totalTokens: bucket.inputTokens + bucket.outputTokens + bucket.cacheTokens
+                cacheReadTokens: bucket.cacheReadTokens,
+                cacheCreationTokens: bucket.cacheCreationTokens,
+                totalTokens: bucket.inputTokens + bucket.outputTokens + bucket.cacheReadTokens + bucket.cacheCreationTokens
             )
         }
 
@@ -380,10 +392,13 @@ enum ModelsCommand {
         let eventCount: Int
         let inputTokens: Int
         let outputTokens: Int
-        let cacheTokens: Int
+        let cacheReadTokens: Int
+        let cacheCreationTokens: Int
         let totalTokens: Int
         let estimatedCostUSD: Double
         let costSource: String
+
+        var cacheTokens: Int { cacheReadTokens + cacheCreationTokens }
     }
 
     struct Result: Encodable {
@@ -416,7 +431,7 @@ enum ModelsCommand {
         let events = CLIFilters.filterEvents(try repository.allEvents(), options: options)
 
         struct Bucket {
-            var inputTokens = 0, outputTokens = 0, cacheTokens = 0
+            var inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, cacheCreationTokens = 0
             var eventCount = 0
             var agents = Set<String>()
             var costUSD: Double = 0
@@ -428,7 +443,8 @@ enum ModelsCommand {
             var bucket = byModel[name] ?? Bucket()
             bucket.inputTokens += event.inputTokens
             bucket.outputTokens += event.outputTokens
-            bucket.cacheTokens += event.cacheTokens
+            bucket.cacheReadTokens += event.cacheReadTokens
+            bucket.cacheCreationTokens += event.cacheCreationTokens
             bucket.eventCount += 1
             bucket.agents.insert(event.agent.rawValue)
             bucket.costUSD += Double(event.inputTokens + event.outputTokens + event.cacheTokens) * event.agent.defaultCostPerMillionTokens / 1_000_000
@@ -442,8 +458,9 @@ enum ModelsCommand {
                 eventCount: bucket.eventCount,
                 inputTokens: bucket.inputTokens,
                 outputTokens: bucket.outputTokens,
-                cacheTokens: bucket.cacheTokens,
-                totalTokens: bucket.inputTokens + bucket.outputTokens + bucket.cacheTokens,
+                cacheReadTokens: bucket.cacheReadTokens,
+                cacheCreationTokens: bucket.cacheCreationTokens,
+                totalTokens: bucket.inputTokens + bucket.outputTokens + bucket.cacheReadTokens + bucket.cacheCreationTokens,
                 estimatedCostUSD: bucket.costUSD,
                 costSource: "defaults"
             )
@@ -521,10 +538,13 @@ enum AgentsCommand {
         let promptCount: Int
         let inputTokens: Int
         let outputTokens: Int
-        let cacheTokens: Int
+        let cacheReadTokens: Int
+        let cacheCreationTokens: Int
         let totalTokens: Int
         let distinctProjects: [String]
         let distinctModels: [String]
+
+        var cacheTokens: Int { cacheReadTokens + cacheCreationTokens }
     }
 
     struct Result: Encodable {
@@ -558,7 +578,7 @@ enum AgentsCommand {
         let prompts = CLIFilters.filterPrompts(try repository.allPrompts(), options: options)
 
         struct Bucket {
-            var inputTokens = 0, outputTokens = 0, cacheTokens = 0
+            var inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, cacheCreationTokens = 0
             var eventCount = 0
             var projects = Set<String>()
             var models = Set<String>()
@@ -569,7 +589,8 @@ enum AgentsCommand {
             var bucket = byAgent[event.agent] ?? Bucket()
             bucket.inputTokens += event.inputTokens
             bucket.outputTokens += event.outputTokens
-            bucket.cacheTokens += event.cacheTokens
+            bucket.cacheReadTokens += event.cacheReadTokens
+            bucket.cacheCreationTokens += event.cacheCreationTokens
             bucket.eventCount += 1
             bucket.projects.insert(event.projectName)
             let model = (event.modelName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -590,8 +611,9 @@ enum AgentsCommand {
                 promptCount: promptCounts[agent] ?? 0,
                 inputTokens: bucket.inputTokens,
                 outputTokens: bucket.outputTokens,
-                cacheTokens: bucket.cacheTokens,
-                totalTokens: bucket.inputTokens + bucket.outputTokens + bucket.cacheTokens,
+                cacheReadTokens: bucket.cacheReadTokens,
+                cacheCreationTokens: bucket.cacheCreationTokens,
+                totalTokens: bucket.inputTokens + bucket.outputTokens + bucket.cacheReadTokens + bucket.cacheCreationTokens,
                 distinctProjects: Array(bucket.projects).sorted(),
                 distinctModels: Array(bucket.models).sorted()
             )

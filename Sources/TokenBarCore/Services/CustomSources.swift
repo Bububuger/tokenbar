@@ -403,7 +403,8 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
             timestamp: event.timestamp,
             inputTokens: event.inputTokens,
             outputTokens: event.outputTokens,
-            cacheTokens: event.cacheTokens,
+            cacheReadTokens: event.cacheReadTokens,
+            cacheCreationTokens: event.cacheCreationTokens,
             reasoningTokens: event.reasoningTokens,
             modelName: event.modelName,
             sourcePath: event.sourcePath,
@@ -422,7 +423,8 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
             timestamp: event.timestamp,
             inputTokens: event.inputTokens,
             outputTokens: event.outputTokens,
-            cacheTokens: event.cacheTokens,
+            cacheReadTokens: event.cacheReadTokens,
+            cacheCreationTokens: event.cacheCreationTokens,
             reasoningTokens: event.reasoningTokens,
             modelName: event.modelName,
             sourcePath: event.sourcePath,
@@ -498,16 +500,18 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
 
             let input = mappedIntValue(from: object, path: record.fieldMapping.inputTokens)
             let output = mappedIntValue(from: object, path: record.fieldMapping.outputTokens)
-            let cache = mappedIntValue(from: object, path: record.fieldMapping.cacheTokens)
-            guard let input, let output, let cache else {
+            let cacheRead = mappedIntValue(from: object, path: record.fieldMapping.cacheReadTokens)
+            let cacheCreation = mappedIntValue(from: object, path: record.fieldMapping.cacheCreationTokens)
+            guard let input, let output else {
                 warnings.append(UsageSourceWarning(sourceName: sourceName, sourcePath: fileURL.path, lineNumber: lineNumber, message: "usage fields are incomplete for custom mapping"))
                 continue
             }
 
             let inputClamp = TokenBarNumberFormatting.clampNonNegative(input)
             let outputClamp = TokenBarNumberFormatting.clampNonNegative(output)
-            let cacheClamp = TokenBarNumberFormatting.clampNonNegative(cache)
-            if inputClamp.wasNegative || outputClamp.wasNegative || cacheClamp.wasNegative {
+            let cacheReadClamp = TokenBarNumberFormatting.clampNonNegative(cacheRead ?? 0)
+            let cacheCreationClamp = TokenBarNumberFormatting.clampNonNegative(cacheCreation ?? 0)
+            if inputClamp.wasNegative || outputClamp.wasNegative || cacheReadClamp.wasNegative || cacheCreationClamp.wasNegative {
                 warnings.append(UsageSourceWarning(sourceName: sourceName, sourcePath: fileURL.path, lineNumber: lineNumber, message: "negative token count clamped to 0"))
             }
 
@@ -527,7 +531,8 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
                     timestamp: timestamp,
                     inputTokens: inputClamp.value,
                     outputTokens: outputClamp.value,
-                    cacheTokens: cacheClamp.value,
+                    cacheReadTokens: cacheReadClamp.value,
+                    cacheCreationTokens: cacheCreationClamp.value,
                     reasoningTokens: nil,
                     modelName: modelName,
                     sourcePath: fileURL.path,

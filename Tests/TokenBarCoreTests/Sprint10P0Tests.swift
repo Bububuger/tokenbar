@@ -96,7 +96,8 @@ struct Sprint10P0Tests {
                 timestamp: referenceDate,
                 inputTokens: big,
                 outputTokens: big,
-                cacheTokens: big,
+                cacheReadTokens: big,
+                cacheCreationTokens: 0,
                 reasoningTokens: nil,
                 sourcePath: "/tmp/\(idx).jsonl",
                 parser: .codex,
@@ -125,7 +126,8 @@ struct Sprint10P0Tests {
                 timestamp: referenceDate.addingTimeInterval(-3600),
                 inputTokens: 100,
                 outputTokens: 0,
-                cacheTokens: 0,
+                cacheReadTokens: 0,
+                cacheCreationTokens: 0,
                 reasoningTokens: nil,
                 sourcePath: "/tmp/file-a.jsonl",
                 parser: .codex,
@@ -140,7 +142,8 @@ struct Sprint10P0Tests {
                 timestamp: referenceDate,
                 inputTokens: 50,
                 outputTokens: 0,
-                cacheTokens: 0,
+                cacheReadTokens: 0,
+                cacheCreationTokens: 0,
                 reasoningTokens: nil,
                 sourcePath: "/tmp/file-b.jsonl",
                 parser: .codex,
@@ -181,13 +184,13 @@ struct Sprint10P0Tests {
         let events = [
             UsageEvent(
                 id: "dst-1", agent: .codex, projectPath: nil, projectName: "proj", sessionId: "s1",
-                timestamp: beforeFallBack, inputTokens: 100, outputTokens: 0, cacheTokens: 0,
-                reasoningTokens: nil, sourcePath: "/tmp/a.jsonl", parser: .codex, confidence: 1
+                timestamp: beforeFallBack, inputTokens: 100, outputTokens: 0, cacheReadTokens: 0,
+                cacheCreationTokens: 0, reasoningTokens: nil, sourcePath: "/tmp/a.jsonl", parser: .codex, confidence: 1
             ),
             UsageEvent(
                 id: "dst-2", agent: .codex, projectPath: nil, projectName: "proj", sessionId: "s2",
-                timestamp: afterFallBack, inputTokens: 50, outputTokens: 0, cacheTokens: 0,
-                reasoningTokens: nil, sourcePath: "/tmp/b.jsonl", parser: .codex, confidence: 1
+                timestamp: afterFallBack, inputTokens: 50, outputTokens: 0, cacheReadTokens: 0,
+                cacheCreationTokens: 0, reasoningTokens: nil, sourcePath: "/tmp/b.jsonl", parser: .codex, confidence: 1
             ),
         ]
 

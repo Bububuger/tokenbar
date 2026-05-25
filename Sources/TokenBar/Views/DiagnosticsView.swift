@@ -561,7 +561,7 @@ struct DiagnosticsView: View {
 
     private var dataAuditRows: [DataAuditRow] {
         if derivedRows.dataAuditRows.isEmpty, isBuildingDerivedRows {
-            return [DataAuditRow(name: "Building audit", summary: UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0))]
+            return [DataAuditRow(name: "Building audit", summary: UsageSummary(inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0))]
         }
         return derivedRows.dataAuditRows
     }
@@ -621,7 +621,7 @@ private struct DiagnosticsDerivedRows: Sendable, Hashable {
         var builtInCounts: [AgentKind: Int] = [:]
         var customCounts: [String: Int] = [:]
         var auditTotals: [String: UsageSummary] = [:]
-        var total = UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0)
+        var total = UsageSummary(inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0)
         let allCustomNamesByID = Dictionary(uniqueKeysWithValues: customSources.map { ($0.id, $0.name) })
         let enabledCustomNamesByID = Dictionary(uniqueKeysWithValues: customSources.filter(\.enabled).map { ($0.id, $0.name) })
 
@@ -715,11 +715,12 @@ private struct DiagnosticsDerivedRows: Sendable, Hashable {
     }
 
     private static func add(_ event: UsageEvent, to summary: UsageSummary?) -> UsageSummary {
-        let summary = summary ?? UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0)
+        let summary = summary ?? UsageSummary(inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0)
         return UsageSummary(
             inputTokens: summary.inputTokens + event.inputTokens,
             outputTokens: summary.outputTokens + event.outputTokens,
-            cacheTokens: summary.cacheTokens + event.cacheTokens
+            cacheReadTokens: summary.cacheReadTokens + event.cacheReadTokens,
+            cacheCreationTokens: summary.cacheCreationTokens + event.cacheCreationTokens
         )
     }
 

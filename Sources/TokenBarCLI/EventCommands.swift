@@ -18,11 +18,14 @@ enum EventsCommand {
         let modelName: String
         let inputTokens: Int
         let outputTokens: Int
-        let cacheTokens: Int
+        let cacheReadTokens: Int
+        let cacheCreationTokens: Int
         let totalTokens: Int
         let reasoningTokens: Int?
         let sourcePath: String
         let parser: String
+
+        var cacheTokens: Int { cacheReadTokens + cacheCreationTokens }
 
         static func from(_ event: UsageEvent) -> Row {
             let total = event.inputTokens + event.outputTokens + event.cacheTokens
@@ -37,7 +40,8 @@ enum EventsCommand {
                 modelName: modelNameOrFallback(event),
                 inputTokens: event.inputTokens,
                 outputTokens: event.outputTokens,
-                cacheTokens: event.cacheTokens,
+                cacheReadTokens: event.cacheReadTokens,
+                cacheCreationTokens: event.cacheCreationTokens,
                 totalTokens: total,
                 reasoningTokens: event.reasoningTokens,
                 sourcePath: event.sourcePath,

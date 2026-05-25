@@ -85,7 +85,8 @@ struct TokenBarPopoverSnapshot: Sendable, Hashable {
             var model = modelTotals[modelName] ?? ModelAccumulator()
             model.inputTokens += event.inputTokens
             model.outputTokens += event.outputTokens
-            model.cacheTokens += event.cacheTokens
+            model.cacheReadTokens += event.cacheReadTokens
+            model.cacheCreationTokens += event.cacheCreationTokens
             model.cost += eventCost
             model.agentTokens[agentName, default: 0] += eventTokens
             modelTotals[modelName] = model
@@ -139,7 +140,8 @@ struct TokenBarPopoverSnapshot: Sendable, Hashable {
             let summary = UsageSummary(
                 inputTokens: model.inputTokens,
                 outputTokens: model.outputTokens,
-                cacheTokens: model.cacheTokens
+                cacheReadTokens: model.cacheReadTokens,
+                cacheCreationTokens: model.cacheCreationTokens
             )
             let agentName = topName(model.agentTokens, fallback: "Local")
             let totalTokens = modelTotals.values.reduce(0) { $0 + $1.totalTokens }
@@ -252,11 +254,12 @@ struct TokenBarPopoverRankingRow: Identifiable, Sendable, Hashable {
 private struct ModelAccumulator {
     var inputTokens = 0
     var outputTokens = 0
-    var cacheTokens = 0
+    var cacheReadTokens = 0
+    var cacheCreationTokens = 0
     var cost = 0.0
     var agentTokens: [String: Int] = [:]
 
     var totalTokens: Int {
-        inputTokens + outputTokens + cacheTokens
+        inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens
     }
 }

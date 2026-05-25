@@ -62,8 +62,8 @@ public enum OpenClawUsageParser {
             let output = intValue(usage["output"])
             let cacheRead = intValue(usage["cacheRead"])
             let cacheWrite = intValue(usage["cacheWrite"])
-            let cacheTokens = cacheRead + cacheWrite
-            guard input + output + cacheTokens > 0 else { continue }
+            let cacheTotal = cacheRead + cacheWrite
+            guard input + output + cacheTotal > 0 else { continue }
 
             guard let timestamp = resolveTimestamp(messageDict: messageDict, outer: object) else {
                 warnings.append(OpenClawParseWarning(
@@ -90,7 +90,8 @@ public enum OpenClawUsageParser {
                 timestamp: timestamp,
                 inputTokens: input,
                 outputTokens: output,
-                cacheTokens: cacheTokens,
+                cacheReadTokens: cacheRead,
+                cacheCreationTokens: cacheWrite,
                 reasoningTokens: 0,
                 modelName: model,
                 sourcePath: sourcePath,

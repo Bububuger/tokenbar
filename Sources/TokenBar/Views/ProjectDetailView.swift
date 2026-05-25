@@ -1118,8 +1118,8 @@ private struct ProjectDetailRangeMetrics: Sendable, Hashable {
     static let empty = ProjectDetailRangeMetrics(
         days: [],
         availabilityNote: "Preparing range",
-        rangeSummary: UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0),
-        todaySummary: UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0),
+        rangeSummary: UsageSummary(inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0),
+        todaySummary: UsageSummary(inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0),
         rangeCost: 0,
         todayCost: 0,
         todaySessionCount: 0,
@@ -1138,12 +1138,12 @@ private struct ProjectDetailRangeMetrics: Sendable, Hashable {
     ) -> ProjectDetailRangeMetrics {
         let rangeSummary = totalTokens > 0
             ? detail.summary
-            : UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0)
+            : UsageSummary(inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0)
         return ProjectDetailRangeMetrics(
             days: detail.last30Days,
             availabilityNote: "Preparing selected range",
             rangeSummary: rangeSummary,
-            todaySummary: UsageSummary(inputTokens: todayTokens, outputTokens: 0, cacheTokens: 0),
+            todaySummary: UsageSummary(inputTokens: todayTokens, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0),
             rangeCost: rangeCost,
             todayCost: todayCost,
             todaySessionCount: todaySessions,

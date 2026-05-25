@@ -65,7 +65,8 @@ enum RebuildCommand {
         let statuses = await collectStatuses(from: sources, referenceDate: started, calendar: calendar)
         let totalInput = state.events.reduce(0) { $0 + $1.inputTokens }
         let totalOutput = state.events.reduce(0) { $0 + $1.outputTokens }
-        let totalCache = state.events.reduce(0) { $0 + $1.cacheTokens }
+        let totalCacheRead = state.events.reduce(0) { $0 + $1.cacheReadTokens }
+        let totalCacheCreation = state.events.reduce(0) { $0 + $1.cacheCreationTokens }
         let output = RebuildOutput(
             generatedAt: CLIOutput.iso(Date()),
             databasePath: databaseURL.path,
@@ -75,7 +76,8 @@ enum RebuildCommand {
             promptCount: state.promptCount,
             inputTokens: totalInput,
             outputTokens: totalOutput,
-            cacheTokens: totalCache,
+            cacheReadTokens: totalCacheRead,
+            cacheCreationTokens: totalCacheCreation,
             warningCount: state.warnings.count,
             rebuildError: state.lastRebuildError,
             checkpointEventsAdded: result.checkpoint?.eventsAdded,
@@ -151,7 +153,8 @@ struct RebuildOutput: Encodable {
     let promptCount: Int
     let inputTokens: Int
     let outputTokens: Int
-    let cacheTokens: Int
+    let cacheReadTokens: Int
+    let cacheCreationTokens: Int
     let totalTokens: Int
     let warningCount: Int
     let rebuildError: String?
@@ -162,6 +165,8 @@ struct RebuildOutput: Encodable {
     let resourceSnapshot: IndexingResourceSnapshot?
     let sources: [DataSourceStatusOutput]
 
+    var cacheTokens: Int { cacheReadTokens + cacheCreationTokens }
+
     init(
         generatedAt: String,
         databasePath: String,
@@ -171,7 +176,8 @@ struct RebuildOutput: Encodable {
         promptCount: Int,
         inputTokens: Int,
         outputTokens: Int,
-        cacheTokens: Int,
+        cacheReadTokens: Int,
+        cacheCreationTokens: Int,
         warningCount: Int,
         rebuildError: String?,
         checkpointEventsAdded: Int?,
@@ -189,8 +195,9 @@ struct RebuildOutput: Encodable {
         self.promptCount = promptCount
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
-        self.cacheTokens = cacheTokens
-        self.totalTokens = inputTokens + outputTokens + cacheTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheCreationTokens = cacheCreationTokens
+        self.totalTokens = inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens
         self.warningCount = warningCount
         self.rebuildError = rebuildError
         self.checkpointEventsAdded = checkpointEventsAdded

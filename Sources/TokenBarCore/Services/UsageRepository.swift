@@ -187,7 +187,7 @@ public struct UsageRepository: Sendable {
         try database.queue.read { db in
             let rows = try Row.fetchAll(db, sql: """
             SELECT id, agent, project_path, project_name, session_id, timestamp,
-                   input_tokens, output_tokens, cache_tokens, reasoning_tokens, model_name,
+                   input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens, model_name,
                    source_path, parser, confidence
             FROM usage_events
             ORDER BY timestamp ASC, id ASC
@@ -214,7 +214,7 @@ public struct UsageRepository: Sendable {
             if let limit {
                 rows = try Row.fetchAll(db, sql: """
                 SELECT id, agent, project_path, project_name, session_id, timestamp,
-                       input_tokens, output_tokens, cache_tokens, reasoning_tokens, model_name,
+                       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens, model_name,
                        source_path, parser, confidence
                 FROM usage_events
                 WHERE project_name = ?
@@ -224,7 +224,7 @@ public struct UsageRepository: Sendable {
             } else {
                 rows = try Row.fetchAll(db, sql: """
                 SELECT id, agent, project_path, project_name, session_id, timestamp,
-                       input_tokens, output_tokens, cache_tokens, reasoning_tokens, model_name,
+                       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens, model_name,
                        source_path, parser, confidence
                 FROM usage_events
                 WHERE project_name = ?
@@ -585,7 +585,8 @@ public struct UsageRepository: Sendable {
                    COALESCE(model_name, '') AS model_name,
                    SUM(input_tokens) AS input_tokens,
                    SUM(output_tokens) AS output_tokens,
-                   SUM(cache_tokens) AS cache_tokens
+                   SUM(cache_read_tokens) AS cache_read_tokens,
+                   SUM(cache_creation_tokens) AS cache_creation_tokens
             FROM usage_events
             WHERE timestamp >= ? AND timestamp < ?
             GROUP BY project_name, agent, COALESCE(model_name, '')
@@ -606,7 +607,8 @@ public struct UsageRepository: Sendable {
                     summary: UsageSummary(
                         inputTokens: row["input_tokens"],
                         outputTokens: row["output_tokens"],
-                        cacheTokens: row["cache_tokens"]
+                        cacheReadTokens: row["cache_read_tokens"],
+                        cacheCreationTokens: row["cache_creation_tokens"]
                     )
                 )
             }
@@ -724,13 +726,15 @@ public struct UsageRepository: Sendable {
                 UsageSummary(
                     inputTokens: 0,
                     outputTokens: 0,
-                    cacheTokens: 0
+                    cacheReadTokens: 0,
+                    cacheCreationTokens: 0
                 )
             ) { total, day in
                 UsageSummary(
                     inputTokens: total.inputTokens + day.summary.inputTokens,
                     outputTokens: total.outputTokens + day.summary.outputTokens,
-                    cacheTokens: total.cacheTokens + day.summary.cacheTokens
+                    cacheReadTokens: total.cacheReadTokens + day.summary.cacheReadTokens,
+                    cacheCreationTokens: total.cacheCreationTokens + day.summary.cacheCreationTokens
                 )
             }.focus
 
@@ -793,16 +797,17 @@ public struct UsageRepository: Sendable {
             SELECT agent,
                    SUM(input_tokens) AS input_tokens,
                    SUM(output_tokens) AS output_tokens,
-                   SUM(cache_tokens) AS cache_tokens
+                   SUM(cache_read_tokens) AS cache_read_tokens,
+                   SUM(cache_creation_tokens) AS cache_creation_tokens
             FROM usage_events
             WHERE project_name = ? AND timestamp >= ? AND timestamp < ?
             GROUP BY agent
-            ORDER BY (SUM(input_tokens) + SUM(output_tokens) + SUM(cache_tokens)) DESC, agent ASC
+            ORDER BY (SUM(input_tokens) + SUM(output_tokens) + SUM(cache_read_tokens) + SUM(cache_creation_tokens)) DESC, agent ASC
             LIMIT ?
             """, arguments: [projectName, windowStart.tokenBarMillisecondsSince1970, windowEnd.tokenBarMillisecondsSince1970, topAgentCount])
             let agentShare = agentRows.map { row in
                 let name = agentDisplayName(row["agent"] as String)
-                let totalTokens = ((row["input_tokens"] as Int?) ?? 0) + ((row["output_tokens"] as Int?) ?? 0) + ((row["cache_tokens"] as Int?) ?? 0)
+                let totalTokens = ((row["input_tokens"] as Int?) ?? 0) + ((row["output_tokens"] as Int?) ?? 0) + ((row["cache_read_tokens"] as Int?) ?? 0) + ((row["cache_creation_tokens"] as Int?) ?? 0)
                 return AgentShareSlice(
                     name: name,
                     totalTokens: totalTokens,
@@ -816,7 +821,8 @@ public struct UsageRepository: Sendable {
                    MAX(timestamp) AS timestamp,
                    SUM(input_tokens) AS input_tokens,
                    SUM(output_tokens) AS output_tokens,
-                   SUM(cache_tokens) AS cache_tokens
+                   SUM(cache_read_tokens) AS cache_read_tokens,
+                   SUM(cache_creation_tokens) AS cache_creation_tokens
             FROM usage_events
             WHERE project_name = ? AND timestamp >= ? AND timestamp < ?
             GROUP BY session_id, agent
@@ -831,7 +837,8 @@ public struct UsageRepository: Sendable {
                     summary: UsageSummary(
                         inputTokens: row["input_tokens"],
                         outputTokens: row["output_tokens"],
-                        cacheTokens: row["cache_tokens"]
+                        cacheReadTokens: row["cache_read_tokens"],
+                        cacheCreationTokens: row["cache_creation_tokens"]
                     )
                 )
             }
@@ -1047,8 +1054,8 @@ public struct UsageRepository: Sendable {
         try db.execute(
             sql: """
             INSERT OR IGNORE INTO usage_events
-            (id, agent, project_path, project_name, session_id, timestamp, input_tokens, output_tokens, cache_tokens, reasoning_tokens, model_name, source_path, parser, confidence)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, agent, project_path, project_name, session_id, timestamp, input_tokens, output_tokens, cache_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens, model_name, source_path, parser, confidence)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             arguments: [
                 event.id,
@@ -1060,6 +1067,8 @@ public struct UsageRepository: Sendable {
                 event.inputTokens,
                 event.outputTokens,
                 event.cacheTokens,
+                event.cacheReadTokens,
+                event.cacheCreationTokens,
                 event.reasoningTokens,
                 event.modelName,
                 event.sourcePath,
@@ -1146,14 +1155,16 @@ public struct UsageRepository: Sendable {
         let row = try Row.fetchOne(db, sql: """
         SELECT COALESCE(SUM(input_tokens), 0) AS input_tokens,
                COALESCE(SUM(output_tokens), 0) AS output_tokens,
-               COALESCE(SUM(cache_tokens), 0) AS cache_tokens
+               COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+               COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens
         FROM usage_events
         \(whereClause)
         """, arguments: arguments)
         return UsageSummary(
             inputTokens: row?["input_tokens"] ?? 0,
             outputTokens: row?["output_tokens"] ?? 0,
-            cacheTokens: row?["cache_tokens"] ?? 0
+            cacheReadTokens: row?["cache_read_tokens"] ?? 0,
+            cacheCreationTokens: row?["cache_creation_tokens"] ?? 0
         )
     }
 
@@ -1199,7 +1210,8 @@ public struct UsageRepository: Sendable {
         SELECT days.day_index AS day_index,
                COALESCE(SUM(usage_events.input_tokens), 0) AS input_tokens,
                COALESCE(SUM(usage_events.output_tokens), 0) AS output_tokens,
-               COALESCE(SUM(usage_events.cache_tokens), 0) AS cache_tokens
+               COALESCE(SUM(usage_events.cache_read_tokens), 0) AS cache_read_tokens,
+               COALESCE(SUM(usage_events.cache_creation_tokens), 0) AS cache_creation_tokens
         FROM days
         LEFT JOIN usage_events
           ON usage_events.timestamp >= days.start_ms
@@ -1215,14 +1227,15 @@ public struct UsageRepository: Sendable {
             summariesByIndex[row["day_index"] as Int] = UsageSummary(
                 inputTokens: row["input_tokens"],
                 outputTokens: row["output_tokens"],
-                cacheTokens: row["cache_tokens"]
+                cacheReadTokens: row["cache_read_tokens"],
+                cacheCreationTokens: row["cache_creation_tokens"]
             )
         }
 
         let days = dayRanges.enumerated().map { index, range in
             UsageDay(
                 date: range.date,
-                summary: summariesByIndex[index] ?? UsageSummary(inputTokens: 0, outputTokens: 0, cacheTokens: 0),
+                summary: summariesByIndex[index] ?? UsageSummary(inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0),
                 intensity: 0
             )
         }
@@ -1258,11 +1271,12 @@ public struct UsageRepository: Sendable {
         SELECT project_name AS name,
                SUM(input_tokens) AS input_tokens,
                SUM(output_tokens) AS output_tokens,
-               SUM(cache_tokens) AS cache_tokens
+               SUM(cache_read_tokens) AS cache_read_tokens,
+               SUM(cache_creation_tokens) AS cache_creation_tokens
         FROM usage_events
         WHERE timestamp >= ? AND timestamp < ?
         GROUP BY project_name
-        ORDER BY (SUM(input_tokens) + SUM(output_tokens) + SUM(cache_tokens)) DESC, name ASC
+        ORDER BY (SUM(input_tokens) + SUM(output_tokens) + SUM(cache_read_tokens) + SUM(cache_creation_tokens)) DESC, name ASC
         \(limitSQL)
         """, arguments: arguments)
         return rows.map { row in
@@ -1271,7 +1285,8 @@ public struct UsageRepository: Sendable {
                 summary: UsageSummary(
                     inputTokens: row["input_tokens"],
                     outputTokens: row["output_tokens"],
-                    cacheTokens: row["cache_tokens"]
+                    cacheReadTokens: row["cache_read_tokens"],
+                    cacheCreationTokens: row["cache_creation_tokens"]
                 )
             )
         }
@@ -1338,7 +1353,8 @@ public struct UsageRepository: Sendable {
                agent,
                SUM(input_tokens) AS input_tokens,
                SUM(output_tokens) AS output_tokens,
-               SUM(cache_tokens) AS cache_tokens
+               SUM(cache_read_tokens) AS cache_read_tokens,
+               SUM(cache_creation_tokens) AS cache_creation_tokens
         FROM usage_events
         \(whereClause)
         GROUP BY COALESCE(model_name, ''), agent
@@ -1355,7 +1371,8 @@ public struct UsageRepository: Sendable {
             let summary = UsageSummary(
                 inputTokens: row["input_tokens"],
                 outputTokens: row["output_tokens"],
-                cacheTokens: row["cache_tokens"]
+                cacheReadTokens: row["cache_read_tokens"],
+                cacheCreationTokens: row["cache_creation_tokens"]
             )
             let rawModelName = row["model_name"] as String?
             let modelName = rawModelName?.isEmpty == false ? rawModelName! : agent.displayName
@@ -1393,11 +1410,12 @@ public struct UsageRepository: Sendable {
         SELECT \(groupColumn) AS name,
                SUM(input_tokens) AS input_tokens,
                SUM(output_tokens) AS output_tokens,
-               SUM(cache_tokens) AS cache_tokens
+               SUM(cache_read_tokens) AS cache_read_tokens,
+               SUM(cache_creation_tokens) AS cache_creation_tokens
         FROM usage_events
         WHERE timestamp >= ? AND timestamp < ? \(projectFilter)
         GROUP BY \(groupColumn)
-        ORDER BY (SUM(input_tokens) + SUM(output_tokens) + SUM(cache_tokens)) DESC, name ASC
+        ORDER BY (SUM(input_tokens) + SUM(output_tokens) + SUM(cache_read_tokens) + SUM(cache_creation_tokens)) DESC, name ASC
         LIMIT ?
         """, arguments: arguments)
         return rows.map { row in
@@ -1406,7 +1424,8 @@ public struct UsageRepository: Sendable {
                 summary: UsageSummary(
                     inputTokens: row["input_tokens"],
                     outputTokens: row["output_tokens"],
-                    cacheTokens: row["cache_tokens"]
+                    cacheReadTokens: row["cache_read_tokens"],
+                    cacheCreationTokens: row["cache_creation_tokens"]
                 )
             )
         }
@@ -1429,7 +1448,8 @@ public struct UsageRepository: Sendable {
             timestamp: .tokenBarDate(millisecondsSince1970: row["timestamp"]),
             inputTokens: row["input_tokens"],
             outputTokens: row["output_tokens"],
-            cacheTokens: row["cache_tokens"],
+            cacheReadTokens: row["cache_read_tokens"],
+            cacheCreationTokens: row["cache_creation_tokens"],
             reasoningTokens: row["reasoning_tokens"],
             modelName: row["model_name"],
             sourcePath: row["source_path"],

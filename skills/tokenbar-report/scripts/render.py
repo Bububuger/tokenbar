@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 """render.py — turn the priced payload + per-persona narrative payloads into
-six themed HTML reports plus an index landing page.
+three themed HTML reports plus an index landing page.
 
 CLI:
     render.py --payload aggregate.json --narratives narratives.json \\
               --output-dir ~/Desktop/tokenbar-report-YYYY-MM-DD/ \\
               --themes-dir <skill-dir>/assets/themes
 
-v5: personas are xiuxian / wuxia / santi / shuihu / talk / jojo. The
-shared "dossier" slot is gone — each persona owns its full 5-section
-structure, including a题材化的`identity_card`narrative authored by its
-subagent.
+v6: personas are jojo / bleach / hxh. Each persona owns its full 5-section
+structure, including a 题材化的 `identity_card` narrative authored by its
+subagent. The shared "dossier" slot was removed in v5 and stays gone.
 
 `narratives.json` shape:
-    { "xiuxian": { ...persona blurbs... }, "wuxia": {...}, ... }
+    { "jojo": { ...persona blurbs... }, "bleach": {...}, "hxh": {...} }
 
 Every theme template file (assets/themes/<key>.html) contains `{{placeholder}}`
 tokens. The substitution is purely string-level — no logic, no escaping by

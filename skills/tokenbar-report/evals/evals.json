@@ -5,24 +5,28 @@
       "id": 1,
       "name": "all-time-chinese",
       "prompt": "帮我做个 token 年度报告",
-      "expected_output": "Folder at ~/Desktop/tokenbar-report-YYYY-MM-DD/ containing index.html (interactive card-draw landing) + 6 themed persona HTML files (01-xiuxian through 06-jojo) + data.json. Narrative in Chinese. Window covers full TokenBar data range (all-time).",
+      "expected_output": "Folder at ~/Desktop/tokenbar-report-YYYY-MM-DD/ containing index.html (interactive card-draw landing) + 3 themed persona HTML files (01-jojo.html / 02-bleach.html / 03-hxh.html) + data.json. Narrative in Chinese. Window covers full TokenBar data range (all-time).",
       "files": [],
       "assertions": [
         { "text": "output folder exists under ~/Desktop matching tokenbar-report-* pattern" },
-        { "text": "exactly 6 persona HTML files present (01-xiuxian.html, 02-wuxia.html, 03-santi.html, 04-shuihu.html, 05-talk.html, 06-jojo.html)" },
-        { "text": "index.html present, contains card-draw JS (a 'drawBtn' element), and links to all 6 persona files" },
-        { "text": "06-jojo.html contains the SVG radar (class 'stand-radar'), psyche-card blocks, stand-card block, and a stand-card-cry block" },
-        { "text": "06-jojo.html persona badge reads 'JOJO' (not '人性透视' from v4) — grep for the badge contents" },
-        { "text": "06-jojo.html stand-card-name is one of the S-tier whitelist entries (e.g. ザ・ワールド / スタープラチナ / クレイジー・ダイヤモンド / ゴールド・エクスペリエンス / キング・クリムゾン / メイド・イン・ヘブン / タスク / D4C / キラークイーン / etc.). NEVER an invented name like 'BLACKOUT MIDNIGHT'." },
+        { "text": "exactly 3 persona HTML files present (01-jojo.html, 02-bleach.html, 03-hxh.html)" },
+        { "text": "index.html present, contains card-draw JS (a 'drawBtn' element), and links to all 3 persona files" },
+        { "text": "01-jojo.html contains the SVG stand-stats radar (class 'stand-radar'), psyche-card blocks, stand-card block, and a stand-card-cry block" },
+        { "text": "01-jojo.html persona badge reads 'JOJO' — grep for the badge contents" },
+        { "text": "01-jojo.html stand-card-name is one of the S-tier whitelist entries (e.g. ザ・ワールド / スタープラチナ / クレイジー・ダイヤモンド / ゴールド・エクスペリエンス / キング・クリムゾン / メイド・イン・ヘブン / タスク act 4 / D4C / キラークイーン / etc.). NEVER an invented name like 'BLACKOUT MIDNIGHT'." },
+        { "text": "02-bleach.html contains a reiatsu-stats / 灵压 block, a psyche-card or 心相 block, and a zanpakuto-card block naming a real zanpakuto (千本桜景厳 / 天鎖斬月 / 流刃若火 / 鏡花水月 / 双殛 / etc.)" },
+        { "text": "02-bleach.html persona badge reads '死神' (BLEACH)" },
+        { "text": "03-hxh.html contains a nen-assessment block (hex radar over 6 系: 強化/操作/具現化/放出/変化/特質), an ability-design block with a named ability + 制约と誓约, and a nen-progression block" },
+        { "text": "03-hxh.html persona badge reads '猎人' (HxH)" },
         { "text": "data.json present, parses as JSON, has cost.totalUSD > 0 and dataWindow.eventCount > 0" },
         { "text": "every persona HTML opens in a browser without console errors" },
         { "text": "no leftover '{{placeholder}}' tokens anywhere in any rendered HTML" },
         { "text": "narrative text in every persona is in Chinese (matching the prompt's language)" },
-        { "text": "the 6 persona themes are visually distinct — at minimum, their <style> blocks differ by > 60% content hash" },
-        { "text": "no shared 'profile-card' dossier section exists in any persona HTML — v5 killed the shared dossier (search for 'profile-card' class should miss in all 6 files)" },
-        { "text": "each persona renders its own题材化 identity_card section: xiuxian uses 境界/灵气 language; wuxia uses 门派/内功 language; santi uses 文明/智子 language; shuihu uses 108/绰号 language; talk uses 段子/开场 language; jojo uses 替身/dossier language" },
-        { "text": "lens isolation: xiuxian must not mention 替身/A-E/智子/108/段子/门派; wuxia must not mention 替身/境界/智子/108/段子; santi must not mention 替身/境界/门派/108/段子; shuihu must not mention 替身/境界/智子/门派/段子; talk must not mention 替身/境界/智子/门派/108; jojo must not mention 境界/灵气/门派/智子/108/段子" },
-        { "text": "CRITICAL: max pairwise content overlap across the 6 rendered persona HTML files (narrative text only, ignoring <style> + <script> + chrome) must be STRICTLY LESS THAN 0.30 (30%) measured via scripts/measure_overlap.py — this is the v5 hard requirement that motivated the redesign" }
+        { "text": "the 3 persona themes are visually distinct — at minimum, their <style> blocks differ by > 60% content hash" },
+        { "text": "no shared 'profile-card' dossier section exists in any persona HTML — v5+ killed the shared dossier (search for 'profile-card' class should miss in all 3 files); each persona must own its identity_card section" },
+        { "text": "each persona renders its own题材化 identity_card section: jojo uses 替身/dossier language; bleach uses 護廷十三隊/灵压/斩魄刀 language; hxh uses 念能力者/系/オーラ language" },
+        { "text": "lens isolation: jojo must not mention 斩魄刀/灵压/卍解/念能力/系/オーラ; bleach must not mention 替身/A-E 六维/念能力/系/オーラ; hxh must not mention 替身/A-E 六维/斩魄刀/卍解/灵压" },
+        { "text": "CRITICAL: max pairwise content overlap across the 3 rendered persona HTML files (narrative text only, ignoring <style> + <script> + chrome) must be STRICTLY LESS THAN 0.30 (30%) measured via scripts/measure_overlap.py — this is the v6 hard requirement" }
       ]
     },
     {
@@ -33,7 +37,7 @@
       "files": [],
       "assertions": [
         { "text": "output folder exists under ~/Desktop matching tokenbar-report-* pattern" },
-        { "text": "exactly 6 persona HTML files (01-xiuxian, 02-wuxia, 03-santi, 04-shuihu, 05-talk, 06-jojo) + index.html present" },
+        { "text": "exactly 3 persona HTML files (01-jojo, 02-bleach, 03-hxh) + index.html present" },
         { "text": "date_range_days in the report equals 30 (±1)" },
         { "text": "total_tokens in the report is strictly less than the all-time figure" },
         { "text": "before generation, the assistant confirmed the time window with the user OR explicitly stated the inferred window" },
@@ -49,10 +53,9 @@
       "files": [],
       "assertions": [
         { "text": "output folder exists under ~/Desktop matching tokenbar-report-* pattern" },
-        { "text": "exactly 6 persona HTML files + index.html present" },
-        { "text": "narrative text in every persona is in English (matching the prompt's language). 题材-specific noun tags (修仙 → 'Cultivation', 武侠 → 'Wuxia Chronicle', 三体 → 'Dark Forest', 水浒 → 'Outlaws of the Marsh', 脱口秀 → 'Stand-up Special', JOJO → 'JOJO') may stay; the narrative prose around them must be English." },
+        { "text": "exactly 3 persona HTML files + index.html present" },
+        { "text": "narrative text in every persona is in English (matching the prompt's language). Title-bar persona badges may stay as 'JOJO' / 'BLEACH' / 'HxH'; 题材-specific OWNED nouns (替身 / 斩魄刀 / 念能力 / 系) may stay as the canonical Japanese/Chinese terms; the surrounding prose must be English." },
         { "text": "date_range_days is between 80 and 100 (i.e. roughly a quarter)" },
-        { "text": "the talk persona uses English stand-up cadence (pauses marked by (beat) or similar)" },
         { "text": "max pairwise overlap < 0.30 (measure_overlap.py)" }
       ]
     }

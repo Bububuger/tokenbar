@@ -2,14 +2,15 @@
 """measure_overlap.py — measure cross-persona content overlap on a rendered
 report folder.
 
-Reads the 6 persona HTML files (01-*.html through 06-*.html), strips
-<style>/<script>/HTML tags + numbers/symbols, tokenizes into character
-3-grams (CJK-friendly), and computes pairwise Jaccard similarity across all
-15 pairs. Prints the matrix + max overlap, and exits non-zero if max ≥
-threshold.
+Reads the persona HTML files (01-*.html, 02-*.html, ...) in the report
+directory, strips <style>/<script>/HTML tags + numbers/symbols, tokenizes
+into character 3-grams (CJK-friendly), and computes pairwise Jaccard
+similarity across every pair. Prints the matrix + max overlap, and exits
+non-zero if max ≥ threshold.
 
-This is the v5 gating metric: max pairwise overlap must be < 0.30 for the
-report to be considered "lens-isolated".
+This is the lens-isolation gating metric (introduced in v5, kept in v6):
+max pairwise overlap must be < 0.30 for the report to be considered
+"lens-isolated". v6 has 3 personas (jojo / bleach / hxh) → 3 pairs.
 
 CLI:
     measure_overlap.py <report_dir> [--threshold 0.30] [--json]
@@ -77,12 +78,16 @@ def jaccard(a: set, b: set) -> float:
 
 
 def find_persona_files(report_dir: pathlib.Path) -> List[Tuple[str, pathlib.Path]]:
-    """Return [(persona_key, path)] for the 6 persona HTML files in canonical order."""
-    candidates = sorted(report_dir.glob("0[1-6]-*.html"))
+    """Return [(persona_key, path)] for the persona HTML files in canonical order.
+
+    Matches `<NN>-<key>.html` (NN any 2-digit prefix). v6 ships 3 files
+    (01-jojo / 02-bleach / 03-hxh); the loose glob keeps the script
+    forward-compatible if the lineup ever changes.
+    """
+    candidates = sorted(report_dir.glob("[0-9][0-9]-*.html"))
     out = []
     for p in candidates:
-        # Filename is like "01-xiuxian.html" — extract the key
-        stem = p.stem  # "01-xiuxian"
+        stem = p.stem  # e.g. "01-jojo"
         if "-" in stem:
             key = stem.split("-", 1)[1]
             out.append((key, p))

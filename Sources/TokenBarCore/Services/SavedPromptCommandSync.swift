@@ -72,7 +72,10 @@ public struct SavedPromptCommandSync: Sendable {
     }
 
     private func fileURL(forSlug slug: String) -> URL {
-        commandsRoot.appendingPathComponent("\(slug).md")
+        let sanitized = slug
+            .replacingOccurrences(of: "..", with: "")
+            .replacingOccurrences(of: "/", with: "-")
+        return commandsRoot.appendingPathComponent("\(sanitized).md")
     }
 
     /// Serialize a SavedPrompt to the on-disk slash-command file format.

@@ -45,7 +45,7 @@ struct ClaudeUsageParserTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let file = root
-            .appendingPathComponent("-Users-dev-Projects-my-cli-tool", isDirectory: true)
+            .appendingPathComponent("-Users-dev-Documents-workspace-projects-my-cli-tool", isDirectory: true)
             .appendingPathComponent("session-1", isDirectory: true)
             .appendingPathComponent("subagents", isDirectory: true)
             .appendingPathComponent("agent-a123.jsonl")
@@ -69,18 +69,18 @@ struct ClaudeUsageParserTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let file = root
-            .appendingPathComponent("-Users-dev-Projects-my-cli-tool", isDirectory: true)
+            .appendingPathComponent("-Users-dev-Documents-workspace-projects-my-cli-tool", isDirectory: true)
             .appendingPathComponent("session-1.jsonl")
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try #"""
-        {"type":"assistant","timestamp":"2026-05-18T10:11:12.000Z","cwd":"/Users/dev/Projects/my-cli-tool/.claude/worktrees/agent-a123","sessionId":"s1","message":{"model":"claude-model","usage":{"input_tokens":12,"output_tokens":34,"cache_creation_input_tokens":0,"cache_read_input_tokens":56}}}
+        {"type":"assistant","timestamp":"2026-05-18T10:11:12.000Z","cwd":"/Users/dev/Documents/workspace/projects/my-cli-tool/.claude/worktrees/agent-a123","sessionId":"s1","message":{"model":"claude-model","usage":{"input_tokens":12,"output_tokens":34,"cache_creation_input_tokens":0,"cache_read_input_tokens":56}}}
         """#.write(to: file, atomically: true, encoding: .utf8)
 
         let slug = ClaudeDataSource.projectSlug(for: file, rootDirectory: root.path)
         let result = try ClaudeUsageParser.parse(fileURL: file, fallbackProjectSlug: slug)
 
         #expect(result.events.map(\.projectName) == ["my-cli-tool"])
-        #expect(result.events.map(\.projectPath) == ["/Users/dev/Projects/my-cli-tool"])
+        #expect(result.events.map(\.projectPath) == ["/Users/dev/Documents/workspace/projects/my-cli-tool"])
     }
 
     private func fixtureURL(named name: String) throws -> URL {

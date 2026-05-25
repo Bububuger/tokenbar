@@ -19,9 +19,9 @@ public enum SampleUsageProvider {
         ]
 
         let projects: [(name: String, path: String)] = [
-            ("tokenbar",   "/Users/sample/projects/tokenbar"),
-            ("my-cli-tool", "/Users/sample/projects/my-cli-tool"),
-            ("side-project",    "/Users/sample/projects/side-project"),
+            ("tokenbar",      "/Users/sample/projects/tokenbar"),
+            ("my-cli-tool",   "/Users/sample/projects/my-cli-tool"),
+            ("side-project",  "/Users/sample/projects/side-project"),
         ]
 
         // 7 days × 4 hours-of-day × 3 agents = 84 sample events.

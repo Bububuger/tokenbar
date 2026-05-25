@@ -54,8 +54,8 @@ struct ClaudeDataSourceTests {
 
     @Test
     func readableProjectNamePreservesHyphenatedWorkspaceSlugs() {
-        #expect(ClaudeDataSource.readableProjectName(fromSlug: "-Users-dev-Projects-my-cli-tool") == "my-cli-tool")
-        #expect(ClaudeDataSource.readableProjectName(fromSlug: "-Users-dev-Projects-my-app--claude-worktrees-fix-data-source-config") == "fix-data-source-config")
+        #expect(ClaudeDataSource.readableProjectName(fromSlug: "-Users-dev-Documents-workspace-projects-my-cli-tool") == "my-cli-tool")
+        #expect(ClaudeDataSource.readableProjectName(fromSlug: "-Users-dev-Documents-workspace-projects-my-app--claude-worktrees-fix-data-source-config") == "fix-data-source-config")
     }
 
     @Test

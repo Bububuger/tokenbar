@@ -23,6 +23,10 @@ docs/design-prd/tokenbar/uploads/
 docs/refactor-*.md
 docs/article-draft.md
 
+# Security audit checklist — local tracking only, never pushed.
+SECURITY-FIX-CHECKLIST.md
+CACHE-SPLIT-CHECKLIST.md
+
 # Claude Code working state (scheduled-task locks, worktrees etc.) —
 # created automatically when claude-code runs against this repo.
 .claude/

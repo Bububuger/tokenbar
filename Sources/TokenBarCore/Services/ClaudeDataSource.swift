@@ -103,8 +103,8 @@ public enum ClaudeDataSource {
     private static func readableProjectNameFromKnownPathSlug(_ slug: String) -> String? {
         let normalized = slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         let markers = [
-            "Projects-",
-            "Projects-",
+            "claude-workspace-",
+            "codex-workspace-",
             "Documents-workspace-projects-",
             "Documents-workspace-",
         ]

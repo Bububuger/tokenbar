@@ -1143,7 +1143,7 @@ struct Sprint8StorageTests {
     func customSourceDiscoversNestedClaudeProjectsRecursively() async throws {
         let directory = temporaryDirectory()
         let nested = directory
-            .appendingPathComponent("-Users-dev-Projects-tokenbar")
+            .appendingPathComponent("-Users-dev-Documents-workspace-projects-tokenbar")
             .appendingPathComponent("session-1")
             .appendingPathComponent("subagents")
         try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)

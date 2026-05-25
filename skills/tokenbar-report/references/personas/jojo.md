@@ -30,7 +30,7 @@
 
 不要照搬 personality_profile 的 chip 字段。用 JOJO 的临床语言**重新叙述**:
 
-> 「ザ・ワールド」型替身使者档案 #{USER_ID}  
+> 「ザ・ワールド」型替身使者档案 #{{USER_ID}}  
 > 你的精神能量已经达到 [mastery 语义化形容]。你在 [intensity 语义化] 的强度下
 > 运转，[work_style.tempo / preference / focus / scheduling 各自一句临床注解]。
 > 工具栈 [tooling 语义化]——你是 [polyglot / 单线程 / 双刃流]。

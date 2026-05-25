@@ -220,9 +220,7 @@ TokenBar is intentionally small — the bar for changes is "does it still feel l
 
 TokenBar is licensed under the **[Apache License, Version 2.0](LICENSE)** — permissive, includes an explicit patent grant, compatible with the MIT-licensed dependencies we ship against. See [`NOTICE`](NOTICE) for attribution.
 
-Separately, [`LEGAL.md`](LEGAL.md) establishes a **comment-language priority** rule: when Chinese-language source-code comments conflict with translations, the Chinese version is authoritative. This is a documentation convention, not a license term.
-
-> **中文**：TokenBar 采用 **[Apache License 2.0](LICENSE)** —— 宽松、含显式专利授权、与依赖项的 MIT 协议兼容。三方致谢见 [`NOTICE`](NOTICE)。<br/>另：[`LEGAL.md`](LEGAL.md) 规定**代码注释优先语言**为中文（当中文注释与其它语言注释冲突时以中文为准），属文档约定，不是许可证条款。
+> **中文**：TokenBar 采用 **[Apache License 2.0](LICENSE)** —— 宽松、含显式专利授权、与依赖项的 MIT 协议兼容。三方致谢见 [`NOTICE`](NOTICE)。
 
 <br />
 

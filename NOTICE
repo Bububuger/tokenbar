@@ -8,7 +8,3 @@ This product includes software developed by:
 
 This product is licensed under the Apache License, Version 2.0.
 See the LICENSE file for the full license text.
-
-Comment-language priority: when Chinese-language comments in the source
-code conflict with comments in other languages, the Chinese-language
-comments are authoritative. See LEGAL.md.

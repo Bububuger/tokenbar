@@ -5,11 +5,11 @@ import Testing
 
 struct Sprint8StorageTests {
     @Test
-    func builtInSourcesIncludesAllSixAgents() {
+    func builtInSourcesIncludesAllSevenAgents() {
         let sources = BuiltInSources.all()
         let agents = Set(sources.map(\.agent))
-        #expect(sources.count == 6)
-        #expect(agents == Set<AgentKind>([.codex, .claudeCode, .hermes, .geminiCLI, .openclaw, .openCode]))
+        #expect(sources.count == 7)
+        #expect(agents == Set<AgentKind>([.codex, .claudeCode, .hermes, .geminiCLI, .openclaw, .openCode, .warp]))
     }
 
     /// Regression: prompt search must hit the FTS5 index (v10 migration),

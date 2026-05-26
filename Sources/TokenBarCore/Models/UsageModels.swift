@@ -7,6 +7,7 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
     case hermes
     case openclaw
     case openCode
+    case warp
     case custom
 
     public var displayName: String {
@@ -23,6 +24,8 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
             "OpenClaw"
         case .openCode:
             "OpenCode"
+        case .warp:
+            "Warp"
         case .custom:
             "Custom"
         }
@@ -42,6 +45,8 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
             2.50
         case .openCode:
             0.00
+        case .warp:
+            2.00
         case .custom:
             0.15
         }
@@ -55,6 +60,7 @@ public enum ParserKind: String, Sendable, Hashable {
     case gemini
     case openclaw
     case openCode
+    case warp
     case sample
     case custom
 }

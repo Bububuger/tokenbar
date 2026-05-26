@@ -665,6 +665,14 @@ private struct DiagnosticsDerivedRows: Sendable, Hashable {
                     lastIndexedAt: lastIndexedAt,
                     note: "session-level model attribution"
                 ),
+                builtInSourceRow(
+                    id: "builtin|warp",
+                    name: "Warp",
+                    path: WarpUsageEventSource.discoverDatabasePath() ?? "~/Library/Group Containers/*.dev.warp/.../warp.sqlite",
+                    count: builtInCounts[.warp, default: 0],
+                    lastIndexedAt: lastIndexedAt,
+                    note: "conversation-level total tokens"
+                ),
             ]
             sourceRows = builtInRows + customSourceRows(
                 customSources: customSources,
@@ -793,6 +801,9 @@ private struct DiagnosticsDerivedRows: Sendable, Hashable {
         }
         if sourceName.contains("hermes") || rootPath.contains(".hermes") {
             return builtInCounts[.hermes, default: 0]
+        }
+        if sourceName.contains("warp") || rootPath.contains("dev.warp") {
+            return builtInCounts[.warp, default: 0]
         }
         return 0
     }

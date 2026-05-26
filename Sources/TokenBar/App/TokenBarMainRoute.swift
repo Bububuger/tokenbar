@@ -1,5 +1,6 @@
 enum TokenBarMainRoute: Equatable, Hashable {
     case today
+    case library
     case diagnostics
     case settings
     case savedPrompts
@@ -11,6 +12,8 @@ extension TokenBarMainRoute {
         switch self {
         case .today:
             "overview"
+        case .library:
+            "library"
         case .diagnostics:
             "diagnostics"
         case .settings:

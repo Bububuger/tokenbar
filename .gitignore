@@ -30,3 +30,6 @@ CACHE-SPLIT-CHECKLIST.md
 # Claude Code working state (scheduled-task locks, worktrees etc.) —
 # created automatically when claude-code runs against this repo.
 .claude/
+
+# Design assets — local reference only, not tracked in git.
+design/

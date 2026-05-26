@@ -485,13 +485,8 @@ struct ProjectDetailView: View {
         return TokenBarCard {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Prompt History")
-                            .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        Text(promptHistorySubtitle)
-                            .font(.caption2)
-                            .foregroundStyle(TokenBarStyle.muted)
-                    }
+                    Text("Prompt History")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
                     Spacer()
                     Button {
                         revealPrompts.toggle()
@@ -513,30 +508,35 @@ struct ProjectDetailView: View {
 
                 promptHistoryControls
 
-                if isPromptHistoryLoading && !hasPromptHistoryLoaded {
-                    Text("Preparing prompt index.")
-                        .font(.caption)
-                        .foregroundStyle(TokenBarStyle.muted)
-                } else if promptHistoryPage.totalCount == 0 {
-                    Text(promptEmptyMessage)
-                        .font(.caption)
-                        .foregroundStyle(TokenBarStyle.muted)
-                } else if pagePrompts.isEmpty {
-                    Text("No prompts match the current search or cluster.")
-                        .font(.caption)
-                        .foregroundStyle(TokenBarStyle.muted)
-                } else {
-                    HStack(alignment: .top, spacing: 12) {
-                        promptListPane(
-                            pagePrompts: pagePrompts,
-                            currentSelectedPromptID: currentSelectedPrompt?.id
-                        )
-                        if let prompt = currentSelectedPrompt {
-                            promptDetailPane(prompt)
+                Group {
+                    if isPromptHistoryLoading && !hasPromptHistoryLoaded {
+                        Text("Preparing prompt index.")
+                            .font(.caption)
+                            .foregroundStyle(TokenBarStyle.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if promptHistoryPage.totalCount == 0 {
+                        Text(promptEmptyMessage)
+                            .font(.caption)
+                            .foregroundStyle(TokenBarStyle.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if pagePrompts.isEmpty {
+                        Text("No prompts match the current search or cluster.")
+                            .font(.caption)
+                            .foregroundStyle(TokenBarStyle.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        HStack(alignment: .top, spacing: 12) {
+                            promptListPane(
+                                pagePrompts: pagePrompts,
+                                currentSelectedPromptID: currentSelectedPrompt?.id
+                            )
+                            if let prompt = currentSelectedPrompt {
+                                promptDetailPane(prompt)
+                            }
                         }
                     }
-                    .frame(height: promptPanelHeight, alignment: .top)
                 }
+                .frame(height: promptPanelHeight, alignment: .top)
             }
         }
         .task(id: promptHistoryTaskID) {

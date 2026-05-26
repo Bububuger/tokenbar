@@ -116,6 +116,14 @@ struct PopoverView: View {
         !runtimeModel.isInitialMeasurement || popover.eventsCount > 0
     }
 
+    private var todayFillRatio: Double {
+        let today = Double(popover.today.totalTokens)
+        let prior = popover.last30Days.dropLast()
+        let peak = prior.map(\.summary.totalTokens).max() ?? 0
+        let baseline = max(Double(peak), 50_000)
+        return min(1.0, today / baseline)
+    }
+
     private var hero: some View {
         HStack(alignment: .center, spacing: 10) {
             TokenBarBrandGlyph(size: 22)
@@ -144,28 +152,6 @@ struct PopoverView: View {
                     .tbNumberTooltip(precise: popover.todayCost, window: "today (est.)")
             }
 
-            VStack(alignment: .trailing, spacing: 6) {
-                TokenBarNativeStatusBadge(
-                    text: isPaused ? "Paused" : runtimeModel.refreshState.rawValue.capitalized,
-                    color: isPaused ? TokenBarStyle.warn : TokenBarStyle.statusColor(for: runtimeModel.refreshState)
-                )
-
-                Button {
-                    TokenBarTelemetry.event("popover.refresh.click", success: true)
-                    Task { await runtimeModel.refresh() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .medium))
-                }
-                .buttonStyle(.borderless)
-                .disabled(isPaused)
-                .rotationEffect(.degrees(runtimeModel.refreshState == .refreshing ? 360 : 0))
-                .animation(runtimeModel.refreshState == .refreshing
-                           ? .linear(duration: 1.2).repeatForever(autoreverses: false)
-                           : .default,
-                           value: runtimeModel.refreshState)
-                .help(isPaused ? "Paused — resume from the menubar to refresh" : "Refresh now")
-            }
         }
     }
 
@@ -185,7 +171,7 @@ struct PopoverView: View {
                 Text("Today")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                Text(popover.yesterdayDeltaText)
+                Text("\(Int((todayFillRatio * 100).rounded()))% of peak")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
@@ -283,11 +269,11 @@ struct PopoverView: View {
             }
             UsageStackedBarChart(days: popover.last30Days, height: 38)
             HStack {
-                Text(popover.last30Days.first?.date.formatted(.dateTime.month(.abbreviated).day()) ?? "")
+                Text(popover.last30Days.first.map { tokenbarMMDD($0.date) } ?? "")
                 Spacer()
-                Text("peak \(popover.peakDay?.formatted(.dateTime.month(.abbreviated).day()) ?? "n/a")")
+                Text("peak \(popover.peakDay.map { tokenbarMMDD($0) } ?? "n/a")")
                 Spacer()
-                Text(popover.last30Days.last?.date.formatted(.dateTime.month(.abbreviated).day()) ?? "")
+                Text(popover.last30Days.last.map { tokenbarMMDD($0.date) } ?? "")
             }
             .font(.system(size: 9.5, design: .monospaced))
             .foregroundStyle(TokenBarStyle.faint)
@@ -540,14 +526,6 @@ struct PopKPI: View {
                     .font(.system(size: 10.5, weight: .semibold))
                     .tracking(0.5)
                     .foregroundStyle(TokenBarStyle.muted)
-                Spacer()
-                // CL-P2-002: trailing-aligned with fixed minWidth so the %
-                // glyph lines up across In / Out / Cache cards regardless of
-                // 1-/2-/3-digit values.
-                Text(pct)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(TokenBarStyle.faint)
-                    .frame(minWidth: 30, alignment: .trailing)
             }
             Group {
                 if let preciseValue {
@@ -560,6 +538,9 @@ struct PopKPI: View {
             .monospacedDigit()
             .lineLimit(1)
             .minimumScaleFactor(0.7)
+            Text(pct)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(TokenBarStyle.faint)
         }
         .padding(.vertical, 3)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -570,22 +551,6 @@ struct PopKPI: View {
                     .frame(height: 1)
             }
         }
-    }
-}
-
-private struct TokenBarNativeStatusBadge: View {
-    let text: String
-    let color: Color
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(color)
-                .frame(width: 6, height: 6)
-            Text(text)
-                .font(.caption)
-        }
-        .foregroundStyle(.secondary)
     }
 }
 

@@ -25,6 +25,7 @@ public enum BuiltInSources {
             HermesUsageEventSource(),
             GeminiUsageEventSource(),
             OpenCodeUsageEventSource(),
+            WarpUsageEventSource(),
         ]
     }
 }

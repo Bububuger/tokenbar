@@ -13,6 +13,7 @@
 		0ED0B2EBB5AE33375CC8CF5A /* JSONLWatermarkLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6437D03BB0B04953688295F /* JSONLWatermarkLoader.swift */; };
 		11BD35E76314C84AABA18971 /* Sprint9IncrementalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8350DE0668F07E1A23EFC9F4 /* Sprint9IncrementalTests.swift */; };
 		13473CCEC11872670DEB7346 /* PromptTemplatePreviewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84ED46F5F5614A4628F27FFC /* PromptTemplatePreviewTests.swift */; };
+		13C6A572B337CECA1363DD7B /* WarpUsageParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98C0AAB42EE381A923F00048 /* WarpUsageParserTests.swift */; };
 		19F556FC44FDA1BA8BC35444 /* Aggregation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E15456AA376C9D15A280DE88 /* Aggregation.swift */; };
 		1A79012C6BB812370D346EB8 /* RuntimeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6127B31ADF0D7B1BBA11F078 /* RuntimeModels.swift */; };
 		1DA3BCA03A603789BD427A06 /* Entry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B8FF89F768851A8BFB6A6B4 /* Entry.swift */; };
@@ -30,6 +31,7 @@
 		392B545CA8758A61EDD425E5 /* session-very-long-line.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = 0C204E1A6B74185FF917C019 /* session-very-long-line.jsonl */; };
 		3B57EDAC293F7BCC1D7A3E7D /* UsageDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59FF02D649035CCD9095EB47 /* UsageDatabase.swift */; };
 		3DAB42155F7F30D94EFB368D /* OpenCodeUsageParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5DC9D8F6E2AB2712DA31A30 /* OpenCodeUsageParser.swift */; };
+		3E1B57FFED4C7AAFAE8D194E /* WarpUsageParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 137225CF079EBD0F6D69FDDE /* WarpUsageParser.swift */; };
 		4214DEA3986FBA479FEDAAB5 /* session-overflow.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = 3CB81B998E274AB1DF728489 /* session-overflow.jsonl */; };
 		4576465B0C01095823CFAEC5 /* SampleUsageProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = E19D865817948FECB87959BE /* SampleUsageProvider.swift */; };
 		46CA88BAAFF18842F0B406EA /* claude-session-zero.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = 8B2E4D0610C08E69AEB81F10 /* claude-session-zero.jsonl */; };
@@ -67,6 +69,7 @@
 		7C7925BB179F309CABA96F2C /* Support.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD741663A590583349753736 /* Support.swift */; };
 		7CCCB7771BA4BF88521770B1 /* UsageEventSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E7F2B634B057D08DC38F52 /* UsageEventSource.swift */; };
 		7DBD4DFAAB7EC462B5FF2F73 /* PromptTemplatePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3362EEE87EF933B6B7F89948 /* PromptTemplatePreview.swift */; };
+		80BB1A1C8878170E69D47D81 /* WarpUsageEventSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 103E92D0A6415B26B1E28B1D /* WarpUsageEventSource.swift */; };
 		830D00A572B86E5C9FADA01D /* claude-session-valid.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = 32B5CF428D5921BE8ECB1EAF /* claude-session-valid.jsonl */; };
 		8AB1DEB0E6C721BB1A2F1610 /* OpenCodeDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B00B83D1FC9097D633231C7 /* OpenCodeDataSource.swift */; };
 		8D7E0C75D918F6963D629A6E /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 802ABA04E6478631EE612A6F /* UpdateChecker.swift */; };
@@ -199,6 +202,8 @@
 		0C204E1A6B74185FF917C019 /* session-very-long-line.jsonl */ = {isa = PBXFileReference; path = "session-very-long-line.jsonl"; sourceTree = "<group>"; };
 		0C5B5EB19E9B93F9A1885A6E /* prompt-examples.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "prompt-examples.json"; sourceTree = "<group>"; };
 		0F7FC1F2B71FC837231EEBE0 /* IndexingStatusViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IndexingStatusViews.swift; sourceTree = "<group>"; };
+		103E92D0A6415B26B1E28B1D /* WarpUsageEventSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WarpUsageEventSource.swift; sourceTree = "<group>"; };
+		137225CF079EBD0F6D69FDDE /* WarpUsageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WarpUsageParser.swift; sourceTree = "<group>"; };
 		185A44011F9E5B62EDA4C90C /* FixtureBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureBundle.swift; sourceTree = "<group>"; };
 		19C19BBA074D73447F892AFB /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
 		1F2418887544EE623F247E42 /* TokenBarRuntimeModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenBarRuntimeModel.swift; sourceTree = "<group>"; };
@@ -273,6 +278,7 @@
 		90055EE0D8035B3D256EE361 /* Sprint8StorageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sprint8StorageTests.swift; sourceTree = "<group>"; };
 		919D1347B2BBBC71C44329FC /* UsageModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageModels.swift; sourceTree = "<group>"; };
 		929002F9E791F3FE00777E72 /* PromptVariablePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptVariablePicker.swift; sourceTree = "<group>"; };
+		98C0AAB42EE381A923F00048 /* WarpUsageParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WarpUsageParserTests.swift; sourceTree = "<group>"; };
 		992944677EE64C6EC8F28603 /* ClaudeUsageParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeUsageParserTests.swift; sourceTree = "<group>"; };
 		9E0D668C114B1D19E73AFBD1 /* TokenBarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenBarApp.swift; sourceTree = "<group>"; };
 		A060C64D41F8A6D7AA96A969 /* OpenClawUsageEventSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawUsageEventSource.swift; sourceTree = "<group>"; };
@@ -412,6 +418,7 @@
 				D5DC9D8F6E2AB2712DA31A30 /* OpenCodeUsageParser.swift */,
 				8657BEDEB107A54CD103ED0A /* ParserTypes.swift */,
 				65E8ACD36BC0E34A79B370BC /* PromptExtraction.swift */,
+				137225CF079EBD0F6D69FDDE /* WarpUsageParser.swift */,
 			);
 			path = Parsers;
 			sourceTree = "<group>";
@@ -453,6 +460,7 @@
 				3305CDF55991739679F3959B /* UsageRepository.swift */,
 				FAD8276CB0DA9B13316F04F0 /* UsageStore.swift */,
 				77B5075D84490225A9132F0E /* WarningScenario.swift */,
+				103E92D0A6415B26B1E28B1D /* WarpUsageEventSource.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -561,6 +569,7 @@
 				A2FA1D7C158B1F8EC47C1D45 /* Sprint10P0Tests.swift */,
 				8621DA3B89F27B97A415C272 /* Sprint10PerfTests.swift */,
 				B8CAF38178F208EEAA36C084 /* WarningScenarioTests.swift */,
+				98C0AAB42EE381A923F00048 /* WarpUsageParserTests.swift */,
 				60524FCD185E7912E01C66CA /* Fixtures */,
 			);
 			path = TokenBarCoreTests;
@@ -969,6 +978,8 @@
 				D229333A7D0C07CA95D74B1E /* UsageRepository.swift in Sources */,
 				DEEB891E641DA1D4AF882640 /* UsageStore.swift in Sources */,
 				F1A57BAEA5A12CF30F4F306E /* WarningScenario.swift in Sources */,
+				80BB1A1C8878170E69D47D81 /* WarpUsageEventSource.swift in Sources */,
+				3E1B57FFED4C7AAFAE8D194E /* WarpUsageParser.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1003,6 +1014,7 @@
 				B7AB350D987A12E680E0D3F5 /* Sprint8StorageTests.swift in Sources */,
 				11BD35E76314C84AABA18971 /* Sprint9IncrementalTests.swift in Sources */,
 				BA358A795E26A4A5A899975E /* WarningScenarioTests.swift in Sources */,
+				13C6A572B337CECA1363DD7B /* WarpUsageParserTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1082,7 +1094,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_DEBUG_DYLIB = NO;
-				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1102,7 +1114,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_DEBUG_DYLIB = NO;
-				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

@@ -100,7 +100,7 @@ struct TokenBarPopoverSnapshot: Sendable, Hashable {
         )
         let hourlyActivityText: String
         if let peak = hourly.peakHourOfDay {
-            hourlyActivityText = "peak \(String(format: "%02d:00", peak.hourOfDay)) · \(tokenbarCompactTokens(peak.summary.totalTokens)) · \(tokenbarIdleHourRanges(hourly.hoursOfDay))"
+            hourlyActivityText = "peak \(String(format: "%02d:00", peak.hourOfDay)) · \(tokenbarCompactTokens(peak.summary.totalTokens))"
         } else {
             hourlyActivityText = "no peak yet"
         }

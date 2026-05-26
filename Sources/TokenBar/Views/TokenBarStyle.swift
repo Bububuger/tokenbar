@@ -158,6 +158,12 @@ enum TokenBarStyle {
                 dark: NSColor(red: 0.98, green: 0.66, blue: 0.34, alpha: 1),
                 light: NSColor(red: 0.78, green: 0.46, blue: 0.18, alpha: 1)
             )
+        case "Warp":
+            return adaptiveColor(
+                "TokenBarWarp",
+                dark: NSColor(red: 0.00, green: 0.82, blue: 0.95, alpha: 1),
+                light: NSColor(red: 0.00, green: 0.55, blue: 0.68, alpha: 1)
+            )
         default:
             return muted
         }
@@ -318,6 +324,11 @@ func tokenbarRelativeTime(_ date: Date?) -> String {
     if delta < 3600 { return "\(Int(delta / 60))m ago" }
     if delta < 86_400 { return "\(Int(delta / 3600))h ago" }
     return date.formatted(.dateTime.month(.abbreviated).day())
+}
+
+func tokenbarMMDD(_ date: Date) -> String {
+    let c = Calendar.current.dateComponents([.month, .day], from: date)
+    return String(format: "%02d/%02d", c.month ?? 0, c.day ?? 0)
 }
 
 struct TokenBarRangeWindow: Sendable, Hashable {
@@ -1952,7 +1963,7 @@ struct UsageStackedBarChart: View {
         .frame(height: height, alignment: .bottom)
         .overlay(alignment: .top) {
             if let hoveredDay {
-                TokenBarHoverBadge(text: dayTooltip(hoveredDay), width: 210)
+                TokenBarHoverBadge(text: dayTooltip(hoveredDay), width: 175)
                     .offset(y: -22)
             }
         }
@@ -1989,11 +2000,13 @@ struct UsageStackedBarChart: View {
     }
 
     private func dayTooltip(_ day: UsageDay) -> String {
+        let date = tokenbarMMDD(day.date)
+        let tokens = tokenbarCompactTokens(day.summary.totalTokens).padding(toLength: 7, withPad: " ", startingAt: 0)
         let promptCount = promptCounts[day.date, default: 0]
         if promptCount > 0 {
-            return "\(day.date.formatted(.dateTime.month(.abbreviated).day())) · \(tokenbarCompactTokens(day.summary.totalTokens)) total · \(promptCount) prompts"
+            return "\(date) · \(tokens) · \(promptCount) prompts"
         }
-        return "\(day.date.formatted(.dateTime.month(.abbreviated).day())) · \(tokenbarCompactTokens(day.summary.totalTokens)) total"
+        return "\(date) · \(tokens)"
     }
 }
 
@@ -2123,7 +2136,7 @@ struct HourlyHeatmapView: View {
             HStack {
                 Spacer()
                 if let hoveredHour {
-                    TokenBarHoverBadge(text: hourTooltip(hoveredHour), width: 180)
+                    TokenBarHoverBadge(text: hourTooltip(hoveredHour), width: 150)
                 }
             }
             .frame(height: 20)
@@ -2167,7 +2180,8 @@ struct HourlyHeatmapView: View {
 
     private func hourTooltip(_ hour: Int) -> String {
         let summary = normalizedHour(hour)?.summary ?? UsageSummary(inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0)
-        return "\(String(format: "%02d:00", hour)) · \(tokenbarCompactTokens(summary.totalTokens)) total"
+        let tokens = tokenbarCompactTokens(summary.totalTokens).padding(toLength: 7, withPad: " ", startingAt: 0)
+        return "\(String(format: "%02d:00", hour)) · \(tokens)"
     }
 }
 
@@ -2319,16 +2333,6 @@ struct RangeBarsCard: View {
                         .layoutPriority(1)
                 }
                 UsageStackedBarChart(days: days, promptCounts: promptCounts)
-                HStack {
-                    Text(displayDays.first?.date.formatted(.dateTime.month(.twoDigits).day(.twoDigits)) ?? "")
-                    Spacer()
-                    Text(displayDays.count > 75 ? "scroll horizontally · newest on right" : "available local buckets")
-                    Spacer()
-                    Text(displayDays.last?.date.formatted(.dateTime.month(.twoDigits).day(.twoDigits)) ?? "")
-                }
-                .font(.caption2)
-                .monospacedDigit()
-                .foregroundStyle(TokenBarStyle.faint)
             }
         }
     }

@@ -27,6 +27,7 @@ struct ContentView: View {
                 refreshState: runtimeModel.refreshState,
                 lastIndexedAt: runtimeModel.diagnostics.lastIndexedAt,
                 onSelectOverview: { runtimeModel.navigate(to: .today, source: "sidebar.overview") },
+                onSelectLibrary: { runtimeModel.navigate(to: .library, source: "sidebar.library") },
                 onSelectDiagnostics: { runtimeModel.navigate(to: .diagnostics, source: "sidebar.diagnostics") },
                 onSelectSettings: { runtimeModel.navigate(to: .settings, source: "sidebar.settings") },
                 onSelectSavedPrompts: { runtimeModel.navigate(to: .savedPrompts, source: "sidebar.saved_prompts") },
@@ -49,6 +50,12 @@ struct ContentView: View {
                         SettingsView()
                             .environmentObject(runtimeModel)
                             .onAppear { recordRouteViewAppear(.settings) }
+                    } else if runtimeModel.mainRoute == .library {
+                        ScrollView {
+                            LibraryView()
+                                .padding(TokenBarStyle.pagePadding)
+                                .onAppear { recordRouteViewAppear(.library) }
+                        }
                     } else if runtimeModel.mainRoute == .savedPrompts {
                         // CL-SAVED-1: rendered outside the shared
                         // ScrollView+LazyVStack chassis. Nesting a single
@@ -78,6 +85,8 @@ struct ContentView: View {
                                         .environmentObject(runtimeModel)
                                         .onAppear { recordRouteViewAppear(.diagnostics) }
                                 case .settings:
+                                    EmptyView()
+                                case .library:
                                     EmptyView()
                                 case .savedPrompts:
                                     EmptyView()
@@ -610,6 +619,7 @@ private struct TokenBarSidebar: View {
     let refreshState: RefreshState
     let lastIndexedAt: Date?
     let onSelectOverview: () -> Void
+    let onSelectLibrary: () -> Void
     let onSelectDiagnostics: () -> Void
     let onSelectSettings: () -> Void
     let onSelectSavedPrompts: () -> Void
@@ -630,6 +640,7 @@ private struct TokenBarSidebar: View {
 
                 VStack(spacing: 6) {
                     routeRow(icon: "square.grid.2x2", title: "Overview", value: "", selected: isOverview, action: onSelectOverview)
+                    routeRow(icon: "book.closed", title: "Library", value: "", selected: isLibrary, action: onSelectLibrary)
                     routeRow(icon: "bookmark", title: "Prompt Templates", value: "", selected: isSavedPrompts, action: onSelectSavedPrompts)
                     routeRow(icon: "waveform.path.ecg", title: "Diagnostics", value: warnings > 0 ? "\(warnings)" : "", selected: isDiagnostics, action: onSelectDiagnostics)
                     routeRow(icon: "gearshape", title: "Settings", value: "", selected: isSettings, action: onSelectSettings)
@@ -736,6 +747,10 @@ private struct TokenBarSidebar: View {
 
     private var isOverview: Bool {
         activeRoute == .today
+    }
+
+    private var isLibrary: Bool {
+        activeRoute == .library
     }
 
     private var isDiagnostics: Bool {
@@ -1099,22 +1114,16 @@ private struct OverviewPage: View {
             VStack(alignment: .leading, spacing: 11) {
                 HStack(alignment: .bottom) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("By hour, today")
+                        Text("By hour")
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
                         Text("24 buckets · local timezone")
                             .font(.caption2)
                             .foregroundStyle(TokenBarStyle.muted)
                     }
                     Spacer()
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text("peak \(tokenbarTokens(hourly.peakHourOfDay?.summary.totalTokens ?? 0))")
-                            .font(.caption)
-                            .foregroundStyle(TokenBarStyle.cache)
-                        Text(hourlyIdleText)
-                            .font(.caption2)
-                            .monospacedDigit()
-                            .foregroundStyle(TokenBarStyle.faint)
-                    }
+                    Text("peak \(hourlyPeakTimeText) · \(tokenbarTokens(hourly.peakHourOfDay?.summary.totalTokens ?? 0))")
+                        .font(.caption)
+                        .foregroundStyle(TokenBarStyle.cache)
                 }
                 HourlyHeatmapView(hours: hourly.hoursOfDay)
             }
@@ -1125,11 +1134,9 @@ private struct OverviewPage: View {
         runtimeModel.popoverSnapshot.hourly
     }
 
-    private var hourlyIdleText: String {
-        if hourly.peakHourOfDay == nil {
-            return "no activity"
-        }
-        return tokenbarIdleHourRanges(hourly.hoursOfDay)
+    private var hourlyPeakTimeText: String {
+        guard let peak = hourly.peakHourOfDay else { return "--:--" }
+        return String(format: "%02d:00", peak.hourOfDay)
     }
 
     private var rangeTitle: String {

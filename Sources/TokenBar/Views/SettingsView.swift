@@ -411,6 +411,7 @@ struct SettingsView: View {
                 customSourceTile(name: "Gemini CLI", path: "~/.gemini/tmp/**/chats/*.json", color: TokenBarStyle.agentColor("Gemini CLI"), enabled: true)
                 customSourceTile(name: "OpenClaw", path: "~/.openclaw/agents/**/sessions/*.jsonl", color: TokenBarStyle.agentColor("OpenClaw"), enabled: true)
                 customSourceTile(name: "OpenCode", path: "~/.local/share/opencode/opencode.db", color: TokenBarStyle.agentColor("OpenCode"), enabled: true)
+                customSourceTile(name: "Warp", path: "~/Library/Group Containers/*.dev.warp/.../warp.sqlite", color: TokenBarStyle.agentColor("Warp"), enabled: true)
                 ForEach(runtimeModel.customSources) { source in
                     editableCustomSourceTile(source: source)
                 }

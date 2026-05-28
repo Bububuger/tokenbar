@@ -92,6 +92,8 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
     case gemini
     case openclaw
     case openCode
+    case pluginSqlite
+    case pluginExecutable
 
     public var displayName: String {
         switch self {
@@ -107,6 +109,10 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             "OpenClaw"
         case .openCode:
             "OpenCode"
+        case .pluginSqlite:
+            "Plugin (SQLite)"
+        case .pluginExecutable:
+            "Plugin (Executable)"
         }
     }
 
@@ -124,6 +130,10 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             "**/sessions/*.jsonl"
         case .openCode:
             "opencode.db"
+        case .pluginSqlite:
+            "*.db"
+        case .pluginExecutable:
+            "*"
         }
     }
 
@@ -141,6 +151,8 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             .openclaw
         case .openCode:
             .openCode
+        case .pluginSqlite, .pluginExecutable:
+            .custom
         }
     }
 
@@ -158,7 +170,13 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             .openclaw
         case .openCode:
             .openCode
+        case .pluginSqlite, .pluginExecutable:
+            .custom
         }
+    }
+
+    public var isPlugin: Bool {
+        self == .pluginSqlite || self == .pluginExecutable
     }
 }
 
@@ -642,6 +660,12 @@ public struct CustomSourceRecord: Identifiable, Sendable, Hashable {
     public var enabled: Bool
     public var fieldMapping: CustomSourceFieldMapping
     public let createdAt: Date
+    public var pluginId: String?
+    public var pluginVersion: String?
+    public var inputIncludesCached: Bool
+    public var timestampFormat: PluginTimestampFormat
+    public var sqliteQuery: PluginSQLiteQuery?
+    public var executableConfig: PluginExecutableSource?
 
     public init(
         id: String = UUID().uuidString,
@@ -653,7 +677,13 @@ public struct CustomSourceRecord: Identifiable, Sendable, Hashable {
         displayAgent: String = "Custom",
         enabled: Bool = true,
         fieldMapping: CustomSourceFieldMapping = .default,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        pluginId: String? = nil,
+        pluginVersion: String? = nil,
+        inputIncludesCached: Bool = false,
+        timestampFormat: PluginTimestampFormat = .iso8601,
+        sqliteQuery: PluginSQLiteQuery? = nil,
+        executableConfig: PluginExecutableSource? = nil
     ) {
         self.id = id
         self.name = name
@@ -665,7 +695,15 @@ public struct CustomSourceRecord: Identifiable, Sendable, Hashable {
         self.enabled = enabled
         self.fieldMapping = fieldMapping
         self.createdAt = createdAt
+        self.pluginId = pluginId
+        self.pluginVersion = pluginVersion
+        self.inputIncludesCached = inputIncludesCached
+        self.timestampFormat = timestampFormat
+        self.sqliteQuery = sqliteQuery
+        self.executableConfig = executableConfig
     }
+
+    public var isPlugin: Bool { pluginId != nil }
 }
 
 public extension CustomSourceRecord {

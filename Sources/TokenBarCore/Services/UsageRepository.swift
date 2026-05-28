@@ -861,7 +861,8 @@ public struct UsageRepository: Sendable {
     public func listCustomSources() throws -> [CustomSourceRecord] {
         try database.queue.read { db in
             let rows = try Row.fetchAll(db, sql: """
-            SELECT id, name, engine, directory, glob_pattern, format, display_agent, enabled, field_mapping, created_at
+            SELECT id, name, engine, directory, glob_pattern, format, display_agent, enabled, field_mapping, created_at,
+                   plugin_id, plugin_version, input_includes_cached, timestamp_format, sqlite_query, executable_config
             FROM custom_sources
             ORDER BY created_at ASC, name ASC
             """)
@@ -889,8 +890,9 @@ public struct UsageRepository: Sendable {
             let targetID = (matchingRows.first?["id"] as String?) ?? source.id
             try db.execute(
                 sql: """
-                INSERT INTO custom_sources (id, name, engine, directory, glob_pattern, format, display_agent, enabled, field_mapping, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO custom_sources (id, name, engine, directory, glob_pattern, format, display_agent, enabled, field_mapping, created_at,
+                    plugin_id, plugin_version, input_includes_cached, timestamp_format, sqlite_query, executable_config)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     engine = excluded.engine,
@@ -899,7 +901,13 @@ public struct UsageRepository: Sendable {
                     format = excluded.format,
                     display_agent = excluded.display_agent,
                     enabled = excluded.enabled,
-                    field_mapping = excluded.field_mapping
+                    field_mapping = excluded.field_mapping,
+                    plugin_id = excluded.plugin_id,
+                    plugin_version = excluded.plugin_version,
+                    input_includes_cached = excluded.input_includes_cached,
+                    timestamp_format = excluded.timestamp_format,
+                    sqlite_query = excluded.sqlite_query,
+                    executable_config = excluded.executable_config
                 """,
                 arguments: [
                     targetID,
@@ -912,6 +920,12 @@ public struct UsageRepository: Sendable {
                     source.enabled ? 1 : 0,
                     encodeFieldMapping(source.fieldMapping),
                     source.createdAt.tokenBarMillisecondsSince1970,
+                    source.pluginId,
+                    source.pluginVersion,
+                    source.inputIncludesCached ? 1 : 0,
+                    source.timestampFormat.rawValue,
+                    encodeJSON(source.sqliteQuery),
+                    encodeJSON(source.executableConfig),
                 ]
             )
             for row in matchingRows.dropFirst() {
@@ -1492,7 +1506,13 @@ public struct UsageRepository: Sendable {
             displayAgent: row["display_agent"],
             enabled: (row["enabled"] as Int) != 0,
             fieldMapping: decodeFieldMapping(row["field_mapping"]),
-            createdAt: .tokenBarDate(millisecondsSince1970: row["created_at"])
+            createdAt: .tokenBarDate(millisecondsSince1970: row["created_at"]),
+            pluginId: row["plugin_id"] as String?,
+            pluginVersion: row["plugin_version"] as String?,
+            inputIncludesCached: ((row["input_includes_cached"] as Int?) ?? 0) != 0,
+            timestampFormat: PluginTimestampFormat(rawValue: (row["timestamp_format"] as String?) ?? "iso8601") ?? .iso8601,
+            sqliteQuery: decodeJSON(row["sqlite_query"] as String?),
+            executableConfig: decodeJSON(row["executable_config"] as String?)
         )
     }
 
@@ -1509,6 +1529,16 @@ public struct UsageRepository: Sendable {
 
     private func encodeFieldMapping(_ mapping: CustomSourceFieldMapping) -> String {
         (try? String(data: JSONEncoder().encode(mapping), encoding: .utf8)) ?? "{}"
+    }
+
+    private func encodeJSON<T: Encodable>(_ value: T?) -> String? {
+        guard let value else { return nil }
+        return try? String(data: JSONEncoder().encode(value), encoding: .utf8)
+    }
+
+    private func decodeJSON<T: Decodable>(_ raw: String?) -> T? {
+        guard let raw, let data = raw.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(T.self, from: data)
     }
 
     private func checkpoint(from row: Row) -> CheckpointSummary {

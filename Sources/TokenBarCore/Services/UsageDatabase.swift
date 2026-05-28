@@ -268,6 +268,17 @@ public final class UsageDatabase: @unchecked Sendable {
             try db.execute(sql: "UPDATE usage_events SET cache_read_tokens = cache_tokens, cache_creation_tokens = 0;")
             try db.execute(sql: "DELETE FROM source_watermarks;")
         }
+        migrator.registerMigration("v13_add_plugin_fields") { db in
+            let columns = try db.columns(in: "custom_sources")
+            if !columns.contains(where: { $0.name == "plugin_id" }) {
+                try db.execute(sql: "ALTER TABLE custom_sources ADD COLUMN plugin_id TEXT;")
+                try db.execute(sql: "ALTER TABLE custom_sources ADD COLUMN plugin_version TEXT;")
+                try db.execute(sql: "ALTER TABLE custom_sources ADD COLUMN input_includes_cached INTEGER NOT NULL DEFAULT 0;")
+                try db.execute(sql: "ALTER TABLE custom_sources ADD COLUMN timestamp_format TEXT NOT NULL DEFAULT 'iso8601';")
+                try db.execute(sql: "ALTER TABLE custom_sources ADD COLUMN sqlite_query TEXT;")
+                try db.execute(sql: "ALTER TABLE custom_sources ADD COLUMN executable_config TEXT;")
+            }
+        }
         return migrator
     }
 }

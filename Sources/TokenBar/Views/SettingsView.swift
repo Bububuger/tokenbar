@@ -29,8 +29,16 @@ struct SettingsView: View {
     @State private var resetAck = ""                // CL-P1-019: type "RESET"
     @State private var sourceSaveMessage: String?
     @State private var sourcePendingDelete: CustomSourceRecord?
+    @State private var settingsTab: SettingsTab = .general
     private let themeOptions = ["Dark", "Light"]
     private let pricingColumns: [CGFloat] = [180, 86, 86, 86, 86, 78, 108]
+
+    private enum SettingsTab: String, CaseIterable {
+        case general = "General"
+        case plugins = "Plugins"
+        case pricing = "Pricing"
+        case sources = "Sources & Data"
+    }
 
     static let defaultPricingRows = tokenbarDefaultPricingRows
 
@@ -143,12 +151,22 @@ struct SettingsView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         header
-                        checkpointSection
-                        promptSection
-                        themeSection
-                        pricingSection
-                        retentionSection
-                        customSourcesSection
+                        settingsTabBar
+
+                        switch settingsTab {
+                        case .general:
+                            checkpointSection
+                            promptSection
+                            themeSection
+                            pluginsTeaserSection
+                        case .plugins:
+                            pluginsSection
+                        case .pricing:
+                            pricingSection
+                        case .sources:
+                            customSourcesSection
+                            retentionSection
+                        }
                     }
                     .padding(16)
                 }
@@ -243,6 +261,45 @@ struct SettingsView: View {
                 onRefresh: { Task { await runtimeModel.refresh() } }
             )
         }
+    }
+
+    private var settingsTabBar: some View {
+        HStack(spacing: 2) {
+            ForEach(SettingsTab.allCases, id: \.self) { tab in
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) { settingsTab = tab }
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(tab.rawValue)
+                            .font(.system(size: 13, weight: settingsTab == tab ? .semibold : .medium))
+                        if tab == .plugins {
+                            let installedCount = PluginManager(store: runtimeModel.store).installedManifests().count
+                            if installedCount > 0 {
+                                Text("\(installedCount)")
+                                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 1)
+                                    .background(TokenBarStyle.accent.opacity(0.18), in: Capsule())
+                                    .foregroundStyle(TokenBarStyle.accent)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(
+                        settingsTab == tab
+                            ? Color.white.opacity(0.08)
+                            : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    )
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(settingsTab == tab ? TokenBarStyle.foreground : TokenBarStyle.faint)
+            }
+        }
+        .padding(3)
+        .background(Color.white.opacity(0.02), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
     }
 
     private var checkpointSection: some View {
@@ -396,10 +453,60 @@ struct SettingsView: View {
             )
     }
 
+    private var pluginsTeaserSection: some View {
+        settingsSection(
+            title: "Plugins",
+            subtitle: "Community adapters for any AI coding tool. Declarative plugins are pure JSON; executable plugins run a small script."
+        ) {
+            let installed = PluginManager(store: runtimeModel.store).installedManifests()
+            if installed.isEmpty {
+                Text("No plugins installed yet.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(TokenBarStyle.faint)
+            } else {
+                HStack(spacing: 8) {
+                    ForEach(installed, id: \.id) { manifest in
+                        HStack(spacing: 6) {
+                            Text(String(manifest.name.prefix(2)).uppercased())
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .frame(width: 22, height: 22)
+                                .background(TokenBarStyle.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 5))
+                                .foregroundStyle(TokenBarStyle.accent)
+                            Text(manifest.name)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(TokenBarStyle.foreground)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(TokenBarStyle.line, lineWidth: 1))
+                    }
+                }
+            }
+        } trailing: {
+            Button {
+                settingsTab = .plugins
+            } label: {
+                Text("Open Gallery \u{2192}")
+            }
+            .buttonStyle(SettingsButtonStyle())
+        }
+    }
+
+    private var pluginsSection: some View {
+        settingsSection(
+            title: "Plugins",
+            subtitle: "Community-built adapters for additional AI tools."
+        ) {
+            PluginGalleryView()
+                .environmentObject(runtimeModel)
+        }
+    }
+
     private var customSourcesSection: some View {
         settingsSection(
             title: "Custom Sources",
-            subtitle: "Point TokenBar at any agent that writes JSONL or sqlite locally."
+            subtitle: "Manually register a local JSONL or SQLite path. For most agents, prefer Plugins — they're maintained, versioned, and one-click."
         ) {
             if runtimeModel.indexingState.isVisible {
                 SettingsIndexingProgressStrip(state: runtimeModel.indexingState)
@@ -1134,6 +1241,10 @@ private struct AddCustomSourceOverlay: View {
             "~/.local/share/opencode/opencode.db or ~/.local/share/opencode"
         case .openclaw:
             "~/.openclaw/agents or **/sessions/*.jsonl"
+        case .pluginSqlite:
+            "Path to SQLite database directory"
+        case .pluginExecutable:
+            "Plugin directory"
         }
     }
 

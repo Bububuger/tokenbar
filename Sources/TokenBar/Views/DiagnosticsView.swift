@@ -23,8 +23,12 @@ struct DiagnosticsView: View {
                     onOpenDiagnostics: nil
                 )
             }
+            diagStatStrip
             dataAuditCard
             sourcesCard
+            pluginSourcesCard
+            normalizeActivityCard
+            executableRuntimeCard
             warningsCard
             checkpointsCard
         }
@@ -159,6 +163,222 @@ struct DiagnosticsView: View {
     private func estimatedReparseSeconds() -> Int {
         // 1 second per ~100 events, min 1s, capped at 60s for UI display
         max(1, min(runtimeModel.eventCount / 100, 60))
+    }
+
+    private var diagStatStrip: some View {
+        let builtinCount = sourceRows.filter { !$0.id.hasPrefix("custom|") && !$0.id.hasPrefix("plugin-") }.count
+        let pluginCount = runtimeModel.customSources.filter { $0.isPlugin }.count
+        let builtinWarnings = sourceRows.filter { $0.state != .ok && !$0.id.hasPrefix("custom|") }.count
+        let pluginWarnings = runtimeModel.customSources.filter { $0.isPlugin && !$0.enabled }.count
+        return HStack(spacing: 12) {
+            diagStatTile(value: "\(builtinCount)", label: "built-in sources", sub: "\(builtinWarnings) warning\(builtinWarnings == 1 ? "" : "s")", subWarn: builtinWarnings > 0)
+            diagStatTile(value: "\(pluginCount)", label: "plugins installed", sub: "\(pluginWarnings) warning\(pluginWarnings == 1 ? "" : "s")", subWarn: pluginWarnings > 0)
+            diagStatTile(value: "\(runtimeModel.eventCount.formatted())", label: "total events", sub: "across all sources", subWarn: false)
+            diagStatTile(value: "\(runtimeModel.diagnostics.parserWarningCount)", label: "warnings", sub: "from latest refresh", subWarn: runtimeModel.diagnostics.parserWarningCount > 0)
+        }
+    }
+
+    private func diagStatTile(value: String, label: String, sub: String, subWarn: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value)
+                .font(.system(size: 22, weight: .bold, design: .monospaced))
+                .foregroundStyle(TokenBarStyle.foreground)
+            Text(label)
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(TokenBarStyle.muted)
+            Text(sub)
+                .font(.system(size: 10.5))
+                .foregroundStyle(subWarn ? TokenBarStyle.warn : TokenBarStyle.faint)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(TokenBarStyle.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
+    }
+
+    private var pluginSourcesCard: some View {
+        let pluginSources = runtimeModel.customSources.filter { $0.isPlugin }
+        return TokenBarCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Plugin Sources")
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        Text("Community manifests via registry \u{00B7} \(pluginSources.count) installed")
+                            .font(.caption2)
+                            .foregroundStyle(TokenBarStyle.muted)
+                    }
+                    Spacer()
+                    Button("manage in Settings \u{2192} Plugins") {}
+                        .font(.system(size: 11))
+                        .foregroundStyle(TokenBarStyle.accent)
+                        .buttonStyle(.plain)
+                }
+
+                if pluginSources.isEmpty {
+                    Text("No plugins installed. Install from Settings \u{2192} Plugins.")
+                        .font(.caption)
+                        .foregroundStyle(TokenBarStyle.muted)
+                        .padding(.vertical, 8)
+                } else {
+                    ForEach(pluginSources, id: \.id) { source in
+                        HStack(spacing: 14) {
+                            Text(String(source.name.prefix(2)).uppercased())
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .frame(width: 28, height: 28)
+                                .background(TokenBarStyle.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 7))
+                                .foregroundStyle(TokenBarStyle.accent)
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 8) {
+                                    Text(source.name)
+                                        .font(.system(size: 14, weight: .medium))
+                                    Text(source.engine.isPlugin ? source.engine.displayName : "plugin")
+                                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color(red: 0.83, green: 0.97, blue: 0.42).opacity(0.12), in: Capsule())
+                                        .foregroundStyle(Color(red: 0.83, green: 0.97, blue: 0.42))
+                                }
+                                Text(source.directory)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(TokenBarStyle.muted)
+                                    .lineLimit(1)
+                                if source.inputIncludesCached {
+                                    Text("inputIncludesCached:true \u{00B7} normalizer subtracts cache_read on every event")
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundStyle(TokenBarStyle.input)
+                                }
+                            }
+
+                            Spacer()
+
+                            VStack(alignment: .trailing, spacing: 3) {
+                                Text(source.enabled ? "enabled" : "paused")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(source.enabled ? TokenBarStyle.cache : TokenBarStyle.faint)
+                                if let version = source.pluginVersion {
+                                    Text("v\(version)")
+                                        .font(.system(size: 10.5, design: .monospaced))
+                                        .foregroundStyle(TokenBarStyle.faint)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 10)
+                        .overlay(Divider().overlay(TokenBarStyle.line.opacity(0.7)), alignment: .bottom)
+                    }
+                }
+            }
+        }
+    }
+
+    private var normalizeActivityCard: some View {
+        TokenBarCard {
+            VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Token Normalize Activity")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    Text("Every event passes the normalizer \u{00B7} clamp negatives \u{2192} 0 \u{00B7} if inputIncludesCached:true, subtract cache_read from input")
+                        .font(.caption2)
+                        .foregroundStyle(TokenBarStyle.muted)
+                }
+
+                let pluginsWithCacheSub = runtimeModel.customSources.filter { $0.isPlugin && $0.inputIncludesCached }
+                if pluginsWithCacheSub.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(TokenBarStyle.cache)
+                        Text("All sources report net input tokens \u{2014} no cache subtraction needed.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(TokenBarStyle.muted)
+                    }
+                    .padding(.vertical, 6)
+                } else {
+                    ForEach(pluginsWithCacheSub, id: \.id) { source in
+                        HStack(spacing: 10) {
+                            Text(source.name)
+                                .font(.system(size: 12.5, weight: .medium))
+                                .foregroundStyle(TokenBarStyle.foreground)
+                            Text("cache-subtracted")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2)
+                                .background(Color(red: 1.0, green: 0.71, blue: 0.33).opacity(0.14), in: Capsule())
+                                .foregroundStyle(Color(red: 1.0, green: 0.71, blue: 0.33))
+                            Spacer()
+                            Text("input -= min(cache_read, input)")
+                                .font(.system(size: 10.5, design: .monospaced))
+                                .foregroundStyle(TokenBarStyle.faint)
+                        }
+                        .padding(.vertical, 6)
+                        .overlay(Divider().overlay(TokenBarStyle.line.opacity(0.55)), alignment: .bottom)
+                    }
+                }
+            }
+        }
+    }
+
+    private var executableRuntimeCard: some View {
+        let execSources = runtimeModel.customSources.filter { $0.engine == .pluginExecutable }
+        return TokenBarCard {
+            VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Executable Plugin Runtime")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    Text("Spawned subprocesses \u{00B7} NDJSON on stdout \u{00B7} stderr \u{2192} ParseWarning \u{00B7} timeout-capped")
+                        .font(.caption2)
+                        .foregroundStyle(TokenBarStyle.muted)
+                }
+
+                if execSources.isEmpty {
+                    Text("No executable plugins installed.")
+                        .font(.caption)
+                        .foregroundStyle(TokenBarStyle.muted)
+                        .padding(.vertical, 6)
+                } else {
+                    Grid(horizontalSpacing: 14, verticalSpacing: 0) {
+                        GridRow {
+                            execHead("Plugin")
+                            execHead("Command")
+                            execHead("Timeout")
+                            execHead("Status")
+                        }
+                        Divider().gridCellColumns(4).overlay(TokenBarStyle.line)
+                        ForEach(execSources, id: \.id) { source in
+                            GridRow {
+                                Text(source.name)
+                                    .font(.system(size: 12.5, weight: .medium))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Text(source.executableConfig?.command ?? "\u{2014}")
+                                    .font(.system(size: 11.5, design: .monospaced))
+                                    .foregroundStyle(TokenBarStyle.muted)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .lineLimit(1)
+                                Text("\(source.executableConfig?.effectiveTimeout ?? 30)s")
+                                    .font(.system(size: 11.5, design: .monospaced))
+                                    .foregroundStyle(TokenBarStyle.faint)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Text(source.enabled ? "active" : "paused")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(source.enabled ? TokenBarStyle.cache : TokenBarStyle.faint)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.vertical, 8)
+                            Divider().gridCellColumns(4).overlay(TokenBarStyle.line.opacity(0.55))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func execHead(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(.system(size: 10.5, weight: .semibold))
+            .tracking(0.8)
+            .foregroundStyle(TokenBarStyle.faint)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var dataAuditCard: some View {

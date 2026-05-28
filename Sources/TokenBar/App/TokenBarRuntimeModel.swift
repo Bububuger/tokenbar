@@ -206,6 +206,7 @@ final class TokenBarRuntimeModel: ObservableObject {
 
     private let settingsStore: SettingsStore
     private let usageStore: UsageStore
+    var store: UsageStore { usageStore }
     private let builtInSources: [any InspectableUsageEventSource]
     private var fileWatcher: RecursiveFSEventsWatcher?
     private var checkpointEngine: CheckpointEngine?

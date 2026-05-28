@@ -111,7 +111,7 @@ struct LibraryMcpDir: Identifiable {
 
 // MARK: - Fixture data
 
-private let skillDirs: [LibrarySkillDir] = [
+let skillDirs: [LibrarySkillDir] = [
     LibrarySkillDir(
         id: "user", scope: .user, path: "~/.claude/skills/",
         label: "User", sub: "personal \u{00B7} synced via dotfiles repo",
@@ -156,7 +156,7 @@ private let plugins: [LibraryPluginItem] = [
     LibraryPluginItem(name: "sql-explain", version: "1.2.0", source: "local", bundle: "3 commands", state: "active"),
 ]
 
-private let mcpDirs: [LibraryMcpDir] = [
+let mcpDirs: [LibraryMcpDir] = [
     LibraryMcpDir(
         id: "mcp-user", scope: .user, path: "~/.config/claude/mcp_servers.json",
         label: "User", sub: "global defaults \u{00B7} loaded into every project unless overridden",
@@ -673,6 +673,7 @@ private struct SkillDirCard: View {
 // MARK: - Skills tab body
 
 private struct SkillsBody: View {
+    @State private var viewMode: LibraryViewMode = .graph
     @State private var filter: SkillFilter = .all
     @State private var searchText = ""
 
@@ -685,9 +686,22 @@ private struct SkillsBody: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            toolbar
-            ForEach(skillDirs) { dir in
-                SkillDirCard(dir: dir, dupNames: dupNames, filter: filter)
+            LibraryModeBar(
+                title: viewMode == .graph ? "Skill constellation" : "All skills",
+                subtitle: viewMode == .graph
+                    ? "hover a node to preview \u{00B7} click to inspect \u{00B7} \u{2318} click to pin"
+                    : "flat list of every skill TokenBar found on disk \u{00B7} use filters to drill down",
+                mode: viewMode,
+                onChange: { viewMode = $0 }
+            )
+
+            if viewMode == .graph {
+                SkillsConstellationView()
+            } else {
+                toolbar
+                ForEach(skillDirs) { dir in
+                    SkillDirCard(dir: dir, dupNames: dupNames, filter: filter)
+                }
             }
         }
     }
@@ -1293,6 +1307,7 @@ private struct McpScopeCard: View {
 // MARK: - MCP tab body
 
 private struct MCPBody: View {
+    @State private var viewMode: LibraryViewMode = .graph
     @State private var mcpFilter = "all"
 
     private var allItems: [LibraryMcpItem] { mcpDirs.flatMap(\.items) }
@@ -1301,12 +1316,23 @@ private struct MCPBody: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            McpContextRibbon(loaded: loadedItems.count, total: allItems.count, tokens: ctxTokens)
+            LibraryModeBar(
+                title: viewMode == .graph ? "MCP solar system" : "All MCP servers",
+                subtitle: viewMode == .graph
+                    ? "the dashed ring is your context window \u{00B7} inside = loaded \u{00B7} outside = configured-but-idle"
+                    : "by scope \u{00B7} toggle to load into context",
+                mode: viewMode,
+                onChange: { viewMode = $0 }
+            )
 
-            toolbar
-
-            ForEach(mcpDirs) { dir in
-                McpScopeCard(dir: dir)
+            if viewMode == .graph {
+                McpSolarSystemView()
+            } else {
+                McpContextRibbon(loaded: loadedItems.count, total: allItems.count, tokens: ctxTokens)
+                toolbar
+                ForEach(mcpDirs) { dir in
+                    McpScopeCard(dir: dir)
+                }
             }
         }
     }

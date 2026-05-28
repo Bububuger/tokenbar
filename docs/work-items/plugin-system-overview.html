@@ -1,0 +1,1177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TokenBar Plugin System — Architecture Overview</title>
+<style>
+  :root {
+    --bg: #0a0e17;
+    --surface: #111827;
+    --surface2: #1a2332;
+    --border: #1e293b;
+    --border-glow: #334155;
+    --text: #e2e8f0;
+    --text-dim: #94a3b8;
+    --text-muted: #64748b;
+    --accent: #38bdf8;
+    --accent2: #818cf8;
+    --accent3: #a78bfa;
+    --green: #34d399;
+    --green-dim: #065f46;
+    --orange: #fb923c;
+    --orange-dim: #7c2d12;
+    --pink: #f472b6;
+    --pink-dim: #831843;
+    --cyan: #22d3ee;
+    --yellow: #fbbf24;
+    --red: #f87171;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* ── Hero ── */
+  .hero {
+    position: relative;
+    padding: 80px 40px 60px;
+    text-align: center;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -200px; left: 50%; transform: translateX(-50%);
+    width: 800px; height: 800px;
+    background: radial-gradient(circle, rgba(56,189,248,0.08) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero-badge {
+    display: inline-block;
+    padding: 4px 14px;
+    border-radius: 20px;
+    border: 1px solid var(--border-glow);
+    background: var(--surface);
+    font-size: 12px;
+    color: var(--accent);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+  .hero h1 {
+    font-size: clamp(32px, 5vw, 56px);
+    font-weight: 700;
+    letter-spacing: -1px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent3) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 16px;
+  }
+  .hero p {
+    font-size: 18px;
+    color: var(--text-dim);
+    max-width: 640px;
+    margin: 0 auto;
+  }
+
+  /* ── Container ── */
+  .container {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  /* ── Section ── */
+  section {
+    margin-bottom: 80px;
+  }
+  .section-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+  .section-title {
+    font-size: 28px;
+    font-weight: 600;
+    margin-bottom: 32px;
+    letter-spacing: -0.5px;
+  }
+
+  /* ── Architecture Diagram ── */
+  .arch-diagram {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .arch-layer {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px 32px;
+    background: var(--surface);
+    margin-bottom: -1px;
+  }
+  .arch-layer:first-child { border-radius: 16px 16px 0 0; }
+  .arch-layer:last-child { border-radius: 0 0 16px 16px; margin-bottom: 0; }
+
+  .layer-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .layer-num {
+    width: 28px; height: 28px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .layer-name {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+  .layer-desc {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-left: 38px;
+  }
+
+  .l1 .layer-num { background: rgba(56,189,248,0.15); color: var(--accent); }
+  .l2 .layer-num { background: rgba(129,140,248,0.15); color: var(--accent2); }
+  .l3 .layer-num { background: rgba(52,211,153,0.15); color: var(--green); }
+  .l4 .layer-num { background: rgba(251,146,60,0.15); color: var(--orange); }
+  .l5 .layer-num { background: rgba(244,114,182,0.15); color: var(--pink); }
+
+  /* ── Two-Tier Card ── */
+  .tier-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+  @media (max-width: 700px) {
+    .tier-grid { grid-template-columns: 1fr; }
+  }
+
+  .tier-card {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px;
+    background: var(--surface);
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .tier-card:hover { border-color: var(--border-glow); }
+
+  .tier-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+  }
+  .tier-card.declarative::before { background: linear-gradient(90deg, var(--green), var(--cyan)); }
+  .tier-card.executable::before { background: linear-gradient(90deg, var(--orange), var(--yellow)); }
+
+  .tier-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 12px;
+  }
+  .tier-badge.green { background: var(--green-dim); color: var(--green); }
+  .tier-badge.orange { background: var(--orange-dim); color: var(--orange); }
+
+  .tier-card h3 {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .tier-card .subtitle {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+  }
+
+  .tier-card ul {
+    list-style: none;
+    padding: 0;
+  }
+  .tier-card li {
+    font-size: 14px;
+    color: var(--text-dim);
+    padding: 5px 0;
+    padding-left: 20px;
+    position: relative;
+  }
+  .tier-card li::before {
+    content: '→';
+    position: absolute;
+    left: 0;
+    color: var(--text-muted);
+  }
+
+  .coverage-bar {
+    margin-top: 16px;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--surface2);
+    overflow: hidden;
+  }
+  .coverage-bar .fill {
+    height: 100%;
+    border-radius: 3px;
+  }
+  .coverage-bar .fill.green { width: 80%; background: linear-gradient(90deg, var(--green), var(--cyan)); }
+  .coverage-bar .fill.orange { width: 20%; background: linear-gradient(90deg, var(--orange), var(--yellow)); }
+  .coverage-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 6px;
+  }
+
+  /* ── Manifest Demo ── */
+  .manifest-tabs {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 0;
+    padding-left: 16px;
+  }
+  .manifest-tab {
+    padding: 8px 18px;
+    border-radius: 8px 8px 0 0;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    background: var(--surface2);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s;
+    user-select: none;
+  }
+  .manifest-tab.active {
+    background: var(--surface);
+    color: var(--accent);
+    border-color: var(--border-glow);
+  }
+  .manifest-tab:hover:not(.active) {
+    color: var(--text-dim);
+  }
+
+  .manifest-panels {
+    border: 1px solid var(--border);
+    border-radius: 0 12px 12px 12px;
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .manifest-panel {
+    display: none;
+    padding: 0;
+  }
+  .manifest-panel.active { display: block; }
+
+  .manifest-panel pre {
+    margin: 0;
+    padding: 24px;
+    overflow-x: auto;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text-dim);
+    tab-size: 2;
+  }
+
+  .json-key { color: var(--accent); }
+  .json-str { color: var(--green); }
+  .json-num { color: var(--orange); }
+  .json-bool { color: var(--pink); }
+  .json-null { color: var(--text-muted); }
+  .json-comment { color: var(--text-muted); font-style: italic; }
+
+  /* ── Dataflow ── */
+  .flow-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    align-items: center;
+  }
+
+  .flow-step {
+    width: 100%;
+    max-width: 800px;
+    display: flex;
+    align-items: stretch;
+    gap: 16px;
+  }
+
+  .flow-line {
+    width: 2px;
+    background: var(--border-glow);
+    position: relative;
+    flex-shrink: 0;
+    margin-left: 24px;
+  }
+  .flow-line::before {
+    content: '';
+    position: absolute;
+    top: 0; left: -5px;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    border: 2px solid var(--border-glow);
+    background: var(--bg);
+  }
+
+  .flow-box {
+    flex: 1;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    background: var(--surface);
+    margin: 8px 0;
+    min-height: 60px;
+  }
+  .flow-box .flow-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .flow-box .flow-detail {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: 'SF Mono', monospace;
+  }
+
+  .flow-step.accent .flow-line { background: var(--accent); }
+  .flow-step.accent .flow-line::before { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 8px rgba(56,189,248,0.4); }
+  .flow-step.green .flow-line { background: var(--green); }
+  .flow-step.green .flow-line::before { border-color: var(--green); background: var(--green); box-shadow: 0 0 8px rgba(52,211,153,0.4); }
+  .flow-step.purple .flow-line { background: var(--accent3); }
+  .flow-step.purple .flow-line::before { border-color: var(--accent3); background: var(--accent3); box-shadow: 0 0 8px rgba(167,139,250,0.4); }
+  .flow-step.orange .flow-line { background: var(--orange); }
+  .flow-step.orange .flow-line::before { border-color: var(--orange); background: var(--orange); box-shadow: 0 0 8px rgba(251,146,60,0.4); }
+  .flow-step.pink .flow-line { background: var(--pink); }
+  .flow-step.pink .flow-line::before { border-color: var(--pink); background: var(--pink); box-shadow: 0 0 8px rgba(244,114,182,0.4); }
+
+  /* ── Gallery Mockup ── */
+  .gallery-mock {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .gallery-titlebar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+  }
+  .gallery-dot {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+  }
+  .gallery-dot.r { background: #ff5f57; }
+  .gallery-dot.y { background: #febc2e; }
+  .gallery-dot.g { background: #28c840; }
+  .gallery-titlebar span {
+    flex: 1;
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-right: 44px;
+  }
+
+  .gallery-body {
+    padding: 24px;
+  }
+  .gallery-section-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .gallery-section-label .count {
+    background: var(--surface2);
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 11px;
+  }
+
+  .gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+
+  .plugin-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    background: var(--surface2);
+    transition: border-color 0.2s, transform 0.15s;
+    cursor: default;
+  }
+  .plugin-card:hover { border-color: var(--border-glow); transform: translateY(-1px); }
+
+  .plugin-icon {
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    margin-bottom: 10px;
+  }
+
+  .plugin-card .plugin-name {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 2px;
+  }
+  .plugin-card .plugin-ver {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+  .plugin-card .plugin-type {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+  }
+  .plugin-type.decl { background: rgba(52,211,153,0.12); color: var(--green); }
+  .plugin-type.exec { background: rgba(251,146,60,0.12); color: var(--orange); }
+
+  .plugin-card .plugin-btn {
+    display: block;
+    width: 100%;
+    margin-top: 12px;
+    padding: 6px 0;
+    border: 1px solid var(--border-glow);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .plugin-card .plugin-btn:hover { background: var(--border); color: var(--text); }
+  .plugin-card .plugin-btn.installed { border-color: var(--green-dim); color: var(--green); }
+  .plugin-card .plugin-btn.installed:hover { background: var(--green-dim); }
+
+  /* ── Normalize Diagram ── */
+  .normalize-box {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface);
+    padding: 28px 32px;
+    display: flex;
+    gap: 24px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .norm-side {
+    flex: 1;
+    min-width: 260px;
+  }
+  .norm-side h4 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+  }
+  .norm-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-size: 13px;
+    font-family: 'SF Mono', monospace;
+  }
+  .norm-label { color: var(--text-dim); min-width: 140px; }
+  .norm-val { color: var(--accent); font-weight: 600; }
+  .norm-val.changed { color: var(--green); }
+  .norm-arrow {
+    font-size: 32px;
+    color: var(--border-glow);
+    flex-shrink: 0;
+    align-self: center;
+  }
+
+  /* ── Registry Diagram ── */
+  .registry-flow {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+    padding: 20px 0;
+  }
+  .reg-node {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    background: var(--surface);
+    text-align: center;
+    min-width: 160px;
+  }
+  .reg-node .reg-icon { font-size: 28px; margin-bottom: 8px; }
+  .reg-node .reg-label { font-size: 14px; font-weight: 600; }
+  .reg-node .reg-sub { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+  .reg-arrow {
+    font-size: 24px;
+    color: var(--text-muted);
+  }
+
+  /* ── Phase Timeline ── */
+  .timeline {
+    position: relative;
+    padding-left: 40px;
+  }
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 15px;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    background: linear-gradient(to bottom, var(--accent), var(--accent3), var(--green), var(--orange), var(--pink));
+  }
+  .timeline-item {
+    position: relative;
+    margin-bottom: 24px;
+  }
+  .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -30px; top: 6px;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    background: var(--bg);
+  }
+  .timeline-item:nth-child(3)::before,
+  .timeline-item:nth-child(4)::before { border-color: var(--accent3); }
+  .timeline-item:nth-child(5)::before,
+  .timeline-item:nth-child(6)::before { border-color: var(--green); }
+  .timeline-item:nth-child(7)::before { border-color: var(--orange); }
+  .timeline-item:nth-child(8)::before { border-color: var(--pink); }
+
+  .timeline-phase {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--accent);
+    margin-bottom: 2px;
+  }
+  .timeline-item:nth-child(3) .timeline-phase,
+  .timeline-item:nth-child(4) .timeline-phase { color: var(--accent3); }
+  .timeline-item:nth-child(5) .timeline-phase,
+  .timeline-item:nth-child(6) .timeline-phase { color: var(--green); }
+  .timeline-item:nth-child(7) .timeline-phase { color: var(--orange); }
+  .timeline-item:nth-child(8) .timeline-phase { color: var(--pink); }
+
+  .timeline-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .timeline-desc {
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+
+  /* ── NDJSON Protocol ── */
+  .protocol-grid {
+    display: grid;
+    grid-template-columns: 100px 1fr;
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    font-size: 13px;
+  }
+  .protocol-grid .pg-head {
+    background: var(--surface2);
+    padding: 10px 16px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
+  .protocol-grid .pg-key {
+    background: var(--surface);
+    padding: 10px 16px;
+    font-weight: 600;
+    color: var(--accent);
+    font-family: 'SF Mono', monospace;
+    font-size: 12px;
+  }
+  .protocol-grid .pg-val {
+    background: var(--surface);
+    padding: 10px 16px;
+    color: var(--text-dim);
+  }
+
+  /* ── Footer ── */
+  footer {
+    text-align: center;
+    padding: 40px 24px 60px;
+    font-size: 13px;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border);
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+
+  /* ── Responsive ── */
+  @media (max-width: 600px) {
+    .hero { padding: 48px 20px 40px; }
+    .container { padding: 0 16px; }
+    .arch-layer { padding: 20px; }
+    .normalize-box { flex-direction: column; }
+    .norm-arrow { transform: rotate(90deg); }
+    .registry-flow { flex-direction: column; }
+    .reg-arrow { transform: rotate(90deg); }
+    .gallery-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════ HERO ═══════════════════════ -->
+<div class="hero">
+  <div class="hero-badge">Design Spec v1</div>
+  <h1>TokenBar Plugin System</h1>
+  <p>让社区为任意 AI 编码工具编写数据源适配器，通过 GitHub Registry 一键分发，TokenBar Gallery 一键安装。</p>
+</div>
+
+<div class="container">
+
+<!-- ═══════════════════════ 1. ARCHITECTURE ═══════════════════════ -->
+<section>
+  <div class="section-label">Architecture</div>
+  <div class="section-title">五层架构</div>
+
+  <div class="arch-diagram">
+    <div class="arch-layer l1">
+      <div class="layer-header">
+        <div class="layer-num">1</div>
+        <div class="layer-name">Gallery UI</div>
+      </div>
+      <div class="layer-desc">Settings → Plugins tab &nbsp;|&nbsp; 浏览 / 安装 / 更新 / 卸载</div>
+    </div>
+    <div class="arch-layer l2">
+      <div class="layer-header">
+        <div class="layer-num">2</div>
+        <div class="layer-name">Registry Client</div>
+      </div>
+      <div class="layer-desc">拉取 GitHub 仓库 registry.json 索引 &nbsp;|&nbsp; 24h 缓存 &nbsp;|&nbsp; 下载 manifest + 脚本</div>
+    </div>
+    <div class="arch-layer l3">
+      <div class="layer-header">
+        <div class="layer-num">3</div>
+        <div class="layer-name">Plugin Manager</div>
+      </div>
+      <div class="layer-desc">manifest.json 解析 &nbsp;→&nbsp; CustomSourceRecord 转换 &nbsp;→&nbsp; 安装/卸载生命周期</div>
+    </div>
+    <div class="arch-layer l4">
+      <div class="layer-header">
+        <div class="layer-num">4</div>
+        <div class="layer-name">Plugin Engines</div>
+      </div>
+      <div class="layer-desc">JSONL FieldMapper &nbsp;|&nbsp; SQLite QueryBuilder &nbsp;|&nbsp; Executable Runner &nbsp;|&nbsp; Token Normalizer</div>
+    </div>
+    <div class="arch-layer l5">
+      <div class="layer-header">
+        <div class="layer-num">5</div>
+        <div class="layer-name">Core Infrastructure</div>
+      </div>
+      <div class="layer-desc">CheckpointEngine &nbsp;|&nbsp; Watermark &nbsp;|&nbsp; UsageDatabase &nbsp;|&nbsp; 现有 7 个内置数据源不受影响</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ 2. TWO-TIER ═══════════════════════ -->
+<section>
+  <div class="section-label">Plugin Types</div>
+  <div class="section-title">两层插件设计</div>
+
+  <div class="tier-grid">
+    <div class="tier-card declarative">
+      <span class="tier-badge green">Level 1</span>
+      <h3>Declarative 声明式</h3>
+      <p class="subtitle">纯 JSON manifest，零代码</p>
+      <ul>
+        <li>JSONL dot-notation 字段映射</li>
+        <li>SQLite 表名 + 列映射 + WHERE</li>
+        <li>复用现有 GRDB / JSONL 引擎</li>
+        <li>安全：只有配置，无可执行代码</li>
+      </ul>
+      <div class="coverage-bar"><div class="fill green"></div></div>
+      <div class="coverage-label">覆盖 ~80% AI 工具（GitHub Copilot、Kiro、Qwen Code、Kimi ...）</div>
+    </div>
+
+    <div class="tier-card executable">
+      <span class="tier-badge orange">Level 2</span>
+      <h3>Executable 可执行</h3>
+      <p class="subtitle">外部脚本/二进制，输出 NDJSON</p>
+      <ul>
+        <li>Python / Node / Bash / 任意语言</li>
+        <li>TokenBar spawn 子进程 + 读 stdout</li>
+        <li>支持 --since 参数实现增量</li>
+        <li>安装时二次确认 + timeout 保护</li>
+      </ul>
+      <div class="coverage-bar"><div class="fill orange"></div></div>
+      <div class="coverage-label">覆盖 ~20% 需要转换逻辑的工具（Cursor、远程 API ...）</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ 3. MANIFEST ═══════════════════════ -->
+<section>
+  <div class="section-label">Plugin Protocol</div>
+  <div class="section-title">Manifest 格式</div>
+
+  <div class="manifest-tabs">
+    <div class="manifest-tab active" onclick="switchTab(this, 'tab-jsonl')">JSONL 插件</div>
+    <div class="manifest-tab" onclick="switchTab(this, 'tab-sqlite')">SQLite 插件</div>
+    <div class="manifest-tab" onclick="switchTab(this, 'tab-exec')">Executable 插件</div>
+  </div>
+
+  <div class="manifest-panels">
+    <div class="manifest-panel active" id="tab-jsonl">
+      <pre>{
+  <span class="json-key">"manifest_version"</span>: <span class="json-num">1</span>,
+  <span class="json-key">"id"</span>:               <span class="json-str">"github-copilot"</span>,
+  <span class="json-key">"name"</span>:             <span class="json-str">"GitHub Copilot"</span>,
+  <span class="json-key">"version"</span>:          <span class="json-str">"1.0.0"</span>,
+  <span class="json-key">"description"</span>:      <span class="json-str">"OTel JSONL span-based token capture"</span>,
+  <span class="json-key">"author"</span>:           <span class="json-str">"tokenbar-community"</span>,
+  <span class="json-key">"min_tokenbar_version"</span>: <span class="json-str">"1.5.0"</span>,
+
+  <span class="json-key">"source"</span>: {
+    <span class="json-key">"type"</span>:      <span class="json-str">"jsonl"</span>,
+    <span class="json-key">"directory"</span>: <span class="json-str">"~/.copilot/otel"</span>,
+    <span class="json-key">"glob"</span>:      <span class="json-str">"*.jsonl"</span>,
+    <span class="json-key">"fields"</span>: {
+      <span class="json-key">"input_tokens"</span>:  <span class="json-str">"attributes.gen_ai.usage.input_tokens"</span>,
+      <span class="json-key">"output_tokens"</span>: <span class="json-str">"attributes.gen_ai.usage.output_tokens"</span>,
+      <span class="json-key">"model"</span>:         <span class="json-str">"attributes.gen_ai.response.model"</span>,
+      <span class="json-key">"timestamp"</span>:     <span class="json-str">"startTimeUnixNano"</span>,
+      <span class="json-key">"session_id"</span>:    <span class="json-str">"traceId"</span>
+    },
+    <span class="json-key">"filter"</span>: { <span class="json-key">"field"</span>: <span class="json-str">"name"</span>, <span class="json-key">"equals"</span>: <span class="json-str">"gen_ai.completion"</span> }
+  },
+
+  <span class="json-key">"token_semantics"</span>: {
+    <span class="json-key">"input_includes_cached"</span>: <span class="json-bool">false</span>,
+    <span class="json-key">"timestamp_format"</span>:      <span class="json-str">"unix_nano"</span>
+  },
+
+  <span class="json-key">"setup_hints"</span>: [
+    <span class="json-str">"export COPILOT_OTEL_FILE_EXPORTER_PATH=~/.copilot/otel"</span>
+  ]
+}</pre>
+    </div>
+
+    <div class="manifest-panel" id="tab-sqlite">
+      <pre>{
+  <span class="json-key">"manifest_version"</span>: <span class="json-num">1</span>,
+  <span class="json-key">"id"</span>:               <span class="json-str">"kiro-cli"</span>,
+  <span class="json-key">"name"</span>:             <span class="json-str">"Kiro CLI"</span>,
+  <span class="json-key">"version"</span>:          <span class="json-str">"1.0.0"</span>,
+  <span class="json-key">"description"</span>:      <span class="json-str">"Reads token usage from Kiro CLI local SQLite"</span>,
+  <span class="json-key">"author"</span>:           <span class="json-str">"tokenbar-community"</span>,
+  <span class="json-key">"min_tokenbar_version"</span>: <span class="json-str">"1.5.0"</span>,
+
+  <span class="json-key">"source"</span>: {
+    <span class="json-key">"type"</span>:      <span class="json-str">"sqlite"</span>,
+    <span class="json-key">"directory"</span>: <span class="json-str">"~/.kiro"</span>,
+    <span class="json-key">"glob"</span>:      <span class="json-str">"data.sqlite3"</span>,
+    <span class="json-key">"query"</span>: {
+      <span class="json-key">"table"</span>: <span class="json-str">"messages"</span>,
+      <span class="json-key">"columns"</span>: {
+        <span class="json-key">"input_tokens"</span>:  <span class="json-str">"input_token_count"</span>,
+        <span class="json-key">"output_tokens"</span>: <span class="json-str">"output_token_count"</span>,
+        <span class="json-key">"model"</span>:         <span class="json-str">"model_id"</span>,
+        <span class="json-key">"timestamp"</span>:     <span class="json-str">"created_at"</span>,
+        <span class="json-key">"session_id"</span>:    <span class="json-str">"conversation_id"</span>
+      },
+      <span class="json-key">"watermark_column"</span>: <span class="json-str">"created_at"</span>,
+      <span class="json-key">"where"</span>: <span class="json-str">"role = 'assistant' AND input_token_count > 0"</span>
+    }
+  },
+
+  <span class="json-key">"token_semantics"</span>: {
+    <span class="json-key">"input_includes_cached"</span>: <span class="json-bool">false</span>,
+    <span class="json-key">"timestamp_format"</span>:      <span class="json-str">"unix_ms"</span>
+  }
+}</pre>
+    </div>
+
+    <div class="manifest-panel" id="tab-exec">
+      <pre>{
+  <span class="json-key">"manifest_version"</span>: <span class="json-num">1</span>,
+  <span class="json-key">"id"</span>:               <span class="json-str">"cursor"</span>,
+  <span class="json-key">"name"</span>:             <span class="json-str">"Cursor"</span>,
+  <span class="json-key">"version"</span>:          <span class="json-str">"1.0.0"</span>,
+  <span class="json-key">"description"</span>:      <span class="json-str">"Extracts usage from Cursor state.vscdb"</span>,
+  <span class="json-key">"author"</span>:           <span class="json-str">"tokenbar-community"</span>,
+  <span class="json-key">"min_tokenbar_version"</span>: <span class="json-str">"1.5.0"</span>,
+
+  <span class="json-key">"source"</span>: {
+    <span class="json-key">"type"</span>:             <span class="json-str">"executable"</span>,
+    <span class="json-key">"command"</span>:          <span class="json-str">"python3"</span>,
+    <span class="json-key">"script"</span>:           <span class="json-str">"collect.py"</span>,    <span class="json-comment">// 相对插件安装目录</span>
+    <span class="json-key">"args"</span>:             [],
+    <span class="json-key">"incremental_flag"</span>: <span class="json-str">"--since"</span>,       <span class="json-comment">// TokenBar 自动追加 ISO8601</span>
+    <span class="json-key">"timeout_seconds"</span>:  <span class="json-num">60</span>
+  },
+
+  <span class="json-key">"token_semantics"</span>: {
+    <span class="json-key">"input_includes_cached"</span>: <span class="json-bool">true</span>,    <span class="json-comment">// 归一层自动减去 cache_read</span>
+    <span class="json-key">"timestamp_format"</span>:      <span class="json-str">"iso8601"</span>
+  },
+
+  <span class="json-key">"setup_hints"</span>: [<span class="json-str">"Requires Python 3.9+"</span>]
+}
+
+<span class="json-comment">// ── collect.py 输出（NDJSON，每行一个事件）──</span>
+{<span class="json-key">"id"</span>:<span class="json-str">"evt-001"</span>, <span class="json-key">"timestamp"</span>:<span class="json-str">"2026-05-27T10:30:00Z"</span>, <span class="json-key">"input_tokens"</span>:<span class="json-num">1500</span>, <span class="json-key">"output_tokens"</span>:<span class="json-num">800</span>, <span class="json-key">"model"</span>:<span class="json-str">"gpt-4o"</span>}
+{<span class="json-key">"id"</span>:<span class="json-str">"evt-002"</span>, <span class="json-key">"timestamp"</span>:<span class="json-str">"2026-05-27T10:35:00Z"</span>, <span class="json-key">"input_tokens"</span>:<span class="json-num">2200</span>, <span class="json-key">"output_tokens"</span>:<span class="json-num">1100</span>, <span class="json-key">"model"</span>:<span class="json-str">"gpt-4o"</span>}</pre>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ 4. EXECUTABLE PROTOCOL ═══════════════════════ -->
+<section>
+  <div class="section-label">Executable Protocol</div>
+  <div class="section-title">可执行插件通信协议</div>
+
+  <div class="protocol-grid">
+    <div class="pg-head" style="grid-column: 1 / -1; text-align: center;">TokenBar ↔ Plugin Script 约定</div>
+    <div class="pg-key">调用</div>
+    <div class="pg-val"><code>{command} {script} {args} --since 2026-05-27T00:00:00Z</code></div>
+    <div class="pg-key">stdout</div>
+    <div class="pg-val">NDJSON — 每行一个 <code>UsageEvent</code>，必填：id, timestamp, input_tokens, output_tokens</div>
+    <div class="pg-key">stderr</div>
+    <div class="pg-val">警告/错误信息 → 采集为 ParseWarning，不影响正常事件</div>
+    <div class="pg-key">退出码</div>
+    <div class="pg-val"><code>0</code> = 成功 &nbsp;|&nbsp; 非 0 = 失败（记录 warning，下次重试）</div>
+    <div class="pg-key">环境变量</div>
+    <div class="pg-val"><code>TOKENBAR_PLUGIN_STATE_DIR</code> → <code>~/Library/.../plugins/{id}/state/</code> 脚本可自行管理状态</div>
+    <div class="pg-key">超时</div>
+    <div class="pg-val">默认 30s，manifest 可配，上限 120s → <code>Process.terminate()</code></div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ 5. NORMALIZE ═══════════════════════ -->
+<section>
+  <div class="section-label">Token Normalization</div>
+  <div class="section-title">inputIncludesCached 归一</div>
+  <p style="font-size:14px; color:var(--text-dim); margin-bottom:24px;">
+    借鉴 ali-trace：不同 provider 的 <code>input_tokens</code> 口径不一致。Anthropic/OpenAI 的 input 已含 cache_read，
+    其他 provider 的 input 是净值。manifest 中 <code>input_includes_cached</code> 标志声明口径，归一层统一处理。
+  </p>
+
+  <div class="normalize-box">
+    <div class="norm-side">
+      <h4>原始数据 (inputIncludesCached: true)</h4>
+      <div class="norm-row"><span class="norm-label">rawInput</span><span class="norm-val">5000</span></div>
+      <div class="norm-row"><span class="norm-label">cacheRead</span><span class="norm-val">3000</span></div>
+      <div class="norm-row"><span class="norm-label">output</span><span class="norm-val">1200</span></div>
+      <div class="norm-row"><span class="norm-label">cacheCreation</span><span class="norm-val">800</span></div>
+      <div class="norm-row"><span class="norm-label">reasoning</span><span class="norm-val">0</span></div>
+    </div>
+    <div class="norm-arrow">→</div>
+    <div class="norm-side">
+      <h4>归一后写入 DB</h4>
+      <div class="norm-row"><span class="norm-label">input</span><span class="norm-val changed">2000</span> <span style="font-size:11px;color:var(--text-muted)">← 5000 - min(3000, 5000)</span></div>
+      <div class="norm-row"><span class="norm-label">cacheRead</span><span class="norm-val">3000</span></div>
+      <div class="norm-row"><span class="norm-label">output</span><span class="norm-val">1200</span></div>
+      <div class="norm-row"><span class="norm-label">cacheCreation</span><span class="norm-val">800</span></div>
+      <div class="norm-row"><span class="norm-label">reasoning</span><span class="norm-val">0</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ 6. DATAFLOW ═══════════════════════ -->
+<section>
+  <div class="section-label">Integration</div>
+  <div class="section-title">数据流：从 Manifest 到 usage_events</div>
+
+  <div class="flow-container">
+    <div class="flow-step accent">
+      <div class="flow-line"></div>
+      <div class="flow-box">
+        <div class="flow-title">manifest.json</div>
+        <div class="flow-detail">Registry 下载 → ~/Library/.../plugins/{id}/manifest.json</div>
+      </div>
+    </div>
+    <div class="flow-step accent">
+      <div class="flow-line"></div>
+      <div class="flow-box">
+        <div class="flow-title">PluginLoader.parse(manifest)</div>
+        <div class="flow-detail">校验 manifest_version · 解析 source.type · 生成 CustomSourceRecord</div>
+      </div>
+    </div>
+    <div class="flow-step purple">
+      <div class="flow-line"></div>
+      <div class="flow-box">
+        <div class="flow-title">CustomSourceRegistry.upsert(record)</div>
+        <div class="flow-detail">写入 custom_sources 表 · pluginId 关联 · sourcePathKey 去重</div>
+      </div>
+    </div>
+    <div class="flow-step green">
+      <div class="flow-line"></div>
+      <div class="flow-box">
+        <div class="flow-title">CheckpointEngine 调度</div>
+        <div class="flow-detail">
+          jsonl → parseMappedJSONL() · sqlite → PluginSqliteReader · exec → PluginExecutableRunner
+        </div>
+      </div>
+    </div>
+    <div class="flow-step orange">
+      <div class="flow-line"></div>
+      <div class="flow-box">
+        <div class="flow-title">TokenNormalizer.normalize()</div>
+        <div class="flow-detail">clamp 负值 → 0 · inputIncludesCached → input -= cacheRead</div>
+      </div>
+    </div>
+    <div class="flow-step pink">
+      <div class="flow-line"></div>
+      <div class="flow-box">
+        <div class="flow-title">usage_events 写入</div>
+        <div class="flow-detail">id 前缀 "plugin:{id}:" · watermark 更新 · 即刻出现在 UI/CLI</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ 7. REGISTRY ═══════════════════════ -->
+<section>
+  <div class="section-label">Distribution</div>
+  <div class="section-title">Registry 分发流程</div>
+
+  <div class="registry-flow">
+    <div class="reg-node">
+      <div class="reg-icon">👩‍💻</div>
+      <div class="reg-label">Plugin Author</div>
+      <div class="reg-sub">编写 manifest.json<br>提交 PR 到 registry 仓库</div>
+    </div>
+    <div class="reg-arrow">→</div>
+    <div class="reg-node" style="border-color: var(--accent);">
+      <div class="reg-icon">📦</div>
+      <div class="reg-label">GitHub Registry</div>
+      <div class="reg-sub">Bububuger/tokenbar-plugins<br>CI 校验 + 生成 registry.json</div>
+    </div>
+    <div class="reg-arrow">→</div>
+    <div class="reg-node">
+      <div class="reg-icon">🔄</div>
+      <div class="reg-label">Registry Client</div>
+      <div class="reg-sub">TokenBar 拉取 registry.json<br>24h 缓存 · HTTPS</div>
+    </div>
+    <div class="reg-arrow">→</div>
+    <div class="reg-node" style="border-color: var(--green);">
+      <div class="reg-icon">🎨</div>
+      <div class="reg-label">Gallery UI</div>
+      <div class="reg-sub">浏览 · 一键安装<br>更新 · 卸载</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ 8. GALLERY MOCKUP ═══════════════════════ -->
+<section>
+  <div class="section-label">User Experience</div>
+  <div class="section-title">Gallery 界面原型</div>
+
+  <div class="gallery-mock">
+    <div class="gallery-titlebar">
+      <div class="gallery-dot r"></div>
+      <div class="gallery-dot y"></div>
+      <div class="gallery-dot g"></div>
+      <span>TokenBar — Settings → Plugins</span>
+    </div>
+    <div class="gallery-body">
+      <div class="gallery-section-label">Installed <span class="count">2</span></div>
+      <div class="gallery-grid">
+        <div class="plugin-card">
+          <div class="plugin-icon" style="background:rgba(52,211,153,0.12);">🔭</div>
+          <div class="plugin-name">GitHub Copilot</div>
+          <div class="plugin-ver">v1.0.0 · tokenbar-community</div>
+          <span class="plugin-type decl">Declarative</span>
+          <button class="plugin-btn installed">Installed ✓</button>
+        </div>
+        <div class="plugin-card">
+          <div class="plugin-icon" style="background:rgba(129,140,248,0.12);">⚡</div>
+          <div class="plugin-name">Kiro CLI</div>
+          <div class="plugin-ver">v1.0.0 · tokenbar-community</div>
+          <span class="plugin-type decl">Declarative</span>
+          <button class="plugin-btn installed">Installed ✓</button>
+        </div>
+      </div>
+
+      <div class="gallery-section-label">Available <span class="count">4</span></div>
+      <div class="gallery-grid">
+        <div class="plugin-card">
+          <div class="plugin-icon" style="background:rgba(251,146,60,0.12);">🖱</div>
+          <div class="plugin-name">Cursor</div>
+          <div class="plugin-ver">v1.0.0 · tokenbar-community</div>
+          <span class="plugin-type exec">Executable</span>
+          <button class="plugin-btn">Install</button>
+        </div>
+        <div class="plugin-card">
+          <div class="plugin-icon" style="background:rgba(56,189,248,0.12);">🤖</div>
+          <div class="plugin-name">Cline</div>
+          <div class="plugin-ver">v1.0.0 · community</div>
+          <span class="plugin-type decl">Declarative</span>
+          <button class="plugin-btn">Install</button>
+        </div>
+        <div class="plugin-card">
+          <div class="plugin-icon" style="background:rgba(244,114,182,0.12);">🌙</div>
+          <div class="plugin-name">Qwen Code</div>
+          <div class="plugin-ver">v0.9.0 · community</div>
+          <span class="plugin-type decl">Declarative</span>
+          <button class="plugin-btn">Install</button>
+        </div>
+        <div class="plugin-card">
+          <div class="plugin-icon" style="background:rgba(251,191,36,0.12);">🔥</div>
+          <div class="plugin-name">Kimi Code</div>
+          <div class="plugin-ver">v0.9.0 · community</div>
+          <span class="plugin-type decl">Declarative</span>
+          <button class="plugin-btn">Install</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ 9. TIMELINE ═══════════════════════ -->
+<section>
+  <div class="section-label">Roadmap</div>
+  <div class="section-title">实施阶段</div>
+
+  <div class="timeline">
+    <div class="timeline-item">
+      <div class="timeline-phase">Phase 1 — 模型层</div>
+      <div class="timeline-title">Manifest 模型 + Schema Migration</div>
+      <div class="timeline-desc">PluginManifest Codable 模型 · CustomSourceEngine 新增 pluginSqlite/pluginExecutable · custom_sources 表新增字段</div>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-phase">Phase 2 — 归一层</div>
+      <div class="timeline-title">TokenNormalizer + inputIncludesCached</div>
+      <div class="timeline-desc">统一负值 clamp + cache 口径归一 · 所有 parser（含内置）经过此层后再写入 DB</div>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-phase">Phase 3 — SQLite 引擎</div>
+      <div class="timeline-title">PluginSqliteReader</div>
+      <div class="timeline-desc">根据 manifest.query 拼接参数化 SQL · GRDB 只读 + WAL · 复用 watermark 机制</div>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-phase">Phase 4 — 可执行引擎</div>
+      <div class="timeline-title">PluginExecutableRunner</div>
+      <div class="timeline-desc">Process spawn + stdout NDJSON 解析 + stderr 采集 + timeout 硬杀 + 退出码检查</div>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-phase">Phase 5 — 生命周期</div>
+      <div class="timeline-title">PluginManager</div>
+      <div class="timeline-desc">install / uninstall / update · manifest → CustomSourceRecord 转换 · cascade 删除</div>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-phase">Phase 6 — 分发</div>
+      <div class="timeline-title">Registry Client</div>
+      <div class="timeline-desc">拉取 registry.json · 24h 缓存 · 下载 manifest + 附件 · 版本比较</div>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-phase">Phase 7 — 界面</div>
+      <div class="timeline-title">Gallery UI</div>
+      <div class="timeline-desc">Settings → Plugins tab · Installed/Available 分区 · 安装确认弹窗 · Setup hints</div>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-phase">Phase 8 — 生态</div>
+      <div class="timeline-title">Registry 仓库 + 种子插件</div>
+      <div class="timeline-desc">Bububuger/tokenbar-plugins · CI 校验 + registry.json 自动生成 · 首批：Copilot + Kiro</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ 10. SECURITY ═══════════════════════ -->
+<section>
+  <div class="section-label">Security</div>
+  <div class="section-title">安全设计</div>
+
+  <div class="tier-grid">
+    <div class="tier-card" style="border-top: 3px solid var(--green);">
+      <span class="tier-badge green">声明式 — 安全</span>
+      <h3>零执行风险</h3>
+      <ul>
+        <li>纯 JSON 配置，无可执行代码</li>
+        <li>GRDB 只读模式，无写入能力</li>
+        <li>字段映射不执行表达式</li>
+        <li>SQL 参数化 + 表/列名白名单</li>
+      </ul>
+    </div>
+    <div class="tier-card" style="border-top: 3px solid var(--orange);">
+      <span class="tier-badge orange">可执行 — 受控</span>
+      <h3>多层防护</h3>
+      <ul>
+        <li>Registry PR 审核脚本内容</li>
+        <li>安装时二次确认弹窗</li>
+        <li>timeout 硬上限 120s</li>
+        <li>全本地数据，无上传通道</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  TokenBar Plugin System — Design Spec v1 · 2026-05-27<br>
+  <a href="https://github.com/Bububuger/tokenbar">github.com/Bububuger/tokenbar</a>
+</footer>
+
+<script>
+function switchTab(el, panelId) {
+  document.querySelectorAll('.manifest-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.manifest-panel').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById(panelId).classList.add('active');
+}
+</script>
+</body>
+</html>

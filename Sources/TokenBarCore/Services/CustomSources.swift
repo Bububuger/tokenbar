@@ -282,9 +282,40 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
                     UsageSourceWarning(sourceName: sourceName, sourcePath: $0.sourcePath, lineNumber: $0.lineNumber, message: $0.message)
                 })
             }
+        case .pluginSqlite:
+            guard let query = record.sqliteQuery else { break }
+            for file in files {
+                let result = try PluginSqliteReader.parse(
+                    databaseURL: file,
+                    query: query,
+                    timestampFormat: record.timestampFormat,
+                    watermark: watermarks[file.path]
+                )
+                events.append(contentsOf: result.events.map { customMappedEvent($0) })
+                nextWatermarks.append(contentsOf: result.nextWatermarks.map {
+                    customWatermark(from: $0, lastEventId: $0.lastEventId, agent: .custom)
+                })
+                warnings.append(contentsOf: result.warnings)
+            }
+        case .pluginExecutable:
+            guard let config = record.executableConfig else { break }
+            let pluginDir = PluginManager.pluginDirectory(for: record.pluginId ?? record.id)
+            let lastWatermark = watermarks.values.sorted(by: { $0.lastMtime < $1.lastMtime }).last
+            let result = try await PluginExecutableRunner.run(
+                config: config,
+                pluginDir: pluginDir,
+                timestampFormat: record.timestampFormat,
+                since: lastWatermark?.lastMtime
+            )
+            events.append(contentsOf: result.events.map { customMappedEvent($0) })
+            nextWatermarks.append(contentsOf: result.nextWatermarks.map {
+                customWatermark(from: $0, lastEventId: $0.lastEventId, agent: .custom)
+            })
+            warnings.append(contentsOf: result.warnings)
         }
 
-        return UsageSourceLoadResult(events: events, prompts: prompts, nextWatermarks: nextWatermarks, warnings: warnings)
+        let normalized = TokenNormalizer.normalizeEvents(events, inputIncludesCached: record.inputIncludesCached)
+        return UsageSourceLoadResult(events: normalized, prompts: prompts, nextWatermarks: nextWatermarks, warnings: warnings)
     }
 
     public func status(referenceDate: Date, calendar: Calendar) async -> UsageDataSourceStatus {
@@ -304,6 +335,9 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
     }
 
     private func discoverFiles() throws -> [URL] {
+        if record.engine == .pluginExecutable {
+            return []
+        }
         if record.engine == .hermes {
             return discoverHermesDatabases()
         }

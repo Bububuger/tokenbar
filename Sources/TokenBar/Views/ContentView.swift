@@ -105,6 +105,24 @@ struct ContentView: View {
         }
         .frame(minWidth: 1280, minHeight: 980)
         .foregroundStyle(TokenBarStyle.foreground)
+        .background(WindowAccessor { window in
+            // Stop SwiftUI/AppKit from auto-focusing the first TextField
+            // (the sidebar "Search projects" field) on launch / window
+            // becoming key. Setting `initialFirstResponder = nil` blocks the
+            // default behavior at the source; the additional makeFirstResponder
+            // call covers the case where focus was already assigned before
+            // this view installed.
+            window.initialFirstResponder = nil
+            window.makeFirstResponder(nil)
+            // Window also tries again the next time it becomes key.
+            NotificationCenter.default.addObserver(
+                forName: NSWindow.didBecomeKeyNotification,
+                object: window,
+                queue: .main
+            ) { _ in
+                window.makeFirstResponder(nil)
+            }
+        })
         .task { await runtimeModel.bootstrapIfNeeded() }
         .task(id: sidebarProjectsTaskID) {
             await rebuildSidebarProjects(reason: "range_or_events")
@@ -1600,4 +1618,26 @@ private struct DelayedAppear<Content: View>: View {
             ready = true
         }
     }
+}
+
+/// Bridges to the underlying `NSWindow` so we can override AppKit-level
+/// behavior that SwiftUI doesn't expose (e.g. initial first responder).
+private struct WindowAccessor: NSViewRepresentable {
+    let configure: (NSWindow) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            if let window = view.window {
+                configure(window)
+            }
+        }
+        return view
+    }
+
+    // Intentionally a no-op: `configure` is run once on install via
+    // `makeNSView`. Re-running it on every SwiftUI update would, for example,
+    // accumulate notification-center observers and repeatedly steal focus
+    // from fields the user is actively typing into.
+    func updateNSView(_ view: NSView, context: Context) {}
 }

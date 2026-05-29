@@ -514,6 +514,7 @@ struct PopKPI: View {
                 content
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var content: some View {
@@ -542,8 +543,17 @@ struct PopKPI: View {
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(TokenBarStyle.faint)
         }
-        .padding(.vertical, 3)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.white.opacity(0.03))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(TokenBarStyle.line.opacity(0.6), lineWidth: 1)
+        )
         .overlay(alignment: .bottom) {
             if isExpanded {
                 Rectangle()

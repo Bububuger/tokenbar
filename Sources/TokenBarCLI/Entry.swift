@@ -112,6 +112,24 @@ struct TokenBarCLIEntry {
                     try WarningsCommand.parse(cursor: &local.cursor, options: &local.options)
                     try WarningsCommand.run(local.options)
                 }
+            case "skills":
+                try await runFiltered(command: SkillsCommand.name, dbOverride: dbOverride, cursor: &cursor) { options in
+                    var local = options
+                    try SkillsCommand.parse(cursor: &local.cursor, options: &local.options)
+                    try SkillsCommand.run(local.options)
+                }
+            case "mcp":
+                try await runFiltered(command: McpCommand.name, dbOverride: dbOverride, cursor: &cursor) { options in
+                    var local = options
+                    try McpCommand.parse(cursor: &local.cursor, options: &local.options)
+                    try McpCommand.run(local.options)
+                }
+            case "plugins":
+                try await runFiltered(command: PluginsCommand.name, dbOverride: dbOverride, cursor: &cursor) { options in
+                    var local = options
+                    try PluginsCommand.parse(cursor: &local.cursor, options: &local.options)
+                    try PluginsCommand.run(local.options)
+                }
             case "schema":
                 try await runFiltered(command: SchemaCommand.name, dbOverride: dbOverride, cursor: &cursor) { options in
                     var local = options

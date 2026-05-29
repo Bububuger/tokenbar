@@ -135,13 +135,11 @@ struct SettingsView: View {
     }
 
     /// CL-P1-019: hard reset — clears pricing overrides, calls runtime to
-    /// wipe prompts, and removes custom sources. Built-in sources remain.
+    /// wipe the local index, saved prompts, and custom sources. Upstream agent
+    /// logs remain on disk and can be re-indexed by a later refresh.
     private func resetAll() async {
         pricingOverridesJSON = "{}"
-        try? await runtimeModel.wipePrompts()
-        for source in runtimeModel.customSources {
-            await runtimeModel.removeCustomSource(id: source.id)
-        }
+        await runtimeModel.resetAllTokenBarData()
     }
 
     var body: some View {
@@ -166,6 +164,7 @@ struct SettingsView: View {
                         case .sources:
                             customSourcesSection
                             retentionSection
+                            librarySection
                         }
                     }
                     .padding(16)
@@ -319,14 +318,14 @@ struct SettingsView: View {
 
     private var promptSection: some View {
         settingsSection(
-            title: "Prompt Capture",
-            subtitle: "Stores user-only prompts locally. Project history reveals text by default."
+            title: "Prompt Text",
+            subtitle: "Prompts stay indexed locally for history, CLI, and reports. This controls whether text is shown."
         ) {
             HStack(spacing: 5) {
-                pill("Off", selected: !runtimeModel.storePromptTextInClearText) {
+                pill("Hidden", selected: !runtimeModel.storePromptTextInClearText) {
                     runtimeModel.storePromptTextInClearText = false
                 }
-                pill("Full", selected: runtimeModel.storePromptTextInClearText) {
+                pill("Shown", selected: runtimeModel.storePromptTextInClearText) {
                     runtimeModel.storePromptTextInClearText = true
                 }
             }
@@ -596,7 +595,73 @@ struct SettingsView: View {
                     }
                     .disabled(resetAck != "RESET")
                 } message: {
-                    Text("This wipes all events, prompts, custom sources, and pricing overrides. Type RESET to confirm.")
+                    Text("This wipes TokenBar's local index, saved prompts, custom sources, and pricing overrides. Upstream agent logs stay on disk and can be re-indexed later. Type RESET to confirm.")
+                }
+            }
+        }
+    }
+
+    private var librarySection: some View {
+        settingsSection(
+            title: "Library (Skills & MCP)",
+            subtitle: "Paths TokenBar watches for skill directories and MCP config."
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("User scope")
+                            .sectionLabel()
+                        Text("~/.claude/skills")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(TokenBarStyle.faint)
+                    }
+                    Spacer()
+                    if let state = runtimeModel.librarySnapshot.scanStates[.user] {
+                        Text("\(state.skillCount) skills")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(TokenBarStyle.muted)
+                    }
+                }
+
+                if let sharedState = runtimeModel.librarySnapshot.scanStates[.shared] {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Shared scope")
+                                .sectionLabel()
+                            Text(UserDefaults.standard.string(forKey: "tokenbar.library.sharedRoots") ?? "not configured")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(TokenBarStyle.faint)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        Text("\(sharedState.skillCount) skills")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(TokenBarStyle.muted)
+                        if let error = sharedState.lastError {
+                            Text(error)
+                                .font(.system(size: 10))
+                                .foregroundStyle(TokenBarStyle.error)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+
+                HStack(spacing: 12) {
+                    Button("Rescan now") {
+                        runtimeModel.rebuildLibrarySnapshot(trigger: "manual.rescan")
+                    }
+                    .buttonStyle(SettingsButtonStyle())
+
+                    if runtimeModel.librarySnapshot.isScanning {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+
+                    if let lastScan = runtimeModel.librarySnapshot.lastFullScanAt {
+                        Text("Last scan: \(lastScan.formatted(.relative(presentation: .named)))")
+                            .font(.system(size: 11))
+                            .foregroundStyle(TokenBarStyle.faint)
+                    }
                 }
             }
         }

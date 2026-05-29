@@ -9,27 +9,23 @@ enum LibraryTab: String, CaseIterable {
     case mcp
 }
 
-enum LibraryScope: String {
-    case user
-    case project
-    case shared
-}
-
 struct LibrarySkillItem: Identifiable {
-    let id = UUID()
+    var id: String { path }
     let name: String
     let isReal: Bool
     let target: String?
+    let path: String
     let size: String
     let contextK: Double?
     let modified: String
     let desc: String
     let broken: Bool
 
-    init(name: String, isReal: Bool, target: String? = nil, size: String, contextK: Double?, modified: String, desc: String, broken: Bool = false) {
+    init(name: String, isReal: Bool, target: String? = nil, path: String, size: String, contextK: Double?, modified: String, desc: String, broken: Bool = false) {
         self.name = name
         self.isReal = isReal
         self.target = target
+        self.path = path
         self.size = size
         self.contextK = contextK
         self.modified = modified
@@ -48,12 +44,12 @@ struct LibrarySkillDir: Identifiable {
 }
 
 struct LibraryPluginItem: Identifiable {
-    let id = UUID()
+    let id: String
     let name: String
     let version: String
     let source: String
     let bundle: String
-    let state: String
+    let path: String
 }
 
 enum McpHealthStatus: String {
@@ -78,7 +74,7 @@ struct McpHealthInfo {
 }
 
 struct LibraryMcpItem: Identifiable {
-    let id = UUID()
+    let id: String
     let name: String
     let loaded: Bool
     let source: String
@@ -88,7 +84,8 @@ struct LibraryMcpItem: Identifiable {
     let broken: Bool
     let health: McpHealthInfo
 
-    init(name: String, loaded: Bool, source: String, tools: Int, tokens: Double, desc: String, broken: Bool = false, health: McpHealthInfo) {
+    init(id: String, name: String, loaded: Bool, source: String, tools: Int, tokens: Double, desc: String, broken: Bool = false, health: McpHealthInfo) {
+        self.id = id
         self.name = name
         self.loaded = loaded
         self.source = source
@@ -109,79 +106,174 @@ struct LibraryMcpDir: Identifiable {
     let items: [LibraryMcpItem]
 }
 
-// MARK: - Fixture data
+// MARK: - Snapshot projection
 
-let skillDirs: [LibrarySkillDir] = [
-    LibrarySkillDir(
-        id: "user", scope: .user, path: "~/.claude/skills/",
-        label: "User", sub: "personal \u{00B7} synced via dotfiles repo",
-        items: [
-            LibrarySkillItem(name: "frontend-design", isReal: true, size: "4.2K", contextK: 1.4, modified: "2d ago", desc: "Aesthetic direction for designs outside an existing brand system"),
-            LibrarySkillItem(name: "make-a-deck", isReal: true, size: "6.8K", contextK: 2.1, modified: "2d ago", desc: "Slide presentation in HTML"),
-            LibrarySkillItem(name: "interactive-prototype", isReal: false, target: "~/dev/skills-repo/interactive-prototype/", size: "12K", contextK: 3.6, modified: "4h ago", desc: "Working app with real interactions"),
-            LibrarySkillItem(name: "wireframe", isReal: false, target: "~/dev/skills-repo/wireframe/", size: "3.4K", contextK: 1.0, modified: "4h ago", desc: "Explore many ideas with wireframes and storyboards"),
-            LibrarySkillItem(name: "save-as-pdf", isReal: true, size: "1.1K", contextK: 0.4, modified: "11d ago", desc: "Print-ready PDF export"),
-            LibrarySkillItem(name: "animations", isReal: true, size: "2.8K", contextK: 0.9, modified: "7d ago", desc: "Timeline-based motion design"),
-        ]
-    ),
-    LibrarySkillDir(
-        id: "project", scope: .project, path: "./.claude/skills/",
-        label: "Project", sub: "scoped to ~/code/tokenbar/",
-        items: [
-            LibrarySkillItem(name: "tokenbar-style-guide", isReal: true, size: "5.6K", contextK: 1.7, modified: "31m ago", desc: "Repo-local style reference for the TokenBar visual system"),
-            LibrarySkillItem(name: "frontend-design", isReal: true, size: "3.9K", contextK: 1.2, modified: "2h ago", desc: "Project-specific override \u{00B7} narrower scope"),
-            LibrarySkillItem(name: "mock-fixtures", isReal: false, target: "~/dev/skills-repo/mock-fixtures/", size: "2.1K", contextK: 0.7, modified: "4h ago", desc: "Realistic sample data generators"),
-        ]
-    ),
-    LibrarySkillDir(
-        id: "shared", scope: .shared, path: "~/.config/agent-shared/skills/",
-        label: "Shared", sub: "third-party \u{00B7} read-only",
-        items: [
-            LibrarySkillItem(name: "shadcn-recipes", isReal: false, target: "~/dev/community/shadcn-recipes/", size: "18K", contextK: 5.4, modified: "3w ago", desc: "shadcn component recipes & layouts"),
-            LibrarySkillItem(name: "figma-importer", isReal: false, target: "~/Library/Caches/agent/_dl/figma-importer-v0.4/", size: "\u{2014}", contextK: nil, modified: "missing", desc: "Import Figma exports", broken: true),
-            LibrarySkillItem(name: "db-migrations", isReal: true, size: "7.2K", contextK: 2.2, modified: "5d ago", desc: "Generate Postgres/SQLite migration scripts"),
-            LibrarySkillItem(name: "make-a-deck", isReal: true, size: "5.4K", contextK: 1.6, modified: "6d ago", desc: "Older fork \u{00B7} shipped with shared bundle"),
-        ]
-    ),
-]
+func projectSkillDirs(from snapshot: LibrarySnapshot) -> [LibrarySkillDir] {
+    var dirs: [LibrarySkillDir] = []
+    let scopeOrder: [LibraryScope] = [.user, .project, .shared, .plugin]
+    let formatter = RelativeDateTimeFormatter()
+    formatter.unitsStyle = .abbreviated
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
 
-private let plugins: [LibraryPluginItem] = [
-    LibraryPluginItem(name: "git-context", version: "1.4.2", source: "marketplace", bundle: "6 commands \u{00B7} 2 hooks", state: "active"),
-    LibraryPluginItem(name: "jira-link", version: "0.9.0", source: "marketplace", bundle: "3 commands", state: "active"),
-    LibraryPluginItem(name: "vscode-bridge", version: "2.1.0", source: "local", bundle: "1 command \u{00B7} 4 hooks", state: "active"),
-    LibraryPluginItem(name: "linear-tasks", version: "0.3.1", source: "marketplace", bundle: "4 commands", state: "active"),
-    LibraryPluginItem(name: "k8s-debug", version: "1.0.0", source: "npm \u{00B7} @infra/k8s-debug", bundle: "7 commands \u{00B7} 1 hook", state: "active"),
-    LibraryPluginItem(name: "playwright-record", version: "0.6.4", source: "marketplace", bundle: "2 commands", state: "disabled"),
-    LibraryPluginItem(name: "sentry-context", version: "0.2.0", source: "marketplace", bundle: "2 commands", state: "active"),
-    LibraryPluginItem(name: "sql-explain", version: "1.2.0", source: "local", bundle: "3 commands", state: "active"),
-]
+    func displayPath(_ raw: String) -> String {
+        raw.hasPrefix(home) ? "~" + raw.dropFirst(home.count) : raw
+    }
 
-let mcpDirs: [LibraryMcpDir] = [
-    LibraryMcpDir(
-        id: "mcp-user", scope: .user, path: "~/.config/claude/mcp_servers.json",
-        label: "User", sub: "global defaults \u{00B7} loaded into every project unless overridden",
-        items: [
-            LibraryMcpItem(name: "filesystem", loaded: true, source: "npx \u{00B7} @mcp/filesystem", tools: 14, tokens: 8.4, desc: "Local file read/write within allow-listed dirs", health: McpHealthInfo(status: .ok, latency: 18, last: "2m ago")),
-            LibraryMcpItem(name: "github", loaded: true, source: "npx \u{00B7} @mcp/github", tools: 22, tokens: 21.0, desc: "Repo \u{00B7} PR \u{00B7} issue \u{00B7} actions \u{2014} scoped token", health: McpHealthInfo(status: .ok, latency: 142, last: "2m ago")),
-            LibraryMcpItem(name: "postgres", loaded: true, source: "~/bin/mcp-postgres", tools: 9, tokens: 6.2, desc: "Schema introspection + read-only queries", health: McpHealthInfo(status: .degraded, latency: 824, last: "2m ago", note: "slow handshake")),
-            LibraryMcpItem(name: "slack", loaded: false, source: "npx \u{00B7} @mcp/slack", tools: 8, tokens: 7.2, desc: "DMs, channels, threads", health: McpHealthInfo(status: .ok, latency: 96, last: "14m ago")),
-            LibraryMcpItem(name: "notion", loaded: false, source: "npx \u{00B7} @mcp/notion", tools: 12, tokens: 18.4, desc: "Pages, databases, properties", health: McpHealthInfo(status: .unchecked, last: "never")),
-            LibraryMcpItem(name: "stripe", loaded: false, source: "npx \u{00B7} @mcp/stripe", tools: 9, tokens: 11.0, desc: "Customers, subs, charges \u{2014} live mode", health: McpHealthInfo(status: .down, last: "1h ago", note: "401 \u{00B7} auth expired")),
-            LibraryMcpItem(name: "sentry", loaded: false, source: "npx \u{00B7} @mcp/sentry", tools: 5, tokens: 4.4, desc: "Issues + events", health: McpHealthInfo(status: .ok, latency: 204, last: "22m ago")),
-            LibraryMcpItem(name: "vercel", loaded: false, source: "local \u{00B7} ~/bin/mcp-vercel", tools: 7, tokens: 5.6, desc: "Deploys, env vars, projects", health: McpHealthInfo(status: .unchecked, last: "never")),
-        ]
-    ),
-    LibraryMcpDir(
-        id: "mcp-project", scope: .project, path: "./.claude/mcp.json",
-        label: "Project", sub: "tokenbar-only \u{00B7} checked into repo \u{00B7} merged after user scope",
-        items: [
-            LibraryMcpItem(name: "linear", loaded: true, source: "npx \u{00B7} @mcp/linear", tools: 11, tokens: 9.8, desc: "Issues, projects, cycles, status", health: McpHealthInfo(status: .ok, latency: 78, last: "2m ago")),
-            LibraryMcpItem(name: "chromium", loaded: true, source: "npx \u{00B7} @mcp/playwright", tools: 18, tokens: 24.0, desc: "Headless browser drive \u{2014} slow", health: McpHealthInfo(status: .degraded, latency: 1420, last: "2m ago", note: "high p95")),
-            LibraryMcpItem(name: "figma", loaded: true, source: "npx \u{00B7} @mcp/figma", tools: 6, tokens: 14.8, desc: "Read frames, export PNG", health: McpHealthInfo(status: .ok, latency: 236, last: "2m ago")),
-            LibraryMcpItem(name: "datadog", loaded: false, source: "npx \u{00B7} @mcp/datadog", tools: 10, tokens: 9.8, desc: "Metrics, dashboards, monitors", broken: true, health: McpHealthInfo(status: .down, last: "5m ago", note: "handshake failed \u{00B7} ETIMEDOUT")),
-        ]
-    ),
-]
+    for scope in scopeOrder {
+        let skills = snapshot.skillsByScope[scope] ?? []
+        guard !skills.isEmpty else { continue }
+        // Sub-group by scope_root so each on-disk skills directory (e.g.
+        // ~/.codex/skills, ~/.agents/skills) shows as its own collapsible
+        // card. Before this, all user-scope skills were jammed into one
+        // "User" bucket and individual roots were invisible.
+        let groupedByRoot = Dictionary(grouping: skills, by: \.scopeRoot.path)
+        let sortedRoots = groupedByRoot.keys.sorted()
+
+        for rootPath in sortedRoots {
+            let rootSkills = groupedByRoot[rootPath] ?? []
+            let rootDisplay = displayPath(rootPath)
+            let label: String
+            let sub: String
+            switch scope {
+            case .user:
+                label = "User \u{00B7} \(rootDisplay)"
+                sub = "\(rootSkills.count) skill\(rootSkills.count == 1 ? "" : "s")"
+            case .project:
+                let projectName = (rootPath as NSString).pathComponents.dropLast(2).last ?? "project"
+                label = "Project \u{00B7} \(projectName)"
+                sub = "\(rootSkills.count) skill\(rootSkills.count == 1 ? "" : "s") \u{00B7} \(rootDisplay)"
+            case .shared:
+                label = "Shared \u{00B7} \(rootDisplay)"
+                sub = "\(rootSkills.count) skill\(rootSkills.count == 1 ? "" : "s")"
+            case .plugin:
+                let pluginId = rootSkills.first?.pluginId ?? "plugin"
+                label = "Plugin \u{00B7} \(pluginId)"
+                sub = "\(rootSkills.count) skill\(rootSkills.count == 1 ? "" : "s") \u{00B7} \(rootDisplay)"
+            }
+
+            let items = rootSkills.map { skill -> LibrarySkillItem in
+                let sizeStr = formatBytes(skill.sizeBytes)
+                let contextK = skill.estimatedTokens > 0 ? Double(skill.estimatedTokens) / 1000.0 : nil
+                let modified = formatter.localizedString(for: skill.modifiedAt, relativeTo: Date())
+                return LibrarySkillItem(
+                    name: skill.name,
+                    isReal: !skill.isSymlink,
+                    target: skill.resolvedTarget?.path,
+                    path: skill.path.path,
+                    size: sizeStr,
+                    contextK: contextK,
+                    modified: modified,
+                    desc: skill.description ?? "",
+                    broken: skill.isBroken
+                )
+            }
+
+            dirs.append(LibrarySkillDir(
+                id: "\(scope.rawValue):\(rootPath)",
+                scope: scope,
+                path: rootPath,
+                label: label,
+                sub: sub,
+                items: items
+            ))
+        }
+    }
+    return dirs
+}
+
+func projectMcpDirs(from snapshot: LibrarySnapshot) -> [LibraryMcpDir] {
+    var dirs: [LibraryMcpDir] = []
+    let scopeOrder: [LibraryScope] = [.user, .project]
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+
+    func displayPath(_ raw: String) -> String {
+        raw.hasPrefix(home) ? "~" + raw.dropFirst(home.count) : raw
+    }
+
+    for scope in scopeOrder {
+        let servers = snapshot.mcpByScope[scope] ?? []
+        guard !servers.isEmpty else { continue }
+        // Sub-group by source_file so each config file (~/.claude.json,
+        // <project>/.mcp.json, etc.) gets its own collapsible card.
+        let groupedBySource = Dictionary(grouping: servers, by: \.sourceFile.path)
+        let sortedSources = groupedBySource.keys.sorted()
+
+        for sourcePath in sortedSources {
+            let serverList = groupedBySource[sourcePath] ?? []
+            let sourceDisplay = displayPath(sourcePath)
+            let label: String
+            let sub: String
+            switch scope {
+            case .user:
+                label = "User \u{00B7} \(sourceDisplay)"
+                sub = "\(serverList.count) server\(serverList.count == 1 ? "" : "s")"
+            case .project:
+                label = "Project \u{00B7} \(sourceDisplay)"
+                sub = "\(serverList.count) server\(serverList.count == 1 ? "" : "s")"
+            case .shared:
+                label = "Shared \u{00B7} \(sourceDisplay)"
+                sub = "\(serverList.count) server\(serverList.count == 1 ? "" : "s")"
+            case .plugin:
+                label = "Plugin \u{00B7} \(sourceDisplay)"
+                sub = "\(serverList.count) server\(serverList.count == 1 ? "" : "s")"
+            }
+
+            let items = serverList.map { server -> LibraryMcpItem in
+                let tokens = Double(server.estimatedTokens) / 1000.0
+                return LibraryMcpItem(
+                    id: "\(scope.rawValue):\(sourcePath):\(server.name)",
+                    name: server.name,
+                    loaded: false,
+                    source: server.command,
+                    tools: 0,
+                    tokens: tokens,
+                    desc: server.args.joined(separator: " "),
+                    health: McpHealthInfo(status: .unchecked, last: "—")
+                )
+            }
+
+            dirs.append(LibraryMcpDir(
+                id: "mcp:\(scope.rawValue):\(sourcePath)",
+                scope: scope,
+                path: sourcePath,
+                label: label,
+                sub: sub,
+                items: items
+            ))
+        }
+    }
+    return dirs
+}
+
+func projectPlugins(from snapshot: LibrarySnapshot) -> [LibraryPluginItem] {
+    snapshot.plugins.map { plugin in
+        let bundle: String
+        if plugin.scope == "local", let pp = plugin.projectPath {
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            bundle = pp.hasPrefix(home) ? "~" + pp.dropFirst(home.count) : pp
+        } else {
+            bundle = plugin.marketplace
+        }
+        return LibraryPluginItem(
+            id: plugin.fullId,
+            name: plugin.name,
+            version: plugin.version,
+            source: plugin.scope,
+            bundle: bundle,
+            path: plugin.installPath
+        )
+    }
+}
+
+func formatBytes(_ bytes: Int64) -> String {
+    if bytes < 1024 { return "\(bytes)B" }
+    let kb = Double(bytes) / 1024.0
+    if kb < 1024 { return String(format: "%.1fK", kb) }
+    let mb = kb / 1024.0
+    return String(format: "%.1fM", mb)
+}
+
+typealias LibraryScope = TokenBarCore.LibraryScope
 
 // MARK: - Helpers
 
@@ -217,6 +309,7 @@ private struct ScopePill: View {
         case .user: TokenBarStyle.input
         case .project: Color(red: 0.78, green: 0.90, blue: 0.39)
         case .shared: TokenBarStyle.muted
+        case .plugin: Color(red: 0.85, green: 0.55, blue: 0.95)
         }
     }
 
@@ -225,6 +318,7 @@ private struct ScopePill: View {
         case .user: TokenBarStyle.input.opacity(0.10)
         case .project: Color(red: 0.78, green: 0.90, blue: 0.39).opacity(0.10)
         case .shared: Color.white.opacity(0.05)
+        case .plugin: Color(red: 0.85, green: 0.55, blue: 0.95).opacity(0.10)
         }
     }
 
@@ -233,6 +327,7 @@ private struct ScopePill: View {
         case .user: TokenBarStyle.input.opacity(0.30)
         case .project: Color(red: 0.78, green: 0.90, blue: 0.39).opacity(0.30)
         case .shared: Color.white.opacity(0.16)
+        case .plugin: Color(red: 0.85, green: 0.55, blue: 0.95).opacity(0.30)
         }
     }
 }
@@ -320,6 +415,9 @@ private struct FilterPillButton: View {
 private struct LibraryTabSelector: View {
     let selectedTab: LibraryTab
     let onSelect: (LibraryTab) -> Void
+    let skillDirs: [LibrarySkillDir]
+    let plugins: [LibraryPluginItem]
+    let mcpDirs: [LibraryMcpDir]
 
     private var totalSkills: Int { skillDirs.reduce(0) { $0 + $1.items.count } }
     private var totalPlugins: Int { plugins.count }
@@ -341,7 +439,7 @@ private struct LibraryTabSelector: View {
                 icon: "powerplug",
                 label: "Plugins",
                 count: totalPlugins,
-                meta: "\(plugins.filter { $0.state == "active" }.count) active"
+                meta: "\(totalPlugins) installed"
             )
             tabItem(
                 tab: .mcp,
@@ -399,6 +497,8 @@ private struct LibraryTabSelector: View {
 private struct LibrarySkillRow: View {
     let item: LibrarySkillItem
     let isDuplicate: Bool
+    @EnvironmentObject private var runtimeModel: TokenBarRuntimeModel
+    @State private var showDeleteAlert = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -451,9 +551,12 @@ private struct LibrarySkillRow: View {
             costCell
 
             HStack(spacing: 6) {
-                iconButton(systemName: "folder", tooltip: "Open in Finder")
-                textButton(label: "Move", tooltip: "Move\u{2026}")
-                iconButton(systemName: "trash", tooltip: "Delete", isDanger: true)
+                iconButton(systemName: "folder", tooltip: "Open in Finder") {
+                    revealInFinder()
+                }
+                iconButton(systemName: "trash", tooltip: "Delete", isDanger: true) {
+                    showDeleteAlert = true
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -461,6 +564,37 @@ private struct LibrarySkillRow: View {
         .overlay(alignment: .bottom) {
             TokenBarStyle.line.frame(height: 1)
                 .padding(.leading, 46)
+        }
+        .alert("Delete \(item.name)?", isPresented: $showDeleteAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Move to Trash", role: .destructive) { deleteToTrash() }
+        } message: {
+            Text(item.isReal
+                 ? "This permanently moves the skill directory to the Trash:\n\(item.path)"
+                 : "This removes the symlink only — the target it points to is untouched:\n\(item.path)")
+        }
+    }
+
+    private func revealInFinder() {
+        let url = URL(fileURLWithPath: item.path)
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    private func deleteToTrash() {
+        let url = URL(fileURLWithPath: item.path)
+        var resulting: NSURL?
+        do {
+            try FileManager.default.trashItem(at: url, resultingItemURL: &resulting)
+            // Immediate UI refresh — FSEvents will also fire, but the
+            // debouncer delays that by ~3s and the user expects to see the
+            // row disappear right away.
+            runtimeModel.rebuildLibrarySnapshot(trigger: "ui.skill_deleted")
+        } catch {
+            // Trash can fail for symlinks pointing into non-Finder-managed
+            // locations or when the parent dir lacks write permission.
+            // Fall back to a hard remove so the row clears either way.
+            try? FileManager.default.removeItem(at: url)
+            runtimeModel.rebuildLibrarySnapshot(trigger: "ui.skill_deleted.fallback")
         }
     }
 
@@ -523,8 +657,8 @@ private struct LibrarySkillRow: View {
         .overlay(Capsule().stroke(TokenBarStyle.error.opacity(0.25), lineWidth: 1))
     }
 
-    private func iconButton(systemName: String, tooltip: String, isDanger: Bool = false) -> some View {
-        Button {} label: {
+    private func iconButton(systemName: String, tooltip: String, isDanger: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 10, weight: .medium))
                 .frame(width: 24, height: 24)
@@ -535,20 +669,6 @@ private struct LibrarySkillRow: View {
         .foregroundStyle(isDanger ? TokenBarStyle.error : TokenBarStyle.muted)
         .help(tooltip)
     }
-
-    private func textButton(label: String, tooltip: String) -> some View {
-        Button {} label: {
-            Text(label)
-                .font(.system(size: 11, weight: .medium))
-                .padding(.horizontal, 9)
-                .frame(height: 24)
-                .background(Color.white.opacity(0.02), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(TokenBarStyle.muted)
-        .help(tooltip)
-    }
 }
 
 // MARK: - Skill directory card (collapsible)
@@ -557,7 +677,7 @@ private struct SkillDirCard: View {
     let dir: LibrarySkillDir
     let dupNames: Set<String>
     let filter: SkillFilter
-    @State private var isOpen = true
+    @State private var isOpen = false
 
     private var filteredItems: [LibrarySkillItem] {
         dir.items.filter { item in
@@ -611,7 +731,9 @@ private struct SkillDirCard: View {
 
                 dirCounts
 
-                Button {} label: {
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: dir.path)])
+                } label: {
                     Text("Reveal")
                         .font(.system(size: 11, weight: .medium))
                         .padding(.horizontal, 9)
@@ -673,7 +795,8 @@ private struct SkillDirCard: View {
 // MARK: - Skills tab body
 
 private struct SkillsBody: View {
-    @State private var viewMode: LibraryViewMode = .graph
+    let skillDirs: [LibrarySkillDir]
+    let onRescan: () -> Void
     @State private var filter: SkillFilter = .all
     @State private var searchText = ""
 
@@ -686,22 +809,12 @@ private struct SkillsBody: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            LibraryModeBar(
-                title: viewMode == .graph ? "Skill constellation" : "All skills",
-                subtitle: viewMode == .graph
-                    ? "hover a node to preview \u{00B7} click to inspect \u{00B7} \u{2318} click to pin"
-                    : "flat list of every skill TokenBar found on disk \u{00B7} use filters to drill down",
-                mode: viewMode,
-                onChange: { viewMode = $0 }
-            )
-
-            if viewMode == .graph {
-                SkillsConstellationView()
-            } else {
-                toolbar
-                ForEach(skillDirs) { dir in
-                    SkillDirCard(dir: dir, dupNames: dupNames, filter: filter)
-                }
+            // Graph view disabled — force-directed layout for ~300 skills
+            // without real link semantics never produced a useful constellation.
+            // List view is the only mode while we revisit the design.
+            toolbar
+            ForEach(skillDirs) { dir in
+                SkillDirCard(dir: dir, dupNames: dupNames, filter: filter)
             }
         }
     }
@@ -711,7 +824,7 @@ private struct SkillsBody: View {
             searchField(placeholder: "Search \(total) skills\u{2026}")
             filterSegment
             Spacer()
-            ghostButton(icon: "arrow.clockwise", label: "Rescan")
+            ghostButton(icon: "arrow.clockwise", label: "Rescan", action: onRescan)
             primaryButton(icon: "plus", label: "Add symlink\u{2026}")
         }
         .padding(.vertical, 4)
@@ -736,33 +849,22 @@ private struct SkillsBody: View {
 private struct LibraryPluginRow: View {
     let plugin: LibraryPluginItem
 
-    private var isDisabled: Bool { plugin.state == "disabled" }
-
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "powerplug")
                 .font(.system(size: 11, weight: .medium))
                 .frame(width: 18)
-                .foregroundStyle(isDisabled ? TokenBarStyle.faint.opacity(0.5) : TokenBarStyle.muted)
+                .foregroundStyle(TokenBarStyle.muted)
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
                     Text(plugin.name)
                         .font(.system(size: 13, weight: .medium, design: .monospaced))
-                        .foregroundStyle(isDisabled ? TokenBarStyle.faint : TokenBarStyle.foreground)
+                        .foregroundStyle(TokenBarStyle.foreground)
                         .lineLimit(1)
                     Text("v\(plugin.version)")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(TokenBarStyle.faint)
-                    if isDisabled {
-                        Text("disabled")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(TokenBarStyle.faint)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 2)
-                            .background(Color.white.opacity(0.04), in: Capsule())
-                            .overlay(Capsule().stroke(TokenBarStyle.line, lineWidth: 1))
-                    }
                 }
                 HStack(spacing: 8) {
                     Text(plugin.bundle)
@@ -778,28 +880,16 @@ private struct LibraryPluginRow: View {
 
             Spacer()
 
-            HStack(spacing: 6) {
-                Button {} label: {
-                    Text(isDisabled ? "Enable" : "Disable")
-                        .font(.system(size: 11, weight: .medium))
-                        .padding(.horizontal, 9)
-                        .frame(height: 24)
-                        .background(Color.white.opacity(0.02), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(TokenBarStyle.muted)
-
-                Button {} label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 10, weight: .medium))
-                        .frame(width: 24, height: 24)
-                        .background(Color.white.opacity(0.02), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(TokenBarStyle.muted)
+            Button { revealInFinder() } label: {
+                Image(systemName: "folder")
+                    .font(.system(size: 10, weight: .medium))
+                    .frame(width: 24, height: 24)
+                    .background(Color.white.opacity(0.02), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
             }
+            .buttonStyle(.plain)
+            .foregroundStyle(TokenBarStyle.muted)
+            .help("Open in Finder")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -808,26 +898,23 @@ private struct LibraryPluginRow: View {
                 .padding(.leading, 46)
         }
     }
+
+    private func revealInFinder() {
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: plugin.path)])
+    }
 }
 
 // MARK: - Plugins tab body
 
 private struct PluginsBody: View {
-    @State private var pluginFilter = "all"
-
-    private var filtered: [LibraryPluginItem] {
-        switch pluginFilter {
-        case "active": plugins.filter { $0.state == "active" }
-        case "disabled": plugins.filter { $0.state == "disabled" }
-        default: plugins
-        }
-    }
+    let plugins: [LibraryPluginItem]
+    let onRescan: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             toolbar
             VStack(spacing: 0) {
-                ForEach(filtered) { plugin in
+                ForEach(plugins) { plugin in
                     LibraryPluginRow(plugin: plugin)
                 }
             }
@@ -839,34 +926,10 @@ private struct PluginsBody: View {
     private var toolbar: some View {
         HStack(spacing: 10) {
             searchField(placeholder: "Search \(plugins.count) plugins\u{2026}")
-            segmentedPicker
             Spacer()
-            ghostButton(icon: "arrow.clockwise", label: "Rescan")
+            ghostButton(icon: "arrow.clockwise", label: "Rescan", action: onRescan)
         }
         .padding(.vertical, 4)
-    }
-
-    private var segmentedPicker: some View {
-        HStack(spacing: 0) {
-            segButton("All", id: "all")
-            segButton("Active", id: "active")
-            segButton("Disabled", id: "disabled")
-        }
-        .padding(2)
-        .background(Color.white.opacity(0.02), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
-    }
-
-    private func segButton(_ label: String, id: String) -> some View {
-        Button { pluginFilter = id } label: {
-            Text(label)
-                .font(.system(size: 11.5, weight: pluginFilter == id ? .semibold : .medium))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(pluginFilter == id ? Color.white.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(pluginFilter == id ? TokenBarStyle.foreground : TokenBarStyle.faint)
     }
 }
 
@@ -901,11 +964,6 @@ private struct McpContextRibbon: View {
                 }
 
                 Spacer()
-
-                HStack(spacing: 8) {
-                    ghostButton(icon: "arrow.clockwise", label: "Reload all")
-                    ghostButton(icon: nil, label: "Unload all")
-                }
             }
 
             VStack(spacing: 4) {
@@ -1032,7 +1090,10 @@ private struct LibraryMcpRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            toggleSwitch
+            Image(systemName: "server.rack")
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 18)
+                .foregroundStyle(TokenBarStyle.muted)
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
@@ -1058,33 +1119,6 @@ private struct LibraryMcpRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             mcpCostCell
-
-            HStack(spacing: 6) {
-                Button {} label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 9, weight: .medium))
-                        Text("Check")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .padding(.horizontal, 9)
-                    .frame(height: 24)
-                    .background(Color.white.opacity(0.02), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(TokenBarStyle.muted)
-
-                Button {} label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 10, weight: .medium))
-                        .frame(width: 24, height: 24)
-                        .background(Color.white.opacity(0.02), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(TokenBarStyle.muted)
-            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -1092,20 +1126,6 @@ private struct LibraryMcpRow: View {
             TokenBarStyle.line.frame(height: 1)
                 .padding(.leading, 52)
         }
-    }
-
-    private var toggleSwitch: some View {
-        ZStack {
-            Capsule()
-                .fill(item.loaded ? TokenBarStyle.input.opacity(0.30) : Color.white.opacity(0.06))
-                .overlay(Capsule().stroke(item.loaded ? TokenBarStyle.input.opacity(0.50) : TokenBarStyle.line, lineWidth: 1))
-            Circle()
-                .fill(item.loaded ? TokenBarStyle.input : TokenBarStyle.muted)
-                .frame(width: 12, height: 12)
-                .shadow(color: item.loaded ? TokenBarStyle.input.opacity(0.5) : .clear, radius: 4)
-                .offset(x: item.loaded ? 7 : -7)
-        }
-        .frame(width: 36, height: 20)
     }
 
     private var mcpCostCell: some View {
@@ -1139,7 +1159,7 @@ private struct LibraryMcpRow: View {
 
 private struct McpScopeCard: View {
     let dir: LibraryMcpDir
-    @State private var isOpen = true
+    @State private var isOpen = false
 
     private var onItems: [LibraryMcpItem] { dir.items.filter(\.loaded) }
     private var offItems: [LibraryMcpItem] { dir.items.filter { !$0.loaded } }
@@ -1180,6 +1200,10 @@ private struct McpScopeCard: View {
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
     }
 
+    private func revealConfigFile() {
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: dir.path)])
+    }
+
     private var scopeHeader: some View {
         Button { withAnimation(.easeOut(duration: 0.15)) { isOpen.toggle() } } label: {
             HStack(spacing: 12) {
@@ -1187,7 +1211,6 @@ private struct McpScopeCard: View {
                     .font(.system(size: 9, weight: .bold))
                     .rotationEffect(.degrees(isOpen ? 90 : 0))
                     .foregroundStyle(TokenBarStyle.faint)
-
                 ScopePill(scope: dir.scope, label: dir.label)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -1205,33 +1228,16 @@ private struct McpScopeCard: View {
 
                 scopeCounts
 
-                HStack(spacing: 6) {
-                    Button {} label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 9, weight: .medium))
-                            Text("Check all")
-                                .font(.system(size: 11, weight: .medium))
-                        }
+                Button { revealConfigFile() } label: {
+                    Text("Reveal")
+                        .font(.system(size: 11, weight: .medium))
                         .padding(.horizontal, 9)
                         .frame(height: 24)
                         .background(Color.white.opacity(0.02), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(TokenBarStyle.muted)
-
-                    Button {} label: {
-                        Text("Reveal")
-                            .font(.system(size: 11, weight: .medium))
-                            .padding(.horizontal, 9)
-                            .frame(height: 24)
-                            .background(Color.white.opacity(0.02), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(TokenBarStyle.muted)
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(TokenBarStyle.muted)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -1307,7 +1313,7 @@ private struct McpScopeCard: View {
 // MARK: - MCP tab body
 
 private struct MCPBody: View {
-    @State private var viewMode: LibraryViewMode = .graph
+    let mcpDirs: [LibraryMcpDir]
     @State private var mcpFilter = "all"
 
     private var allItems: [LibraryMcpItem] { mcpDirs.flatMap(\.items) }
@@ -1316,23 +1322,13 @@ private struct MCPBody: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            LibraryModeBar(
-                title: viewMode == .graph ? "MCP solar system" : "All MCP servers",
-                subtitle: viewMode == .graph
-                    ? "the dashed ring is your context window \u{00B7} inside = loaded \u{00B7} outside = configured-but-idle"
-                    : "by scope \u{00B7} toggle to load into context",
-                mode: viewMode,
-                onChange: { viewMode = $0 }
-            )
-
-            if viewMode == .graph {
-                McpSolarSystemView()
-            } else {
-                McpContextRibbon(loaded: loadedItems.count, total: allItems.count, tokens: ctxTokens)
-                toolbar
-                ForEach(mcpDirs) { dir in
-                    McpScopeCard(dir: dir)
-                }
+            // Graph view disabled (matches the Skills tab decision) — the
+            // solar-system layout was carrying its own dead weight without
+            // adding signal over the list view.
+            McpContextRibbon(loaded: loadedItems.count, total: allItems.count, tokens: ctxTokens)
+            toolbar
+            ForEach(mcpDirs) { dir in
+                McpScopeCard(dir: dir)
             }
         }
     }
@@ -1342,7 +1338,6 @@ private struct MCPBody: View {
             searchField(placeholder: "Search \(allItems.count) servers\u{2026}")
             segmentedPicker
             Spacer()
-            primaryButton(icon: "plus", label: "Add server\u{2026}")
         }
         .padding(.vertical, 4)
     }
@@ -1391,8 +1386,8 @@ private struct MCPBody: View {
     .frame(maxWidth: 260)
 }
 
-@MainActor private func ghostButton(icon: String?, label: String) -> some View {
-    Button {} label: {
+@MainActor private func ghostButton(icon: String?, label: String, action: @escaping () -> Void = {}) -> some View {
+    Button(action: action) {
         HStack(spacing: 5) {
             if let icon {
                 Image(systemName: icon)
@@ -1432,30 +1427,66 @@ private struct MCPBody: View {
 // MARK: - Library page
 
 struct LibraryView: View {
+    @EnvironmentObject private var runtimeModel: TokenBarRuntimeModel
     @State private var selectedTab: LibraryTab = .skills
+
+    private var skillDirs: [LibrarySkillDir] { projectSkillDirs(from: runtimeModel.librarySnapshot) }
+    private var plugins: [LibraryPluginItem] { projectPlugins(from: runtimeModel.librarySnapshot) }
+    private var mcpDirs: [LibraryMcpDir] { projectMcpDirs(from: runtimeModel.librarySnapshot) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: TokenBarStyle.sectionSpacing) {
             pageHeader
-            LibraryTabSelector(selectedTab: selectedTab, onSelect: { selectedTab = $0 })
+            if let errorState = runtimeModel.librarySnapshot.scanStates.values.first(where: { $0.lastError != nil }) {
+                errorBanner(errorState.lastError ?? "Unknown error")
+            }
+            LibraryTabSelector(
+                selectedTab: selectedTab,
+                onSelect: { selectedTab = $0 },
+                skillDirs: skillDirs,
+                plugins: plugins,
+                mcpDirs: mcpDirs
+            )
             switch selectedTab {
             case .skills:
-                SkillsBody()
+                SkillsBody(skillDirs: skillDirs, onRescan: { runtimeModel.rebuildLibrarySnapshot(trigger: "manual.rescan") })
             case .plugins:
-                PluginsBody()
+                PluginsBody(plugins: plugins, onRescan: { runtimeModel.rebuildLibrarySnapshot(trigger: "manual.rescan") })
             case .mcp:
-                MCPBody()
+                MCPBody(mcpDirs: mcpDirs)
             }
         }
     }
 
     private var pageHeader: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Library")
-                .font(.system(size: 24, weight: .bold, design: .rounded))
+            HStack {
+                Text("Library")
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                Spacer()
+                if runtimeModel.librarySnapshot.isScanning {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
             Text("Skills, prompt templates, plugins, and MCP servers TokenBar can see on disk \u{2014} and what\u{2019}s currently loaded into agent context.")
                 .font(.system(size: 13))
                 .foregroundStyle(TokenBarStyle.muted)
         }
+    }
+
+    private func errorBanner(_ message: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(TokenBarStyle.error)
+            Text(message)
+                .font(.system(size: 12))
+                .foregroundStyle(TokenBarStyle.error)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(TokenBarStyle.error.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(TokenBarStyle.error.opacity(0.2), lineWidth: 1))
     }
 }

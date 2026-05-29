@@ -213,6 +213,13 @@ public actor UsageStore {
         try repository.resetIndexForFullReparse()
     }
 
+    public func resetAllData() throws {
+        warnings = []
+        lastIndexedAt = nil
+        lastRebuildError = nil
+        try repository.resetAllData()
+    }
+
     public func pruneRecords(before cutoff: Date) throws {
         try repository.deleteRecords(before: cutoff)
     }
@@ -387,5 +394,39 @@ public actor UsageStore {
 
     private func userActionableWarnings(_ sourceWarnings: [UsageSourceWarning]) -> [UsageSourceWarning] {
         sourceWarnings.filter(\.isUserActionable)
+    }
+
+    // MARK: - Library
+
+    public func upsertLibrarySkills(_ skills: [ScannedSkill], scope: LibraryScope) throws {
+        try repository.upsertLibrarySkills(skills, scope: scope)
+    }
+
+    public func upsertLibraryMcp(_ servers: [ScannedMcpServer], scope: LibraryScope) throws {
+        try repository.upsertLibraryMcp(servers, scope: scope)
+    }
+
+    public func upsertLibraryScanState(_ state: LibraryScanState) throws {
+        try repository.upsertLibraryScanState(state)
+    }
+
+    public func upsertLibraryPlugins(_ plugins: [ScannedClaudePlugin]) throws {
+        try repository.upsertLibraryPlugins(plugins)
+    }
+
+    public func loadLibraryPlugins() throws -> [ScannedClaudePlugin] {
+        try repository.loadLibraryPlugins()
+    }
+
+    public func loadLibrarySkills() throws -> [ScannedSkill] {
+        try repository.loadLibrarySkills()
+    }
+
+    public func loadLibraryMcp() throws -> [ScannedMcpServer] {
+        try repository.loadLibraryMcp()
+    }
+
+    public func loadLibraryScanStates() throws -> [LibraryScope: LibraryScanState] {
+        try repository.loadLibraryScanStates()
     }
 }

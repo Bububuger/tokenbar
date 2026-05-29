@@ -110,6 +110,76 @@ struct Sprint8StorageTests {
     }
 
     @Test
+    func resetAllDataClearsIndexConfigurationAndSavedPrompts() throws {
+        let dbURL = temporaryDatabaseURL()
+        let repository = try UsageRepository(databaseURL: dbURL)
+        let now = fixedDate()
+
+        _ = try repository.insertCheckpoint(
+            trigger: "seed",
+            startedAt: now,
+            endedAt: now,
+            events: [
+                dbEvent(
+                    id: "event-1",
+                    agent: .codex,
+                    projectName: "tokenbar",
+                    sessionId: "session",
+                    timestamp: now,
+                    inputTokens: 10,
+                    outputTokens: 20,
+                    cacheTokens: 5
+                ),
+            ],
+            prompts: [prompt(id: "prompt-1")],
+            nextWatermarks: [
+                SourceWatermark(
+                    sourcePath: "/tmp/source.jsonl",
+                    agent: .codex,
+                    lastMtime: now,
+                    lastByteOffset: 42,
+                    lastEventId: "event-1",
+                    lastInode: 7,
+                    updatedAt: now
+                ),
+            ],
+            warnings: [
+                UsageSourceWarning(
+                    sourceName: "codex",
+                    sourcePath: "/tmp/source.jsonl",
+                    lineNumber: 1,
+                    message: "warning"
+                ),
+            ],
+            error: nil
+        )
+        try repository.upsertCustomSource(
+            CustomSourceRecord(name: "custom", directory: "/tmp/custom")
+        )
+        try repository.upsertSavedPrompt(
+            SavedPrompt(
+                id: "saved-1",
+                slug: "saved",
+                title: "Saved",
+                body: "body",
+                sourcePromptId: nil,
+                createdAt: now,
+                updatedAt: now
+            )
+        )
+
+        try repository.resetAllData()
+
+        #expect(try repository.allEvents().isEmpty)
+        #expect(try repository.allPrompts().isEmpty)
+        #expect(try repository.watermarks().isEmpty)
+        #expect(try repository.latestWarnings().isEmpty)
+        #expect(try repository.latestCheckpoint() == nil)
+        #expect(try repository.listCustomSources().isEmpty)
+        #expect(try repository.allSavedPrompts().isEmpty)
+    }
+
+    @Test
     func makeSnapshotAggregatesFromSQLiteWithDerivedFields() throws {
         let dbURL = temporaryDatabaseURL()
         let repository = try UsageRepository(databaseURL: dbURL)

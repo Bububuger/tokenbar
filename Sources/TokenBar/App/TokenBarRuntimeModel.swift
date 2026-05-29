@@ -246,6 +246,13 @@ final class TokenBarRuntimeModel: ObservableObject {
     private var updateCheckTask: Task<Void, Never>?
     private var updateDownloadTask: Task<Void, Never>?
 
+    // MARK: - Library
+    @Published private(set) var librarySnapshot: LibrarySnapshot = .empty
+    private let skillScanner = SkillScanner()
+    private let mcpScanner = McpScanner()
+    private var libraryWatcher: LibraryWatcher?
+    private var libraryRefreshTask: Task<Void, Never>?
+
     init(
         settingsStore: SettingsStore,
         usageStore: UsageStore,
@@ -322,6 +329,9 @@ final class TokenBarRuntimeModel: ObservableObject {
         // GitHub-releases version check. Once per launch, then every 24h.
         // Opt-out via `tokenbar.updateCheckEnabled = false` in UserDefaults.
         startUpdateCheckLoop()
+        await loadLibraryFromCache()
+        startLibraryWatcher()
+        rebuildLibrarySnapshot(trigger: "bootstrap")
         if shouldRunInitialIndexing {
             startInitialIndexing(reason: "cold-start")
             // `indexingState` now drives the "still measuring" affordance;
@@ -1673,6 +1683,44 @@ final class TokenBarRuntimeModel: ObservableObject {
         }
     }
 
+    func resetAllTokenBarData() async {
+        let started = Date()
+        do {
+            try await usageStore.resetAllData()
+            try savedPromptCommandSync.removeAll()
+            customSources = []
+            savedPrompts = []
+            selectedProjectName = nil
+            projectDetail = nil
+            projectDetailCache.removeAll()
+            let referenceDate = Date()
+            let state = await usageStore.state(
+                referenceDate: referenceDate,
+                calendar: Calendar(identifier: .gregorian),
+                includePrompts: false,
+                includeEvents: true
+            )
+            publishStoreState(
+                state,
+                statuses: diagnostics.dataSourceStatuses,
+                referenceDate: referenceDate,
+                refreshState: .idle
+            )
+            TokenBarTelemetry.event(
+                "settings.reset_all",
+                success: true,
+                elapsed: Date().timeIntervalSince(started)
+            )
+        } catch {
+            TokenBarTelemetry.event(
+                "settings.reset_all",
+                success: false,
+                elapsed: Date().timeIntervalSince(started),
+                error: String(describing: error)
+            )
+        }
+    }
+
     func reparseSource(_ sourcePath: String) async {
         let started = Date()
         do {
@@ -2319,6 +2367,266 @@ final class TokenBarRuntimeModel: ObservableObject {
             await self?.refresh(trigger: .interval)
         }
         updateRefreshState()
+    }
+
+    // MARK: - Library Snapshot
+
+    /// Cross-tool user skill roots (depth-1 `<root>/<skill>/SKILL.md`).
+    /// Order matches duplicate-priority: first listed wins on name collision.
+    private static let crossToolUserSkillSubpaths: [String] = [
+        ".claude/skills",
+        ".config/claude/skills",
+        ".agents/skills",
+        ".cursor/skills",
+        ".gemini/skills",
+        ".codex/skills",
+        ".opencode/skills",
+        ".copilot/skills",
+        ".roo/skills",
+        ".goose/skills",
+    ]
+
+    /// Cross-tool project skill subpaths under each project root.
+    private static let crossToolProjectSkillSubpaths: [String] = [
+        ".claude/skills",
+        ".agents/skills",
+        ".cursor/skills",
+        ".gemini/skills",
+        ".github/skills",
+        ".codex/skills",
+        ".opencode/skills",
+    ]
+
+    private func userSkillRoots() -> [URL] {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return Self.crossToolUserSkillSubpaths.map { home.appendingPathComponent($0, isDirectory: true) }
+    }
+
+    private func projectSkillRoots() -> [URL] {
+        let fm = FileManager.default
+        var seen = Set<String>()
+        var roots: [URL] = []
+        for event in events {
+            guard let path = event.projectPath, !path.isEmpty else { continue }
+            guard !seen.contains(path) else { continue }
+            seen.insert(path)
+            let projectURL = URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true)
+            guard fm.fileExists(atPath: projectURL.path) else { continue }
+            for sub in Self.crossToolProjectSkillSubpaths {
+                roots.append(projectURL.appendingPathComponent(sub, isDirectory: true))
+            }
+        }
+        return roots
+    }
+
+    private func sharedSkillRoots() -> [URL] {
+        let raw = UserDefaults.standard.string(forKey: "tokenbar.library.sharedRoots") ?? ""
+        return raw
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath, isDirectory: true) }
+    }
+
+    private static var pluginsRoot: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/plugins", isDirectory: true)
+    }
+
+    /// Reads Claude Code's `installed_plugins.json` for the Library tab's
+    /// Plugins surface. Distinct from `PluginManager.installedManifests()`,
+    /// which lists TokenBar's own marketplace plugins (shown in Settings).
+    /// Manifest timestamps include fractional seconds (`2026-05-23T14:03:05.055Z`),
+    /// which the default `ISO8601DateFormatter` rejects.
+    private static let pluginInstalledAtFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static func scanClaudeInstalledPlugins() -> [ScannedClaudePlugin] {
+        let manifestURL = pluginsRoot.appendingPathComponent("installed_plugins.json")
+        guard let data = try? Data(contentsOf: manifestURL),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let plugins = json["plugins"] as? [String: [[String: Any]]] else { return [] }
+        var result: [ScannedClaudePlugin] = []
+        for (key, instances) in plugins {
+            let split = key.split(separator: "@", maxSplits: 1).map(String.init)
+            let name = split.first ?? key
+            let marketplace = split.count > 1 ? split[1] : ""
+            for inst in instances {
+                let version = inst["version"] as? String ?? "unknown"
+                let scope = inst["scope"] as? String ?? "user"
+                let installPath = inst["installPath"] as? String ?? ""
+                let projectPath = inst["projectPath"] as? String
+                let installedAt = (inst["installedAt"] as? String).flatMap {
+                    pluginInstalledAtFormatter.date(from: $0)
+                }
+                result.append(ScannedClaudePlugin(
+                    fullId: key,
+                    name: name,
+                    marketplace: marketplace,
+                    version: version,
+                    scope: scope,
+                    installPath: installPath,
+                    projectPath: projectPath,
+                    installedAt: installedAt
+                ))
+            }
+        }
+        return result.sorted { $0.fullId < $1.fullId }
+    }
+
+    func rebuildLibrarySnapshot(trigger: String) {
+        libraryRefreshTask?.cancel()
+
+        let userRoots = userSkillRoots()
+        let projectRoots = projectSkillRoots()
+        let sharedRoots = sharedSkillRoots()
+        let pluginsRoot = Self.pluginsRoot
+
+        let claudeJson = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude.json")
+
+        libraryRefreshTask = Task { [weak self] in
+            guard let self else { return }
+            let scanning = LibrarySnapshot(
+                skills: self.librarySnapshot.skills,
+                mcpServers: self.librarySnapshot.mcpServers,
+                plugins: self.librarySnapshot.plugins,
+                conflicts: self.librarySnapshot.conflicts,
+                scanStates: self.librarySnapshot.scanStates,
+                lastFullScanAt: self.librarySnapshot.lastFullScanAt,
+                isScanning: true
+            )
+            self.librarySnapshot = scanning
+
+            var allSkills: [ScannedSkill] = []
+            var allMcp: [ScannedMcpServer] = []
+            var scanStates: [LibraryScope: LibraryScanState] = [:]
+            let now = Date()
+
+            var userSkills: [ScannedSkill] = []
+            var userError: String?
+            for root in userRoots {
+                do {
+                    let found = try await self.skillScanner.scanScope(.user, root: root)
+                    userSkills.append(contentsOf: found)
+                } catch {
+                    userError = error.localizedDescription
+                }
+            }
+            allSkills.append(contentsOf: userSkills)
+            let userState = LibraryScanState(scope: .user, lastScanAt: now, lastError: userError, skillCount: userSkills.count, mcpCount: 0)
+            scanStates[.user] = userState
+            try? await self.usageStore.upsertLibrarySkills(userSkills, scope: .user)
+            try? await self.usageStore.upsertLibraryScanState(userState)
+
+            var projectSkills: [ScannedSkill] = []
+            var projectError: String?
+            for root in projectRoots {
+                do {
+                    let found = try await self.skillScanner.scanScope(.project, root: root)
+                    projectSkills.append(contentsOf: found)
+                } catch {
+                    projectError = error.localizedDescription
+                }
+            }
+            allSkills.append(contentsOf: projectSkills)
+            let projectState = LibraryScanState(scope: .project, lastScanAt: now, lastError: projectError, skillCount: projectSkills.count, mcpCount: 0)
+            scanStates[.project] = projectState
+            try? await self.usageStore.upsertLibrarySkills(projectSkills, scope: .project)
+            try? await self.usageStore.upsertLibraryScanState(projectState)
+
+            var sharedSkills: [ScannedSkill] = []
+            var sharedError: String?
+            for root in sharedRoots {
+                do {
+                    let found = try await self.skillScanner.scanScope(.shared, root: root)
+                    sharedSkills.append(contentsOf: found)
+                } catch {
+                    sharedError = error.localizedDescription
+                }
+            }
+            allSkills.append(contentsOf: sharedSkills)
+            let sharedState = LibraryScanState(scope: .shared, lastScanAt: now, lastError: sharedError, skillCount: sharedSkills.count, mcpCount: 0)
+            scanStates[.shared] = sharedState
+            try? await self.usageStore.upsertLibrarySkills(sharedSkills, scope: .shared)
+            try? await self.usageStore.upsertLibraryScanState(sharedState)
+
+            let pluginSkills = (try? await self.skillScanner.scanPluginsRoot(pluginsRoot)) ?? []
+            allSkills.append(contentsOf: pluginSkills)
+            let pluginState = LibraryScanState(scope: .plugin, lastScanAt: now, lastError: nil, skillCount: pluginSkills.count, mcpCount: 0)
+            scanStates[.plugin] = pluginState
+            try? await self.usageStore.upsertLibrarySkills(pluginSkills, scope: .plugin)
+            try? await self.usageStore.upsertLibraryScanState(pluginState)
+
+            do {
+                let userMcp = try await self.mcpScanner.scanScope(.user, configFile: claudeJson)
+                allMcp.append(contentsOf: userMcp)
+                try? await self.usageStore.upsertLibraryMcp(userMcp, scope: .user)
+            } catch {}
+
+            do {
+                let projectMcp = try await self.mcpScanner.scanClaudeJsonProjects(claudeJson)
+                allMcp.append(contentsOf: projectMcp)
+                try? await self.usageStore.upsertLibraryMcp(projectMcp, scope: .project)
+            } catch {}
+
+            let plugins = Self.scanClaudeInstalledPlugins()
+            try? await self.usageStore.upsertLibraryPlugins(plugins)
+            let pluginIds = plugins.map(\.fullId)
+            let conflicts = LibraryConflictDetector.compute(skills: allSkills, pluginIds: pluginIds)
+
+            let newSnapshot = LibrarySnapshot(
+                skills: allSkills,
+                mcpServers: allMcp,
+                plugins: plugins,
+                conflicts: conflicts,
+                scanStates: scanStates,
+                lastFullScanAt: now,
+                isScanning: false
+            )
+            self.librarySnapshot = newSnapshot
+
+            let symlinkTargets = await self.skillScanner.collectSymlinkTargets(from: allSkills)
+            self.libraryWatcher?.updateSymlinkTargets(symlinkTargets)
+        }
+    }
+
+    func startLibraryWatcher() {
+        var roots = userSkillRoots()
+        roots.append(Self.pluginsRoot)
+        roots.append(contentsOf: sharedSkillRoots())
+
+        let watcher = LibraryWatcher { [weak self] in
+            await MainActor.run {
+                self?.rebuildLibrarySnapshot(trigger: "watcher.fs_event")
+            }
+        }
+        watcher.start(roots: roots)
+        self.libraryWatcher = watcher
+    }
+
+    func loadLibraryFromCache() async {
+        do {
+            let skills = try await usageStore.loadLibrarySkills()
+            let mcp = try await usageStore.loadLibraryMcp()
+            let scanStates = try await usageStore.loadLibraryScanStates()
+            let plugins = Self.scanClaudeInstalledPlugins()
+            try? await usageStore.upsertLibraryPlugins(plugins)
+            let pluginIds = plugins.map(\.fullId)
+            let conflicts = LibraryConflictDetector.compute(skills: skills, pluginIds: pluginIds)
+            librarySnapshot = LibrarySnapshot(
+                skills: skills,
+                mcpServers: mcp,
+                plugins: plugins,
+                conflicts: conflicts,
+                scanStates: scanStates,
+                lastFullScanAt: scanStates.values.map(\.lastScanAt).max(),
+                isScanning: false
+            )
+        } catch {}
     }
 
     static func live() -> TokenBarRuntimeModel {

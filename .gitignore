@@ -33,3 +33,4 @@ CACHE-SPLIT-CHECKLIST.md
 
 # Design assets — local reference only, not tracked in git.
 design/
+build/

@@ -579,15 +579,26 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
         return UsageSourceLoadResult(events: events, prompts: [], warnings: warnings)
     }
 
+    // ISO8601DateFormatter.date(from:) is thread-safe on macOS 10.15+; share
+    // read-only instances to avoid rebuilding ICU SimpleDateFormat per event.
+    nonisolated(unsafe) private static let iso8601WithFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    nonisolated(unsafe) private static let iso8601NoFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
     private func parseTimestamp(_ value: String?) -> Date? {
         guard let value else { return nil }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: value) {
+        if let date = Self.iso8601WithFractional.date(from: value) {
             return date
         }
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: value)
+        return Self.iso8601NoFractional.date(from: value)
     }
 
     private func mappedStringValue(from object: [String: Any], path: String) -> String? {

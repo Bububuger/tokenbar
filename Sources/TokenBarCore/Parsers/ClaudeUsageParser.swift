@@ -314,14 +314,26 @@ public enum ClaudeUsageParser {
         return NSString.path(withComponents: Array(parentComponents))
     }
 
+    // ISO8601DateFormatter.date(from:) is thread-safe on macOS 10.15+; we
+    // share two read-only instances to avoid rebuilding ICU SimpleDateFormat
+    // (which dominated the parse hot path — see commit message).
+    nonisolated(unsafe) private static let iso8601WithFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    nonisolated(unsafe) private static let iso8601NoFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
     static func parseTimestamp(_ value: String?) -> Date? {
         guard let value else { return nil }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: value) {
+        if let date = iso8601WithFractional.date(from: value) {
             return date
         }
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: value)
+        return iso8601NoFractional.date(from: value)
     }
 }

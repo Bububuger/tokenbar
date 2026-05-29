@@ -114,33 +114,22 @@ public enum OpenClawUsageParser {
             return Date(timeIntervalSince1970: n.doubleValue / 1000.0)
         }
         if let outerIso = outer["timestamp"] as? String {
-            return isoTimestampParser.parse(outerIso)
+            return iso8601WithFractional.date(from: outerIso) ?? iso8601NoFractional.date(from: outerIso)
         }
         return nil
     }
 
-    private static let isoTimestampParser = LockedOpenClawISO8601Parser()
-}
+    // ISO8601DateFormatter.date(from:) is thread-safe on macOS 10.15+; share
+    // read-only instances to avoid rebuilding ICU SimpleDateFormat per event.
+    nonisolated(unsafe) private static let iso8601WithFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
 
-/// ISO8601DateFormatter is not thread-safe; wrap reads in NSLock so it can be
-/// touched from concurrent parsing tasks without crashing.
-private final class LockedOpenClawISO8601Parser: @unchecked Sendable {
-    private let lock = NSLock()
-    private let fractional: ISO8601DateFormatter
-    private let plain: ISO8601DateFormatter
-
-    init() {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        self.fractional = fractional
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-        self.plain = plain
-    }
-
-    func parse(_ value: String) -> Date? {
-        lock.lock()
-        defer { lock.unlock() }
-        return fractional.date(from: value) ?? plain.date(from: value)
-    }
+    nonisolated(unsafe) private static let iso8601NoFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
 }

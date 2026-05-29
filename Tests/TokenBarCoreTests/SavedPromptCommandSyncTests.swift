@@ -58,6 +58,22 @@ struct SavedPromptCommandSyncTests {
         try sync.remove(slug: "never-existed")
     }
 
+    @Test
+    func removeAllDeletesTokenBarMarkdownCommandsOnly() throws {
+        let root = temporaryCommandsRoot()
+        let sync = SavedPromptCommandSync(commandsRoot: root)
+        try sync.apply(makePrompt(slug: "one", title: "One", body: "1"), previousSlug: nil)
+        try sync.apply(makePrompt(slug: "two", title: "Two", body: "2"), previousSlug: nil)
+        let preserved = root.appendingPathComponent("notes.txt")
+        try "keep".write(to: preserved, atomically: true, encoding: .utf8)
+
+        try sync.removeAll()
+
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("one.md").path))
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("two.md").path))
+        #expect(FileManager.default.fileExists(atPath: preserved.path))
+    }
+
     /// Locks the invariant that deleting a saved prompt removes BOTH the DB
     /// row and the on-disk `~/.claude/commands/tbar/<slug>.md` file. Runs
     /// the two-step deletion in the same shape `TokenBarRuntimeModel.deleteSavedPrompt`

@@ -33,9 +33,9 @@ struct ProjectDetailView: View {
     // CL-P1-016: which session row is expanded into the detail drawer.
     @State private var expandedSession: String?
     @State private var saveAsTemplateTarget: SavedPromptEditorTarget?
-    // CL-P0-033: Reveal is gated by the global "Store prompt text in clear"
-    // setting. When mask-only is configured, the button is disabled and
-    // hovering it explains where to enable Full capture.
+    // CL-P0-033: Reveal is gated by the global prompt text display setting.
+    // When text is hidden, the button is disabled and hovering it explains
+    // where to enable full local text display.
     @EnvironmentObject private var runtimeModel: TokenBarRuntimeModel
 
     init(
@@ -503,7 +503,7 @@ struct ProjectDetailView: View {
                     .opacity(runtimeModel.storePromptTextInClearText ? 1 : 0.5)
                     .help(runtimeModel.storePromptTextInClearText
                           ? (revealPrompts ? "Hide prompt text" : "Reveal stored prompt text")
-                          : "Enable Prompt Capture in Settings → Prompts to allow Reveal")
+                          : "Enable Prompt Text in Settings to allow Reveal")
                 }
 
                 promptHistoryControls
@@ -826,7 +826,7 @@ struct ProjectDetailView: View {
                 .font(.system(size: 13, design: .monospaced))
                 .foregroundStyle(TokenBarStyle.muted)
                 .lineLimit(1)
-            Text("Prompt Capture is protected. Use Reveal after enabling Full capture in Settings.")
+            Text("Prompt text is hidden. Enable Prompt Text in Settings, then use Reveal.")
                 .font(.caption)
                 .foregroundStyle(TokenBarStyle.muted)
         }

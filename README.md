@@ -163,11 +163,11 @@ Output lands at `~/Desktop/tokenbar-report-YYYY-MM-DD/` — one folder, four HTM
 ## 🔒 Privacy / 隐私
 
 - **Local-only by construction.** TokenBar does not contain *any* network code in the data path. There is no telemetry endpoint, no analytics SDK, no cloud sync.
-- **One SQLite database** at `~/Library/Application Support/com.javis.TokenBar/usage.sqlite` — owned by you, exportable as JSON from `Settings → Data & Retention`, wipe-able with a single click (type `RESET` to confirm).
-- **Prompt capture is opt-in** and stored on the user's machine — *"Stores user-only prompts locally. Project history reveals text by default."*
+- **One SQLite database** at `~/Library/Application Support/TokenBar/tokenbar.sqlite` — owned by you, exportable as JSON from `Settings → Data & Retention`, wipe-able from the same panel (type `RESET` to confirm). Reset clears TokenBar's index and saved templates; it does not delete upstream Claude/Codex/Gemini logs.
+- **Prompt capture is local-first and default-on.** TokenBar stores user prompt text in the local SQLite index so project history, `tbar prompts`, and `tokenbar-report` can work. You can hide prompt text in the UI or wipe stored prompts from Diagnostics; upstream agent logs remain the source of truth.
 - **Pricing model is local.** USD-per-million-token rates live in `Settings → Pricing` and you can override any of them per-model.
 
-> **中文**：TokenBar 的数据通路里**没有任何网络代码**。所有索引都落在本机 SQLite，可一键导出 JSON、一键 RESET 清空。Prompt 抓取需要你显式开启，且仅存本地。
+> **中文**：TokenBar 的数据通路里**没有任何网络代码**。所有索引都落在本机 SQLite，可导出 JSON、RESET 清空 TokenBar 自己的索引与模板；不会删除上游 Agent 原始日志。Prompt 明文默认本地索引，用于项目历史、CLI 查询和报告生成，可在 UI 隐藏或从 Diagnostics 清除已存 prompt。
 
 <br />
 

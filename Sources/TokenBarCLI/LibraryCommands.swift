@@ -93,6 +93,8 @@ enum McpCommand {
         let command: String
         let args: [String]
         let estimatedTokens: Int
+        let isDisabled: Bool
+        let projectRoot: String?
     }
 
     static func parse(cursor: inout ArgumentCursor, options: inout FilterOptions) throws {
@@ -119,7 +121,9 @@ enum McpCommand {
                 name: server.name,
                 command: server.command,
                 args: server.args,
-                estimatedTokens: server.estimatedTokens
+                estimatedTokens: server.estimatedTokens,
+                isDisabled: server.isDisabled,
+                projectRoot: server.projectRoot
             )
         }
         let limited = options.limit == 0 ? rows : Array(rows.prefix(options.limit))
@@ -146,7 +150,8 @@ enum McpCommand {
             print("  Count: \(limited.count) (of \(rows.count))")
             for row in limited {
                 let argsTail = row.args.isEmpty ? "" : " " + row.args.joined(separator: " ")
-                print("  - [\(row.scope)] \(row.name) tokens=\(row.estimatedTokens)")
+                let disabled = row.isDisabled ? " [disabled]" : ""
+                print("  - [\(row.scope)] \(row.name) tokens=\(row.estimatedTokens)\(disabled)")
                 print("      cmd: \(row.command)\(argsTail)")
                 print("      source: \(row.sourceFile)")
             }

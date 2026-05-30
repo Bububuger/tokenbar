@@ -52,49 +52,15 @@ struct LibraryPluginItem: Identifiable {
     let path: String
 }
 
-enum McpHealthStatus: String {
-    case ok
-    case degraded
-    case down
-    case unchecked
-}
-
-struct McpHealthInfo {
-    let status: McpHealthStatus
-    let latency: Int?
-    let last: String
-    let note: String?
-
-    init(status: McpHealthStatus, latency: Int? = nil, last: String, note: String? = nil) {
-        self.status = status
-        self.latency = latency
-        self.last = last
-        self.note = note
-    }
-}
-
 struct LibraryMcpItem: Identifiable {
     let id: String
     let name: String
-    let loaded: Bool
     let source: String
-    let tools: Int
     let tokens: Double
     let desc: String
-    let broken: Bool
-    let health: McpHealthInfo
-
-    init(id: String, name: String, loaded: Bool, source: String, tools: Int, tokens: Double, desc: String, broken: Bool = false, health: McpHealthInfo) {
-        self.id = id
-        self.name = name
-        self.loaded = loaded
-        self.source = source
-        self.tools = tools
-        self.tokens = tokens
-        self.desc = desc
-        self.broken = broken
-        self.health = health
-    }
+    let isDisabled: Bool
+    let scope: LibraryScope
+    let sourceFile: String
 }
 
 struct LibraryMcpDir: Identifiable {
@@ -168,13 +134,21 @@ func projectSkillDirs(from snapshot: LibrarySnapshot) -> [LibrarySkillDir] {
                 )
             }
 
+            // Within a directory, group by type (real skills first, then
+            // symlinks), and within each group sort by estimated context desc
+            // so the heaviest skills surface at the top.
+            let sortedItems = items.sorted { lhs, rhs in
+                if lhs.isReal != rhs.isReal { return lhs.isReal && !rhs.isReal }
+                return (lhs.contextK ?? 0) > (rhs.contextK ?? 0)
+            }
+
             dirs.append(LibrarySkillDir(
                 id: "\(scope.rawValue):\(rootPath)",
                 scope: scope,
                 path: rootPath,
                 label: label,
                 sub: sub,
-                items: items
+                items: sortedItems
             ))
         }
     }
@@ -208,8 +182,11 @@ func projectMcpDirs(from snapshot: LibrarySnapshot) -> [LibraryMcpDir] {
                 label = "User \u{00B7} \(sourceDisplay)"
                 sub = "\(serverList.count) server\(serverList.count == 1 ? "" : "s")"
             case .project:
-                label = "Project \u{00B7} \(sourceDisplay)"
-                sub = "\(serverList.count) server\(serverList.count == 1 ? "" : "s")"
+                // sourcePath is <project>/.mcp.json — show the project dir name.
+                let projectName = (sourcePath as NSString).deletingLastPathComponent
+                let projectDisplay = (projectName as NSString).lastPathComponent
+                label = "Project \u{00B7} \(projectDisplay)"
+                sub = "\(serverList.count) server\(serverList.count == 1 ? "" : "s") \u{00B7} \(displayPath(projectName))"
             case .shared:
                 label = "Shared \u{00B7} \(sourceDisplay)"
                 sub = "\(serverList.count) server\(serverList.count == 1 ? "" : "s")"
@@ -223,12 +200,12 @@ func projectMcpDirs(from snapshot: LibrarySnapshot) -> [LibraryMcpDir] {
                 return LibraryMcpItem(
                     id: "\(scope.rawValue):\(sourcePath):\(server.name)",
                     name: server.name,
-                    loaded: false,
                     source: server.command,
-                    tools: 0,
                     tokens: tokens,
                     desc: server.args.joined(separator: " "),
-                    health: McpHealthInfo(status: .unchecked, last: "—")
+                    isDisabled: server.isDisabled,
+                    scope: server.scope,
+                    sourceFile: server.sourceFile.path
                 )
             }
 
@@ -422,8 +399,7 @@ private struct LibraryTabSelector: View {
     private var totalSkills: Int { skillDirs.reduce(0) { $0 + $1.items.count } }
     private var totalPlugins: Int { plugins.count }
     private var allMcp: [LibraryMcpItem] { mcpDirs.flatMap(\.items) }
-    private var loadedMcp: Int { allMcp.filter(\.loaded).count }
-    private var loadedTokens: Double { allMcp.filter(\.loaded).reduce(0) { $0 + $1.tokens } }
+    private var mcpTokens: Double { allMcp.reduce(0) { $0 + $1.tokens } }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -446,7 +422,7 @@ private struct LibraryTabSelector: View {
                 icon: "circle.grid.cross",
                 label: "MCP",
                 count: allMcp.count,
-                meta: "\(loadedMcp) loaded \u{00B7} \(String(format: "%.1f", loadedTokens))K"
+                meta: "\(String(format: "%.1f", mcpTokens))K est. context"
             )
         }
     }
@@ -936,7 +912,6 @@ private struct PluginsBody: View {
 // MARK: - MCP context cost ribbon
 
 private struct McpContextRibbon: View {
-    let loaded: Int
     let total: Int
     let tokens: Double
     let budget: Double = 128
@@ -948,8 +923,8 @@ private struct McpContextRibbon: View {
             HStack {
                 HStack(spacing: 22) {
                     kpiBlock(
-                        value: Text("\(loaded)").foregroundStyle(TokenBarStyle.foreground) + Text("/\(total)").foregroundStyle(TokenBarStyle.faint),
-                        label: "loaded"
+                        value: Text("\(total)").foregroundStyle(TokenBarStyle.foreground),
+                        label: "servers"
                     )
                     divider
                     kpiBlock(
@@ -1019,94 +994,34 @@ private struct McpContextRibbon: View {
     }
 }
 
-// MARK: - MCP health pill
-
-private struct McpHealthPill: View {
-    let health: McpHealthInfo
-
-    private var statusLabel: String {
-        switch health.status {
-        case .ok: "reachable"
-        case .degraded: "slow"
-        case .down: "unreachable"
-        case .unchecked: "not checked"
-        }
-    }
-
-    private var dotColor: Color {
-        switch health.status {
-        case .ok: Color(red: 0.30, green: 0.78, blue: 0.55)
-        case .degraded: Color(red: 0.91, green: 0.72, blue: 0.43)
-        case .down: TokenBarStyle.error
-        case .unchecked: TokenBarStyle.faint
-        }
-    }
-
-    private var pillBg: Color {
-        switch health.status {
-        case .ok: Color(red: 0.30, green: 0.78, blue: 0.55).opacity(0.08)
-        case .degraded: Color(red: 0.91, green: 0.72, blue: 0.43).opacity(0.08)
-        case .down: TokenBarStyle.error.opacity(0.08)
-        case .unchecked: Color.white.opacity(0.03)
-        }
-    }
-
-    private var pillBorder: Color {
-        switch health.status {
-        case .ok: Color(red: 0.30, green: 0.78, blue: 0.55).opacity(0.25)
-        case .degraded: Color(red: 0.91, green: 0.72, blue: 0.43).opacity(0.25)
-        case .down: TokenBarStyle.error.opacity(0.25)
-        case .unchecked: TokenBarStyle.line
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(dotColor)
-                .frame(width: 6, height: 6)
-            Text(statusLabel)
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(dotColor)
-            if let latency = health.latency {
-                Text("\(latency)ms")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(dotColor.opacity(0.8))
-                    .padding(.leading, 4)
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(pillBg, in: Capsule())
-        .overlay(Capsule().stroke(pillBorder, lineWidth: 1))
-        .help(health.note.map { "\(statusLabel) \u{00B7} \($0) \u{00B7} checked \(health.last)" } ?? "\(statusLabel) \u{00B7} checked \(health.last)")
-    }
-}
-
 // MARK: - MCP row
 
 private struct LibraryMcpRow: View {
     let item: LibraryMcpItem
+    @EnvironmentObject private var runtimeModel: TokenBarRuntimeModel
+    @State private var showDeleteAlert = false
 
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "server.rack")
                 .font(.system(size: 11, weight: .medium))
                 .frame(width: 18)
-                .foregroundStyle(TokenBarStyle.muted)
+                .foregroundStyle(item.isDisabled ? TokenBarStyle.faint.opacity(0.5) : TokenBarStyle.muted)
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
                     Text(item.name)
                         .font(.system(size: 13, weight: .medium, design: .monospaced))
-                        .foregroundStyle(item.loaded ? TokenBarStyle.foreground : TokenBarStyle.muted)
+                        .foregroundStyle(item.isDisabled ? TokenBarStyle.faint : TokenBarStyle.foreground)
                         .lineLimit(1)
-                    McpHealthPill(health: item.health)
+                    if item.isDisabled {
+                        disabledPill
+                    }
                 }
                 HStack(spacing: 8) {
                     Text(item.desc)
                         .font(.system(size: 11.5))
-                        .foregroundStyle(item.loaded ? TokenBarStyle.faint : TokenBarStyle.faint.opacity(0.7))
+                        .foregroundStyle(TokenBarStyle.faint.opacity(0.7))
                         .lineLimit(1)
                     Text("\u{00B7}")
                         .foregroundStyle(TokenBarStyle.faint.opacity(0.5))
@@ -1119,6 +1034,17 @@ private struct LibraryMcpRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             mcpCostCell
+
+            Button { showDeleteAlert = true } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 10, weight: .medium))
+                    .frame(width: 24, height: 24)
+                    .background(Color.white.opacity(0.02), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(TokenBarStyle.error)
+            .help("Delete from config")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -1126,6 +1052,24 @@ private struct LibraryMcpRow: View {
             TokenBarStyle.line.frame(height: 1)
                 .padding(.leading, 52)
         }
+        .alert("Delete \(item.name)?", isPresented: $showDeleteAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                runtimeModel.deleteMcpServer(name: item.name, sourceFile: URL(fileURLWithPath: item.sourceFile))
+            }
+        } message: {
+            Text("This removes the \"\(item.name)\" entry from:\n\(item.sourceFile)")
+        }
+    }
+
+    private var disabledPill: some View {
+        Text("disabled")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(TokenBarStyle.faint)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Color.white.opacity(0.04), in: Capsule())
+            .overlay(Capsule().stroke(TokenBarStyle.line, lineWidth: 1))
     }
 
     private var mcpCostCell: some View {
@@ -1133,23 +1077,15 @@ private struct LibraryMcpRow: View {
             HStack(spacing: 0) {
                 Text(String(format: "%.1f", item.tokens))
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(item.loaded ? TokenBarStyle.foreground : TokenBarStyle.faint)
+                    .foregroundStyle(TokenBarStyle.faint)
                 Text("K")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(TokenBarStyle.faint)
             }
-            Text("tokens")
+            Text("est. tokens")
                 .font(.system(size: 9.5, weight: .semibold))
                 .foregroundStyle(TokenBarStyle.faint)
                 .textCase(.uppercase)
-            HStack(spacing: 0) {
-                Text("\(item.tools)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(TokenBarStyle.faint)
-                Text(" tools")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(TokenBarStyle.faint.opacity(0.7))
-            }
         }
         .frame(width: 80, alignment: .trailing)
     }
@@ -1161,38 +1097,17 @@ private struct McpScopeCard: View {
     let dir: LibraryMcpDir
     @State private var isOpen = false
 
-    private var onItems: [LibraryMcpItem] { dir.items.filter(\.loaded) }
-    private var offItems: [LibraryMcpItem] { dir.items.filter { !$0.loaded } }
-    private var loadedCount: Int { onItems.count }
-    private var totalTokens: Double { onItems.reduce(0) { $0 + $1.tokens } }
-    private var downCount: Int { dir.items.filter { $0.health.status == .down }.count }
-    private var degradedCount: Int { dir.items.filter { $0.health.status == .degraded }.count }
+    // Sort by estimated tokens desc so the heaviest servers surface first.
+    private var sortedItems: [LibraryMcpItem] { dir.items.sorted { $0.tokens > $1.tokens } }
+    private var totalTokens: Double { dir.items.reduce(0) { $0 + $1.tokens } }
+    private var disabledCount: Int { dir.items.filter(\.isDisabled).count }
 
     var body: some View {
         VStack(spacing: 0) {
             scopeHeader
             if isOpen {
-                if !onItems.isEmpty {
-                    groupLabel(
-                        dot: TokenBarStyle.input,
-                        label: "Loaded",
-                        count: onItems.count,
-                        meta: "contributing to every agent turn"
-                    )
-                    ForEach(onItems) { item in
-                        LibraryMcpRow(item: item)
-                    }
-                }
-                if !offItems.isEmpty {
-                    groupLabel(
-                        dot: TokenBarStyle.faint,
-                        label: "Available \u{00B7} not loaded",
-                        count: offItems.count,
-                        meta: "configured but absent from context \u{2014} flip to load"
-                    )
-                    ForEach(offItems) { item in
-                        LibraryMcpRow(item: item)
-                    }
+                ForEach(sortedItems) { item in
+                    LibraryMcpRow(item: item)
                 }
             }
         }
@@ -1253,16 +1168,10 @@ private struct McpScopeCard: View {
         HStack(spacing: 4) {
             countChip("\(dir.items.count)", label: "total", color: TokenBarStyle.muted)
             sepDot
-            countChip("\(loadedCount)", label: "loaded", color: TokenBarStyle.foreground)
-            sepDot
             countChip(String(format: "%.1f", totalTokens), label: "K ctx", color: TokenBarStyle.cost)
-            if downCount > 0 {
+            if disabledCount > 0 {
                 sepDot
-                countChip("\(downCount)", label: "down", color: TokenBarStyle.error)
-            }
-            if degradedCount > 0 {
-                sepDot
-                countChip("\(degradedCount)", label: "slow", color: Color(red: 0.91, green: 0.72, blue: 0.43))
+                countChip("\(disabledCount)", label: "disabled", color: TokenBarStyle.faint)
             }
         }
         .font(.system(size: 11, design: .monospaced))
@@ -1282,52 +1191,35 @@ private struct McpScopeCard: View {
                 .foregroundStyle(TokenBarStyle.faint)
         }
     }
-
-    private func groupLabel(dot: Color, label: String, count: Int, meta: String) -> some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(dot)
-                .frame(width: 6, height: 6)
-                .shadow(color: dot == TokenBarStyle.input ? dot.opacity(0.5) : .clear, radius: 3)
-            Text(label)
-                .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(TokenBarStyle.muted)
-            Text("\(count)")
-                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-                .foregroundStyle(TokenBarStyle.faint)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1)
-                .background(Color.white.opacity(0.04), in: Capsule())
-            Text(meta)
-                .font(.system(size: 10.5))
-                .foregroundStyle(TokenBarStyle.faint)
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color.white.opacity(0.015))
-        .overlay(alignment: .top) { TokenBarStyle.line.frame(height: 1) }
-    }
 }
 
 // MARK: - MCP tab body
 
 private struct MCPBody: View {
     let mcpDirs: [LibraryMcpDir]
-    @State private var mcpFilter = "all"
+    @State private var scopeFilter: McpScopeFilter = .all
+
+    private enum McpScopeFilter: String { case all, user, project }
 
     private var allItems: [LibraryMcpItem] { mcpDirs.flatMap(\.items) }
-    private var loadedItems: [LibraryMcpItem] { allItems.filter(\.loaded) }
-    private var ctxTokens: Double { loadedItems.reduce(0) { $0 + $1.tokens } }
+    private var ctxTokens: Double { allItems.reduce(0) { $0 + $1.tokens } }
+
+    private var filteredDirs: [LibraryMcpDir] {
+        switch scopeFilter {
+        case .all: return mcpDirs
+        case .user: return mcpDirs.filter { $0.scope == .user }
+        case .project: return mcpDirs.filter { $0.scope == .project }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Graph view disabled (matches the Skills tab decision) — the
             // solar-system layout was carrying its own dead weight without
             // adding signal over the list view.
-            McpContextRibbon(loaded: loadedItems.count, total: allItems.count, tokens: ctxTokens)
+            McpContextRibbon(total: allItems.count, tokens: ctxTokens)
             toolbar
-            ForEach(mcpDirs) { dir in
+            ForEach(filteredDirs) { dir in
                 McpScopeCard(dir: dir)
             }
         }
@@ -1344,26 +1236,25 @@ private struct MCPBody: View {
 
     private var segmentedPicker: some View {
         HStack(spacing: 0) {
-            segButton("All", id: "all")
-            segButton("Loaded", id: "loaded")
-            segButton("Available", id: "available")
-            segButton("Broken", id: "broken")
+            segButton("All", filter: .all)
+            segButton("User", filter: .user)
+            segButton("Project", filter: .project)
         }
         .padding(2)
         .background(Color.white.opacity(0.02), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
     }
 
-    private func segButton(_ label: String, id: String) -> some View {
-        Button { mcpFilter = id } label: {
+    private func segButton(_ label: String, filter: McpScopeFilter) -> some View {
+        Button { scopeFilter = filter } label: {
             Text(label)
-                .font(.system(size: 11.5, weight: mcpFilter == id ? .semibold : .medium))
+                .font(.system(size: 11.5, weight: scopeFilter == filter ? .semibold : .medium))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
-                .background(mcpFilter == id ? Color.white.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .background(scopeFilter == filter ? Color.white.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
-        .foregroundStyle(mcpFilter == id ? TokenBarStyle.foreground : TokenBarStyle.faint)
+        .foregroundStyle(scopeFilter == filter ? TokenBarStyle.foreground : TokenBarStyle.faint)
     }
 }
 

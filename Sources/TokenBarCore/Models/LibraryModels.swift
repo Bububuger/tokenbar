@@ -58,7 +58,7 @@ public struct ScannedSkill: Codable, Sendable, Equatable, Identifiable {
 }
 
 public struct ScannedMcpServer: Codable, Sendable, Equatable, Identifiable {
-    public var id: String { "\(scope.rawValue):\(name)" }
+    public var id: String { "\(scope.rawValue):\(sourceFile.path):\(name)" }
     public let scope: LibraryScope
     public let sourceFile: URL
     public let name: String
@@ -66,6 +66,10 @@ public struct ScannedMcpServer: Codable, Sendable, Equatable, Identifiable {
     public let args: [String]
     public let envKeys: [String]
     public let estimatedTokens: Int
+    public let isDisabled: Bool
+    /// The owning project directory for `.mcp.json`-sourced servers; nil for
+    /// user scope. Used to locate the config file when deleting.
+    public let projectRoot: String?
     public let scannedAt: Date
 
     public init(
@@ -76,6 +80,8 @@ public struct ScannedMcpServer: Codable, Sendable, Equatable, Identifiable {
         args: [String],
         envKeys: [String],
         estimatedTokens: Int,
+        isDisabled: Bool = false,
+        projectRoot: String? = nil,
         scannedAt: Date
     ) {
         self.scope = scope
@@ -85,6 +91,8 @@ public struct ScannedMcpServer: Codable, Sendable, Equatable, Identifiable {
         self.args = args
         self.envKeys = envKeys
         self.estimatedTokens = estimatedTokens
+        self.isDisabled = isDisabled
+        self.projectRoot = projectRoot
         self.scannedAt = scannedAt
     }
 }

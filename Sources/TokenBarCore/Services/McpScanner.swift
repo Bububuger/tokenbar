@@ -64,42 +64,45 @@ public actor McpScanner {
         return results.sorted { $0.name < $1.name }
     }
 
-    /// Walks `~/.claude.json`'s `projects.<path>.mcpServers` map. Claude Code
-    /// stores per-project MCP overrides nested under each project's entry,
-    /// not in a separate file — this surfaces them as `.project` scope.
-    public func scanClaudeJsonProjects(_ configFile: URL) throws -> [ScannedMcpServer] {
+    /// Scans a project's `.mcp.json` file. Claude Code records which of these
+    /// servers a user has toggled off in `~/.claude.json`'s per-project
+    /// `disabledMcpjsonServers` array — pass that list as `disabledNames` so the
+    /// scan can surface a disabled state. `projectRoot` is the directory that
+    /// owns the `.mcp.json` (used later to locate the file when deleting).
+    public func scanProjectMcpJson(projectRoot: URL, disabledNames: Set<String>) throws -> [ScannedMcpServer] {
         let fm = FileManager.default
+        let configFile = projectRoot.appendingPathComponent(".mcp.json")
         guard fm.fileExists(atPath: configFile.path) else { return [] }
 
         let data = try Data(contentsOf: configFile)
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let projects = json["projects"] as? [String: Any] else { return [] }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return []
+        }
+        let serversDict = (json["mcpServers"] as? [String: Any]) ?? json
 
         let now = Date()
         var results: [ScannedMcpServer] = []
-        for (_, value) in projects {
-            guard let proj = value as? [String: Any],
-                  let mcpServers = proj["mcpServers"] as? [String: Any] else { continue }
-            for (name, cfg) in mcpServers {
-                guard let serverConfig = cfg as? [String: Any] else { continue }
-                let command = serverConfig["command"] as? String ?? ""
-                let args = serverConfig["args"] as? [String] ?? []
-                let env = serverConfig["env"] as? [String: String] ?? [:]
-                let envKeys = Array(env.keys).sorted()
-                let estimatedTokens = Self.staticTokenEstimates[name]
-                    ?? Self.staticTokenEstimates[name.lowercased()]
-                    ?? 5000
-                results.append(ScannedMcpServer(
-                    scope: .project,
-                    sourceFile: configFile,
-                    name: name,
-                    command: command,
-                    args: args,
-                    envKeys: envKeys,
-                    estimatedTokens: estimatedTokens,
-                    scannedAt: now
-                ))
-            }
+        for (name, value) in serversDict {
+            guard let serverConfig = value as? [String: Any] else { continue }
+            let command = serverConfig["command"] as? String ?? ""
+            let args = serverConfig["args"] as? [String] ?? []
+            let env = serverConfig["env"] as? [String: String] ?? [:]
+            let envKeys = Array(env.keys).sorted()
+            let estimatedTokens = Self.staticTokenEstimates[name]
+                ?? Self.staticTokenEstimates[name.lowercased()]
+                ?? 5000
+            results.append(ScannedMcpServer(
+                scope: .project,
+                sourceFile: configFile,
+                name: name,
+                command: command,
+                args: args,
+                envKeys: envKeys,
+                estimatedTokens: estimatedTokens,
+                isDisabled: disabledNames.contains(name),
+                projectRoot: projectRoot.path,
+                scannedAt: now
+            ))
         }
         return results.sorted { $0.name < $1.name }
     }

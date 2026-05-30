@@ -279,6 +279,116 @@ public final class UsageDatabase: @unchecked Sendable {
                 try db.execute(sql: "ALTER TABLE custom_sources ADD COLUMN executable_config TEXT;")
             }
         }
+        migrator.registerMigration("v14_add_library_tables") { db in
+            try db.execute(sql: """
+            CREATE TABLE IF NOT EXISTS library_skills (
+                path TEXT PRIMARY KEY,
+                scope TEXT NOT NULL,
+                scope_root TEXT NOT NULL,
+                name TEXT NOT NULL,
+                is_symlink INTEGER NOT NULL DEFAULT 0,
+                resolved_target TEXT,
+                is_broken INTEGER NOT NULL DEFAULT 0,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                estimated_tokens INTEGER NOT NULL DEFAULT 0,
+                description TEXT,
+                allowed_tools TEXT,
+                plugin_id TEXT,
+                modified_at REAL NOT NULL,
+                scanned_at REAL NOT NULL
+            );
+            """)
+            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_library_skills_scope ON library_skills(scope);")
+            try db.execute(sql: """
+            CREATE TABLE IF NOT EXISTS library_mcp (
+                scope TEXT NOT NULL,
+                source_file TEXT NOT NULL,
+                name TEXT NOT NULL,
+                command TEXT NOT NULL,
+                args TEXT,
+                env_keys TEXT,
+                estimated_tokens INTEGER NOT NULL DEFAULT 0,
+                scanned_at REAL NOT NULL,
+                PRIMARY KEY (scope, source_file, name)
+            );
+            """)
+            try db.execute(sql: """
+            CREATE TABLE IF NOT EXISTS library_scan_state (
+                scope TEXT PRIMARY KEY,
+                last_scan_at REAL NOT NULL,
+                last_error TEXT,
+                skill_count INTEGER NOT NULL DEFAULT 0,
+                mcp_count INTEGER NOT NULL DEFAULT 0
+            );
+            """)
+        }
+        migrator.registerMigration("v15_library_skills_path_pk_plugin_id") { db in
+            try db.execute(sql: "DROP TABLE IF EXISTS library_skills;")
+            try db.execute(sql: """
+            CREATE TABLE library_skills (
+                path TEXT PRIMARY KEY,
+                scope TEXT NOT NULL,
+                scope_root TEXT NOT NULL,
+                name TEXT NOT NULL,
+                is_symlink INTEGER NOT NULL DEFAULT 0,
+                resolved_target TEXT,
+                is_broken INTEGER NOT NULL DEFAULT 0,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                estimated_tokens INTEGER NOT NULL DEFAULT 0,
+                description TEXT,
+                allowed_tools TEXT,
+                plugin_id TEXT,
+                modified_at REAL NOT NULL,
+                scanned_at REAL NOT NULL
+            );
+            """)
+            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_library_skills_scope ON library_skills(scope);")
+            try db.execute(sql: "DROP TABLE IF EXISTS library_mcp;")
+            try db.execute(sql: """
+            CREATE TABLE library_mcp (
+                scope TEXT NOT NULL,
+                source_file TEXT NOT NULL,
+                name TEXT NOT NULL,
+                command TEXT NOT NULL,
+                args TEXT,
+                env_keys TEXT,
+                estimated_tokens INTEGER NOT NULL DEFAULT 0,
+                scanned_at REAL NOT NULL,
+                PRIMARY KEY (scope, source_file, name)
+            );
+            """)
+        }
+        migrator.registerMigration("v16_add_library_plugins") { db in
+            try db.execute(sql: """
+            CREATE TABLE IF NOT EXISTS library_plugins (
+                full_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                marketplace TEXT NOT NULL,
+                version TEXT NOT NULL,
+                scope TEXT NOT NULL,
+                install_path TEXT NOT NULL,
+                project_path TEXT,
+                installed_at REAL
+            );
+            """)
+        }
+        migrator.registerMigration("v17_library_mcp_disabled_project_root") { db in
+            let columns = try db.columns(in: "library_mcp")
+            if !columns.contains(where: { $0.name == "is_disabled" }) {
+                try db.execute(sql: "ALTER TABLE library_mcp ADD COLUMN is_disabled INTEGER NOT NULL DEFAULT 0;")
+            }
+            if !columns.contains(where: { $0.name == "project_root" }) {
+                try db.execute(sql: "ALTER TABLE library_mcp ADD COLUMN project_root TEXT;")
+            }
+        }
+        migrator.registerMigration("v18_rename_custom_sources_engine_to_plugin") { db in
+            let columns = try db.columns(in: "custom_sources")
+            let hasEngine = columns.contains(where: { $0.name == "engine" })
+            let hasPlugin = columns.contains(where: { $0.name == "plugin" })
+            if hasEngine && !hasPlugin {
+                try db.execute(sql: "ALTER TABLE custom_sources RENAME COLUMN engine TO plugin;")
+            }
+        }
         return migrator
     }
 }

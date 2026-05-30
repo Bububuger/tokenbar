@@ -23,7 +23,7 @@ public struct CustomSourceRegistry: Sendable {
 public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Sendable {
     public let sourceName: String
     public let rootPath: String
-    public var agent: AgentKind { record.engine.agentKind }
+    public var agent: AgentKind { record.plugin.agentKind }
     public let record: CustomSourceRecord
     private let fileManager: FileManager
 
@@ -47,7 +47,7 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
         var nextWatermarks: [SourceWatermark] = []
         var warnings: [UsageSourceWarning] = []
 
-        switch record.engine {
+        switch record.plugin {
         case .claudeCode:
             for file in files {
                 if shouldUseMappedJSONL(for: file) {
@@ -73,7 +73,7 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
                 let incremental = try JSONLIncrementalReader.read(
                     fileURL: file,
                     sourceName: sourceName,
-                    agent: record.engine.agentKind,
+                    agent: record.plugin.agentKind,
                     watermark: watermarks[file.path],
                     now: referenceDate
                 )
@@ -111,7 +111,7 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
                 let incremental = try JSONLIncrementalReader.read(
                     fileURL: file,
                     sourceName: sourceName,
-                    agent: record.engine.agentKind,
+                    agent: record.plugin.agentKind,
                     watermark: watermarks[file.path],
                     now: referenceDate
                 )
@@ -166,7 +166,7 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
                         customWatermark(
                             from: SourceWatermark(
                                 sourcePath: sourcePath,
-                                agent: record.engine.agentKind,
+                                agent: record.plugin.agentKind,
                                 lastMtime: fingerprint.mtime,
                                 lastByteOffset: 0,
                                 lastEventId: stripCustomWatermarkPrefix(priorWatermark?.lastEventId),
@@ -229,7 +229,7 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
                     customWatermark(
                         from: SourceWatermark(
                             sourcePath: sourcePath,
-                            agent: record.engine.agentKind,
+                            agent: record.plugin.agentKind,
                             lastMtime: fingerprint.mtime,
                             lastByteOffset: 0,
                             lastEventId: watermarkLastEventID,
@@ -245,12 +245,43 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
                 let incremental = try JSONLIncrementalReader.read(
                     fileURL: file,
                     sourceName: sourceName,
-                    agent: record.engine.agentKind,
+                    agent: record.plugin.agentKind,
                     watermark: watermarks[file.path],
                     now: referenceDate
                 )
                 let context = OpenClawUsageParser.sessionContext(fileURL: file)
                 let result = OpenClawUsageParser.parse(
+                    lines: incremental.lines,
+                    fileURL: file,
+                    initialSessionID: context.sessionID,
+                    initialProjectPath: context.projectPath
+                )
+                events.append(contentsOf: result.events.map { customEvent($0) })
+                nextWatermarks.append(customWatermark(
+                    from: incremental.nextWatermark,
+                    lastEventId: result.events.last?.id ?? watermarks[file.path]?.lastEventId
+                ))
+                warnings.append(contentsOf: incremental.warnings)
+                warnings.append(contentsOf: result.warnings.map {
+                    UsageSourceWarning(
+                        sourceName: sourceName,
+                        sourcePath: $0.sourcePath,
+                        lineNumber: $0.lineNumber,
+                        message: $0.message
+                    )
+                })
+            }
+        case .pi:
+            for file in files {
+                let incremental = try JSONLIncrementalReader.read(
+                    fileURL: file,
+                    sourceName: sourceName,
+                    agent: record.plugin.agentKind,
+                    watermark: watermarks[file.path],
+                    now: referenceDate
+                )
+                let context = PiUsageParser.sessionContext(fileURL: file)
+                let result = PiUsageParser.parse(
                     lines: incremental.lines,
                     fileURL: file,
                     initialSessionID: context.sessionID,
@@ -335,13 +366,13 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
     }
 
     private func discoverFiles() throws -> [URL] {
-        if record.engine == .pluginExecutable {
+        if record.plugin == .pluginExecutable {
             return []
         }
-        if record.engine == .hermes {
+        if record.plugin == .hermes {
             return discoverHermesDatabases()
         }
-        if record.engine == .openCode {
+        if record.plugin == .openCode {
             return OpenCodeDataSource.discoverDatabases(
                 rootPath: record.directory,
                 fileManager: fileManager
@@ -430,7 +461,7 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
     private func customEvent(_ event: UsageEvent) -> UsageEvent {
         UsageEvent(
             id: "custom:\(record.id):\(event.id)",
-            agent: record.engine.agentKind,
+            agent: record.plugin.agentKind,
             projectPath: event.projectPath,
             projectName: event.projectName,
             sessionId: event.sessionId,
@@ -442,7 +473,7 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
             reasoningTokens: event.reasoningTokens,
             modelName: event.modelName,
             sourcePath: event.sourcePath,
-            parser: record.engine.parserKind,
+            parser: record.plugin.parserKind,
             confidence: event.confidence
         )
     }
@@ -471,7 +502,7 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
         PromptRecord(
             id: "custom:\(record.id):\(prompt.id)",
             eventId: prompt.eventId.map { "custom:\(record.id):\($0)" },
-            agent: record.engine.agentKind,
+            agent: record.plugin.agentKind,
             projectName: prompt.projectName,
             sessionId: prompt.sessionId,
             timestamp: prompt.timestamp,
@@ -488,7 +519,7 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
     ) -> SourceWatermark {
         SourceWatermark(
             sourcePath: watermark.sourcePath,
-            agent: agent ?? record.engine.agentKind,
+            agent: agent ?? record.plugin.agentKind,
             lastMtime: watermark.lastMtime,
             lastByteOffset: watermark.lastByteOffset,
             lastEventId: lastEventId.map { "custom:\(record.id):\($0)" },
@@ -498,7 +529,7 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
     }
 
     private func shouldUseMappedJSONL(for file: URL) -> Bool {
-        guard record.engine != .hermes else { return false }
+        guard record.plugin != .hermes else { return false }
         switch record.format {
         case .unknown:
             return true
@@ -579,15 +610,26 @@ public struct CustomUsageEventSource: InspectableUsageEventSource, @unchecked Se
         return UsageSourceLoadResult(events: events, prompts: [], warnings: warnings)
     }
 
+    // ISO8601DateFormatter.date(from:) is thread-safe on macOS 10.15+; share
+    // read-only instances to avoid rebuilding ICU SimpleDateFormat per event.
+    nonisolated(unsafe) private static let iso8601WithFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    nonisolated(unsafe) private static let iso8601NoFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
     private func parseTimestamp(_ value: String?) -> Date? {
         guard let value else { return nil }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: value) {
+        if let date = Self.iso8601WithFractional.date(from: value) {
             return date
         }
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: value)
+        return Self.iso8601NoFractional.date(from: value)
     }
 
     private func mappedStringValue(from object: [String: Any], path: String) -> String? {

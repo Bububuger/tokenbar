@@ -514,6 +514,7 @@ struct PopKPI: View {
                 content
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var content: some View {
@@ -542,8 +543,17 @@ struct PopKPI: View {
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(TokenBarStyle.faint)
         }
-        .padding(.vertical, 3)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.white.opacity(0.03))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(TokenBarStyle.line.opacity(0.6), lineWidth: 1)
+        )
         .overlay(alignment: .bottom) {
             if isExpanded {
                 Rectangle()
@@ -582,6 +592,14 @@ private struct PopoverFooterIconButton: View {
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isHovering = hovering
+            }
+            // The footer sits on the popover's bottom edge where AppKit's
+            // window resize tracking would otherwise flash the up/down resize
+            // cursor. Force a plain arrow over the button while hovered.
+            if hovering {
+                NSCursor.arrow.push()
+            } else {
+                NSCursor.pop()
             }
         }
     }

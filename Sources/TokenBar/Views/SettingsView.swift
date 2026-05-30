@@ -97,7 +97,7 @@ struct SettingsView: View {
             struct CustomSource: Codable {
                 let id: String
                 let name: String
-                let engine: CustomSourceEngine
+                let plugin: CustomSourcePlugin
                 let directory: String
                 let enabled: Bool
                 let fieldMapping: CustomSourceFieldMapping
@@ -116,7 +116,7 @@ struct SettingsView: View {
                 .init(
                     id: $0.id,
                     name: $0.name,
-                    engine: $0.engine,
+                    plugin: $0.plugin,
                     directory: $0.directory,
                     enabled: $0.enabled,
                     fieldMapping: $0.fieldMapping
@@ -135,13 +135,11 @@ struct SettingsView: View {
     }
 
     /// CL-P1-019: hard reset — clears pricing overrides, calls runtime to
-    /// wipe prompts, and removes custom sources. Built-in sources remain.
+    /// wipe the local index, saved prompts, and custom sources. Upstream agent
+    /// logs remain on disk and can be re-indexed by a later refresh.
     private func resetAll() async {
         pricingOverridesJSON = "{}"
-        try? await runtimeModel.wipePrompts()
-        for source in runtimeModel.customSources {
-            await runtimeModel.removeCustomSource(id: source.id)
-        }
+        await runtimeModel.resetAllTokenBarData()
     }
 
     var body: some View {
@@ -158,7 +156,6 @@ struct SettingsView: View {
                             checkpointSection
                             promptSection
                             themeSection
-                            pluginsTeaserSection
                         case .plugins:
                             pluginsSection
                         case .pricing:
@@ -166,6 +163,7 @@ struct SettingsView: View {
                         case .sources:
                             customSourcesSection
                             retentionSection
+                            librarySection
                         }
                     }
                     .padding(16)
@@ -319,14 +317,14 @@ struct SettingsView: View {
 
     private var promptSection: some View {
         settingsSection(
-            title: "Prompt Capture",
-            subtitle: "Stores user-only prompts locally. Project history reveals text by default."
+            title: "Prompt Text",
+            subtitle: "Prompts stay indexed locally for history, CLI, and reports. This controls whether text is shown."
         ) {
             HStack(spacing: 5) {
-                pill("Off", selected: !runtimeModel.storePromptTextInClearText) {
+                pill("Hidden", selected: !runtimeModel.storePromptTextInClearText) {
                     runtimeModel.storePromptTextInClearText = false
                 }
-                pill("Full", selected: runtimeModel.storePromptTextInClearText) {
+                pill("Shown", selected: runtimeModel.storePromptTextInClearText) {
                     runtimeModel.storePromptTextInClearText = true
                 }
             }
@@ -453,54 +451,78 @@ struct SettingsView: View {
             )
     }
 
-    private var pluginsTeaserSection: some View {
-        settingsSection(
-            title: "Plugins",
-            subtitle: "Community adapters for any AI coding tool. Declarative plugins are pure JSON; executable plugins run a small script."
-        ) {
-            let installed = PluginManager(store: runtimeModel.store).installedManifests()
-            if installed.isEmpty {
-                Text("No plugins installed yet.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(TokenBarStyle.faint)
-            } else {
-                HStack(spacing: 8) {
-                    ForEach(installed, id: \.id) { manifest in
-                        HStack(spacing: 6) {
-                            Text(String(manifest.name.prefix(2)).uppercased())
-                                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                .frame(width: 22, height: 22)
-                                .background(TokenBarStyle.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 5))
-                                .foregroundStyle(TokenBarStyle.accent)
-                            Text(manifest.name)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(TokenBarStyle.foreground)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
-                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(TokenBarStyle.line, lineWidth: 1))
-                    }
-                }
-            }
-        } trailing: {
-            Button {
-                settingsTab = .plugins
-            } label: {
-                Text("Open Gallery \u{2192}")
-            }
-            .buttonStyle(SettingsButtonStyle())
-        }
+    // Built-in plugins (parsers) shipped with TokenBar. These are the native
+    // adapters BuiltInSources wires up; shown read-only so users can see what's
+    // covered out of the box, above the community gallery.
+    private struct BuiltInPlugin: Identifiable {
+        let id: String
+        let name: String       // AgentKind.displayName, drives agentColor
+        let defaultPath: String
+    }
+
+    private var builtInPlugins: [BuiltInPlugin] {
+        [
+            BuiltInPlugin(id: "claudeCode", name: "Claude Code", defaultPath: "~/.claude/projects"),
+            BuiltInPlugin(id: "codex", name: "Codex", defaultPath: "~/.codex/sessions"),
+            BuiltInPlugin(id: "gemini", name: "Gemini CLI", defaultPath: "~/.gemini/tmp"),
+            BuiltInPlugin(id: "openCode", name: "OpenCode", defaultPath: "~/.local/share/opencode"),
+            BuiltInPlugin(id: "openclaw", name: "OpenClaw", defaultPath: "~/.openclaw/agents"),
+            BuiltInPlugin(id: "hermes", name: "Hermes", defaultPath: "~/.hermes/state.db"),
+            BuiltInPlugin(id: "warp", name: "Warp", defaultPath: "~/Library/Group Containers/*.warp/.../warp.sqlite"),
+            BuiltInPlugin(id: "pi", name: "Pi", defaultPath: "~/.pi/agent"),
+        ]
     }
 
     private var pluginsSection: some View {
-        settingsSection(
-            title: "Plugins",
-            subtitle: "Community-built adapters for additional AI tools."
-        ) {
-            PluginGalleryView()
-                .environmentObject(runtimeModel)
+        VStack(alignment: .leading, spacing: 12) {
+            settingsSection(
+                title: "Built-in Plugins",
+                subtitle: "Native parsers shipped with TokenBar. Each reads one agent's local logs."
+            ) {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                    ForEach(builtInPlugins) { plugin in
+                        builtInPluginTile(plugin)
+                    }
+                }
+            }
+
+            settingsSection(
+                title: "Community Plugins",
+                subtitle: "Community-built adapters for additional AI tools."
+            ) {
+                PluginGalleryView()
+                    .environmentObject(runtimeModel)
+            }
         }
+    }
+
+    private func builtInPluginTile(_ plugin: BuiltInPlugin) -> some View {
+        HStack(spacing: 11) {
+            Circle()
+                .fill(TokenBarStyle.agentColor(plugin.name))
+                .frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 7) {
+                    Text(plugin.name)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                    Text("built-in")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(TokenBarStyle.muted)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(TokenBarStyle.surface.opacity(0.7), in: Capsule())
+                }
+                Text(plugin.defaultPath)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(TokenBarStyle.muted)
+                    .lineLimit(1)
+            }
+            Spacer()
+        }
+        .padding(13)
+        .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
     }
 
     private var customSourcesSection: some View {
@@ -519,6 +541,7 @@ struct SettingsView: View {
                 customSourceTile(name: "OpenClaw", path: "~/.openclaw/agents/**/sessions/*.jsonl", color: TokenBarStyle.agentColor("OpenClaw"), enabled: true)
                 customSourceTile(name: "OpenCode", path: "~/.local/share/opencode/opencode.db", color: TokenBarStyle.agentColor("OpenCode"), enabled: true)
                 customSourceTile(name: "Warp", path: "~/Library/Group Containers/*.dev.warp/.../warp.sqlite", color: TokenBarStyle.agentColor("Warp"), enabled: true)
+                customSourceTile(name: "Pi", path: "~/.pi/agent/sessions/**/*.jsonl", color: TokenBarStyle.agentColor("Pi"), enabled: true)
                 ForEach(runtimeModel.customSources) { source in
                     editableCustomSourceTile(source: source)
                 }
@@ -596,7 +619,73 @@ struct SettingsView: View {
                     }
                     .disabled(resetAck != "RESET")
                 } message: {
-                    Text("This wipes all events, prompts, custom sources, and pricing overrides. Type RESET to confirm.")
+                    Text("This wipes TokenBar's local index, saved prompts, custom sources, and pricing overrides. Upstream agent logs stay on disk and can be re-indexed later. Type RESET to confirm.")
+                }
+            }
+        }
+    }
+
+    private var librarySection: some View {
+        settingsSection(
+            title: "Library (Skills & MCP)",
+            subtitle: "Paths TokenBar watches for skill directories and MCP config."
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("User scope")
+                            .sectionLabel()
+                        Text("~/.claude/skills")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(TokenBarStyle.faint)
+                    }
+                    Spacer()
+                    if let state = runtimeModel.librarySnapshot.scanStates[.user] {
+                        Text("\(state.skillCount) skills")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(TokenBarStyle.muted)
+                    }
+                }
+
+                if let sharedState = runtimeModel.librarySnapshot.scanStates[.shared] {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Shared scope")
+                                .sectionLabel()
+                            Text(UserDefaults.standard.string(forKey: "tokenbar.library.sharedRoots") ?? "not configured")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(TokenBarStyle.faint)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        Text("\(sharedState.skillCount) skills")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(TokenBarStyle.muted)
+                        if let error = sharedState.lastError {
+                            Text(error)
+                                .font(.system(size: 10))
+                                .foregroundStyle(TokenBarStyle.error)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+
+                HStack(spacing: 12) {
+                    Button("Rescan now") {
+                        runtimeModel.rebuildLibrarySnapshot(trigger: "manual.rescan")
+                    }
+                    .buttonStyle(SettingsButtonStyle())
+
+                    if runtimeModel.librarySnapshot.isScanning {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+
+                    if let lastScan = runtimeModel.librarySnapshot.lastFullScanAt {
+                        Text("Last scan: \(lastScan.formatted(.relative(presentation: .named)))")
+                            .font(.system(size: 11))
+                            .foregroundStyle(TokenBarStyle.faint)
+                    }
                 }
             }
         }
@@ -680,7 +769,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 7) {
                     Text(source.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                    Text(source.engine.displayName)
+                    Text(source.plugin.displayName)
                         .font(.system(size: 10.5, weight: .semibold))
                         .foregroundStyle(TokenBarStyle.muted)
                         .padding(.horizontal, 6)
@@ -1050,7 +1139,8 @@ private struct AddCustomSourceOverlay: View {
     @State private var name = ""
     @State private var displayAgent = ""
     @State private var pathGlob = ""
-    @State private var engine: CustomSourceEngine = .claudeCode
+    @State private var plugin: CustomSourcePlugin = .claudeCode
+    @State private var pluginSearch = ""
     @State private var format: CustomSourceFormat = .auto
     @State private var mappingOpen = false
     @State private var inputField = "usage.input_tokens"
@@ -1077,7 +1167,7 @@ private struct AddCustomSourceOverlay: View {
             : "\(source.directory)/\(source.globPattern)"
             _pathGlob = State(initialValue: initialPath.replacingOccurrences(of: "//", with: "/"))
             _displayAgent = State(initialValue: source.displayAgent)
-            _engine = State(initialValue: source.engine)
+            _plugin = State(initialValue: source.plugin)
             _format = State(initialValue: source.format)
             _mappingOpen = State(initialValue: source.fieldMapping != .default)
             _inputField = State(initialValue: source.fieldMapping.inputTokens)
@@ -1089,7 +1179,7 @@ private struct AddCustomSourceOverlay: View {
             _name = State(initialValue: "")
             _displayAgent = State(initialValue: "")
             _pathGlob = State(initialValue: "")
-            _engine = State(initialValue: .claudeCode)
+            _plugin = State(initialValue: .claudeCode)
             _format = State(initialValue: .auto)
             _mappingOpen = State(initialValue: false)
             _inputField = State(initialValue: CustomSourceFieldMapping.default.inputTokens)
@@ -1134,7 +1224,7 @@ private struct AddCustomSourceOverlay: View {
 
                     VStack(alignment: .leading, spacing: 14) {
                         field("Name", text: $name, prompt: "e.g. Hermes Runs")
-                        enginePicker
+                        pluginPicker
                         field("Path or glob", text: $pathGlob, prompt: pathPrompt, trailing: {
                             HStack(spacing: 7) {
                                 Button("Browse...") {
@@ -1166,6 +1256,7 @@ private struct AddCustomSourceOverlay: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(18)
 
                     Divider().overlay(TokenBarStyle.line)
@@ -1201,34 +1292,136 @@ private struct AddCustomSourceOverlay: View {
             .shadow(color: TokenBarStyle.appBackground.opacity(0.22), radius: 22, x: 0, y: 14)
         }
         .onChange(of: pathGlob) { _, _ in resetDetectionAfterEdit() }
-        .onChange(of: engine) { _, _ in resetDetectionAfterEdit() }
+        .onChange(of: plugin) { _, _ in resetDetectionAfterEdit() }
     }
 
-    private var enginePicker: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Engine")
-                .sectionLabel()
-            HStack(spacing: 8) {
-                ForEach(CustomSourceEngine.allCases, id: \.self) { option in
-                    Button {
-                        engine = option
-                    } label: {
-                        Text(option.displayName)
-                            .font(.system(size: 12.5, weight: .semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .background(engine == option ? TokenBarStyle.input.opacity(0.20) : TokenBarStyle.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(engine == option ? TokenBarStyle.input.opacity(0.42) : TokenBarStyle.line, lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(engine == option ? TokenBarStyle.foreground : TokenBarStyle.muted)
+    // Built-in plugins map to native agent parsers; the generic SQLite /
+    // Executable adapters are the "market" (community) plugin types. Grouped
+    // and searchable so the list scales as more plugins ship.
+    private var builtInPluginOptions: [CustomSourcePlugin] {
+        CustomSourcePlugin.allCases.filter { !$0.isPlugin }
+    }
+
+    private var marketPluginOptions: [CustomSourcePlugin] {
+        CustomSourcePlugin.allCases.filter(\.isPlugin)
+    }
+
+    private func pluginMatchesSearch(_ option: CustomSourcePlugin) -> Bool {
+        let q = pluginSearch.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return true }
+        return option.displayName.localizedCaseInsensitiveContains(q)
+            || option.rawValue.localizedCaseInsensitiveContains(q)
+    }
+
+    private var pluginPicker: some View {
+        let builtIn = builtInPluginOptions.filter(pluginMatchesSearch)
+        let market = marketPluginOptions.filter(pluginMatchesSearch)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Plugin")
+                    .sectionLabel()
+                Spacer()
+                pluginSearchField
+            }
+            if builtIn.isEmpty && market.isEmpty {
+                Text("No plugin matches \u{201C}\(pluginSearch)\u{201D}")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(TokenBarStyle.faint)
+                    .padding(.vertical, 6)
+            } else {
+                if !builtIn.isEmpty {
+                    pluginGroupLabel("Built-in", count: builtInPluginOptions.count)
+                    pluginGrid(builtIn)
+                }
+                if !market.isEmpty {
+                    pluginGroupLabel("Market", count: marketPluginOptions.count)
+                    pluginGrid(market)
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var pluginSearchField: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(TokenBarStyle.faint)
+            TextField("Search", text: $pluginSearch)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11.5))
+                .frame(width: 120)
+            if !pluginSearch.isEmpty {
+                Button { pluginSearch = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(TokenBarStyle.faint)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(TokenBarStyle.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
+    }
+
+    private func pluginGroupLabel(_ title: String, count: Int) -> some View {
+        HStack(spacing: 6) {
+            Text(title.uppercased())
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(TokenBarStyle.faint)
+            Text("\(count)")
+                .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                .foregroundStyle(TokenBarStyle.faint.opacity(0.7))
+        }
+        .padding(.top, 2)
+    }
+
+    private func pluginGrid(_ options: [CustomSourcePlugin]) -> some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 132), spacing: 8)],
+            alignment: .leading,
+            spacing: 8
+        ) {
+            ForEach(options, id: \.self) { option in
+                pluginOptionTile(option)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func pluginOptionTile(_ option: CustomSourcePlugin) -> some View {
+        let selected = plugin == option
+        return Button {
+            plugin = option
+        } label: {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(option.isPlugin ? TokenBarStyle.muted : TokenBarStyle.agentColor(option.displayName))
+                    .frame(width: 7, height: 7)
+                Text(option.displayName)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(TokenBarStyle.input)
+                }
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(selected ? TokenBarStyle.input.opacity(0.18) : TokenBarStyle.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(selected ? TokenBarStyle.input.opacity(0.42) : TokenBarStyle.line, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(selected ? TokenBarStyle.foreground : TokenBarStyle.muted)
     }
 
     private var pathPrompt: String {
-        switch engine {
+        switch plugin {
         case .claudeCode:
             "~/.claude/projects or **/*.jsonl"
         case .codex:
@@ -1241,6 +1434,8 @@ private struct AddCustomSourceOverlay: View {
             "~/.local/share/opencode/opencode.db or ~/.local/share/opencode"
         case .openclaw:
             "~/.openclaw/agents or **/sessions/*.jsonl"
+        case .pi:
+            "~/.pi/agent or sessions/**/*.jsonl"
         case .pluginSqlite:
             "Path to SQLite database directory"
         case .pluginExecutable:
@@ -1290,7 +1485,7 @@ private struct AddCustomSourceOverlay: View {
                 "ellipsis",
                 TokenBarStyle.input,
                 "Checking source",
-                "Scanning the path with the selected engine."
+                "Scanning the path with the selected plugin."
             )
         case .success(let message):
             return (
@@ -1358,10 +1553,10 @@ private struct AddCustomSourceOverlay: View {
         }
         detectionState = .detecting
         let mapping = normalizedFieldMapping()
-        let selectedEngine = engine
+        let selectedEngine = plugin
         Task {
             let result = await Task.detached(priority: .userInitiated) {
-                Self.detect(rawPathGlob: rawPath, engine: selectedEngine, fieldMapping: mapping)
+                Self.detect(rawPathGlob: rawPath, plugin: selectedEngine, fieldMapping: mapping)
             }.value
             await MainActor.run {
                 switch result {
@@ -1370,7 +1565,7 @@ private struct AddCustomSourceOverlay: View {
                     self.detectionState = .success(message)
                     TokenBarTelemetry.event(
                         "custom_source.detect",
-                        metadata: "path=\(rawPath) engine=\(selectedEngine.rawValue) format=\(format.displayName)",
+                        metadata: "path=\(rawPath) plugin=\(selectedEngine.rawValue) format=\(format.displayName)",
                         success: true,
                         elapsed: Date().timeIntervalSince(started)
                     )
@@ -1411,7 +1606,7 @@ private struct AddCustomSourceOverlay: View {
         }
         isSaving = true
         saveError = nil
-        let split = splitPathGlob(pathGlob, defaultGlob: engine.defaultGlobPattern)
+        let split = splitPathGlob(pathGlob, defaultGlob: plugin.defaultGlobPattern)
         Task {
             let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
             let finalName = trimmedName.isEmpty ? "Custom Source" : trimmedName
@@ -1421,21 +1616,21 @@ private struct AddCustomSourceOverlay: View {
                 result = await runtimeModel.updateCustomSource(
                     source,
                     name: finalName,
-                    engine: engine,
+                    plugin: plugin,
                     directory: split.directory,
                     globPattern: split.glob,
                     format: format,
-                    displayAgent: engine.displayName,
+                    displayAgent: plugin.displayName,
                     fieldMapping: fieldMapping
                 )
             } else {
                 result = await runtimeModel.addCustomSource(
                     name: finalName,
-                    engine: engine,
+                    plugin: plugin,
                     directory: split.directory,
                     globPattern: split.glob,
                     format: format,
-                    displayAgent: engine.displayName,
+                    displayAgent: plugin.displayName,
                     fieldMapping: fieldMapping
                 )
             }
@@ -1509,16 +1704,16 @@ private struct AddCustomSourceOverlay: View {
 
     nonisolated private static func detect(
         rawPathGlob: String,
-        engine: CustomSourceEngine,
+        plugin: CustomSourcePlugin,
         fieldMapping: CustomSourceFieldMapping
     ) -> SourceDetectionResult {
-        let split = splitPathGlob(rawPathGlob, defaultGlob: engine.defaultGlobPattern)
-        let files = discoverFiles(directory: split.directory, globPattern: split.glob, engine: engine)
+        let split = splitPathGlob(rawPathGlob, defaultGlob: plugin.defaultGlobPattern)
+        let files = discoverFiles(directory: split.directory, globPattern: split.glob, plugin: plugin)
         guard let sample = files.first else {
             return .failure("No readable files matched this path. Use ~/ for home directories, or browse to the folder.")
         }
 
-        if engine == .hermes {
+        if plugin == .hermes {
             do {
                 _ = try HermesUsageParser.parse(databaseURL: sample)
                 return .success(.auto, "Hermes state database · \(files.count) database(s) matched.")
@@ -1530,28 +1725,28 @@ private struct AddCustomSourceOverlay: View {
         let samples = Array(files.prefix(detectionSampleLimit))
         for sample in samples {
             let detected = SourceFormatDetector.detect(fileURL: sample)
-            if engine == .claudeCode, detected == .claudeCodeJSONL {
-                return .success(detected, "\(engine.displayName) JSONL · \(files.count) file(s) matched.")
+            if plugin == .claudeCode, detected == .claudeCodeJSONL {
+                return .success(detected, "\(plugin.displayName) JSONL · \(files.count) file(s) matched.")
             }
-            if engine == .codex, detected == .codexJSONL {
-                return .success(detected, "\(engine.displayName) rollout JSONL · \(files.count) file(s) matched.")
+            if plugin == .codex, detected == .codexJSONL {
+                return .success(detected, "\(plugin.displayName) rollout JSONL · \(files.count) file(s) matched.")
             }
         }
 
         if samples.contains(where: { mappedJSONLooksValid(fileURL: $0, mapping: fieldMapping) }) {
             return .failure("The sample is mapped JSONL, but only Claude Code, Codex, and Hermes engines are supported here.")
         }
-        return .failure("Selected \(engine.displayName) engine did not match any of \(samples.count) sampled file(s).")
+        return .failure("Selected \(plugin.displayName) plugin did not match any of \(samples.count) sampled file(s).")
     }
 
-    nonisolated private static func discoverFiles(directory: String, globPattern: String, engine: CustomSourceEngine) -> [URL] {
+    nonisolated private static func discoverFiles(directory: String, globPattern: String, plugin: CustomSourcePlugin) -> [URL] {
         let expanded = CodexDataSource.expandHome(in: directory)
         let root = URL(fileURLWithPath: expanded, isDirectory: true)
         var isDirectory = ObjCBool(false)
         guard FileManager.default.fileExists(atPath: root.path(percentEncoded: false), isDirectory: &isDirectory) else {
             return []
         }
-        if engine == .hermes {
+        if plugin == .hermes {
             if !isDirectory.boolValue {
                 return FileManager.default.isReadableFile(atPath: root.path(percentEncoded: false)) ? [root] : []
             }

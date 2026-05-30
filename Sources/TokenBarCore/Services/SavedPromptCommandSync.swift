@@ -63,6 +63,21 @@ public struct SavedPromptCommandSync: Sendable {
         try removeIfPresent(slug: slug)
     }
 
+    public func removeAll() throws {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: commandsRoot.path) else {
+            return
+        }
+        let files = try fileManager.contentsOfDirectory(
+            at: commandsRoot,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        )
+        for file in files where file.pathExtension == "md" {
+            try fileManager.removeItem(at: file)
+        }
+    }
+
     private func removeIfPresent(slug: String) throws {
         let fileManager = FileManager.default
         let url = fileURL(forSlug: slug)

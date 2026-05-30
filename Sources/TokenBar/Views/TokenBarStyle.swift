@@ -164,6 +164,12 @@ enum TokenBarStyle {
                 dark: NSColor(red: 0.00, green: 0.82, blue: 0.95, alpha: 1),
                 light: NSColor(red: 0.00, green: 0.55, blue: 0.68, alpha: 1)
             )
+        case "Pi":
+            return adaptiveColor(
+                "TokenBarPi",
+                dark: NSColor(red: 0.98, green: 0.80, blue: 0.30, alpha: 1),
+                light: NSColor(red: 0.72, green: 0.55, blue: 0.12, alpha: 1)
+            )
         default:
             return muted
         }

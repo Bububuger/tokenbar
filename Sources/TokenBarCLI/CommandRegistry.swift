@@ -160,7 +160,7 @@ enum CommandRegistry {
             filters: ["--db <path>", "--json", "--ndjson"],
             sortFields: [],
             rowFields: [
-                "name", "type", "engine", "rootPath", "globPattern",
+                "name", "type", "plugin", "rootPath", "globPattern",
                 "enabled", "isReadable", "discoveredFileCount",
                 "eventCount", "promptCount", "latestEventTimestamp",
             ],
@@ -187,6 +187,40 @@ enum CommandRegistry {
             rowFields: ["sourceName", "sourcePath", "lineNumber", "message"],
             extras: [],
             defaultLimit: 50
+        ),
+        CommandDescriptor(
+            name: "skills",
+            summary: "List scanned Library skills (scope, name, tokens, path).",
+            filters: ["--db <path>", "--limit N", "--json", "--ndjson"],
+            sortFields: [],
+            rowFields: [
+                "scope", "scopeRoot", "name", "estimatedTokens", "path", "isBroken", "pluginId",
+            ],
+            extras: ["Reads the library_skills table (populated on rebuild)."],
+            defaultLimit: 100
+        ),
+        CommandDescriptor(
+            name: "mcp",
+            summary: "List scanned MCP servers (scope, source_file, name, command).",
+            filters: ["--db <path>", "--limit N", "--json", "--ndjson"],
+            sortFields: [],
+            rowFields: [
+                "scope", "sourceFile", "name", "command", "args", "estimatedTokens", "isDisabled", "projectRoot",
+            ],
+            extras: ["Reads the library_mcp table (populated on rebuild)."],
+            defaultLimit: 100
+        ),
+        CommandDescriptor(
+            name: "plugins",
+            summary: "List installed Claude Code plugins (full_id, version, scope, path).",
+            filters: ["--db <path>", "--limit N", "--json", "--ndjson"],
+            sortFields: [],
+            rowFields: [
+                "fullId", "name", "marketplace", "version", "scope",
+                "installPath", "projectPath", "installedAt",
+            ],
+            extras: ["Reads the library_plugins table (populated on rebuild)."],
+            defaultLimit: 100
         ),
         CommandDescriptor(
             name: "schema",

@@ -1,6 +1,13 @@
 import Foundation
 
 public enum PluginExecutableRunner {
+    // ISO8601DateFormatter is thread-safe on macOS 10.15+; share one instance.
+    nonisolated(unsafe) private static let iso8601: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
     public static func run(
         config: PluginExecutableSource,
         pluginDir: URL,
@@ -21,10 +28,8 @@ public enum PluginExecutableRunner {
             arguments.append(contentsOf: args)
         }
         if let flag = config.incrementalFlag, let since {
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime]
             arguments.append(flag)
-            arguments.append(formatter.string(from: since))
+            arguments.append(iso8601.string(from: since))
         }
 
         let stateDir = pluginDir.appendingPathComponent("state")

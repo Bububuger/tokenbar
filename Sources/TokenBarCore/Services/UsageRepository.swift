@@ -136,6 +136,21 @@ public struct UsageRepository: Sendable {
         }
     }
 
+    public func resetAllData() throws {
+        try database.queue.write { db in
+            try db.execute(sql: "DELETE FROM usage_events")
+            try db.execute(sql: "DELETE FROM prompts")
+            try db.execute(sql: "DELETE FROM source_watermarks")
+            try db.execute(sql: "DELETE FROM source_warnings")
+            try db.execute(sql: "DELETE FROM checkpoints")
+            try db.execute(sql: "DELETE FROM custom_sources")
+            try db.execute(sql: "DELETE FROM saved_prompts")
+        }
+        try database.queue.writeWithoutTransaction { db in
+            try db.execute(sql: "VACUUM")
+        }
+    }
+
     public func deleteRecords(before cutoff: Date) throws {
         try database.queue.write { db in
             let millis = cutoff.tokenBarMillisecondsSince1970
@@ -150,7 +165,7 @@ public struct UsageRepository: Sendable {
         try database.queue.write { db in
             try db.execute(sql: "DELETE FROM prompts")
         }
-        try database.queue.write { db in
+        try database.queue.writeWithoutTransaction { db in
             try db.execute(sql: "VACUUM")
         }
     }
@@ -861,7 +876,7 @@ public struct UsageRepository: Sendable {
     public func listCustomSources() throws -> [CustomSourceRecord] {
         try database.queue.read { db in
             let rows = try Row.fetchAll(db, sql: """
-            SELECT id, name, engine, directory, glob_pattern, format, display_agent, enabled, field_mapping, created_at,
+            SELECT id, name, plugin, directory, glob_pattern, format, display_agent, enabled, field_mapping, created_at,
                    plugin_id, plugin_version, input_includes_cached, timestamp_format, sqlite_query, executable_config
             FROM custom_sources
             ORDER BY created_at ASC, name ASC
@@ -890,12 +905,12 @@ public struct UsageRepository: Sendable {
             let targetID = (matchingRows.first?["id"] as String?) ?? source.id
             try db.execute(
                 sql: """
-                INSERT INTO custom_sources (id, name, engine, directory, glob_pattern, format, display_agent, enabled, field_mapping, created_at,
+                INSERT INTO custom_sources (id, name, plugin, directory, glob_pattern, format, display_agent, enabled, field_mapping, created_at,
                     plugin_id, plugin_version, input_includes_cached, timestamp_format, sqlite_query, executable_config)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
-                    engine = excluded.engine,
+                    plugin = excluded.plugin,
                     directory = excluded.directory,
                     glob_pattern = excluded.glob_pattern,
                     format = excluded.format,
@@ -912,7 +927,7 @@ public struct UsageRepository: Sendable {
                 arguments: [
                     targetID,
                     source.name,
-                    source.engine.rawValue,
+                    source.plugin.rawValue,
                     source.directory,
                     source.globPattern,
                     source.format.rawValue,
@@ -1499,7 +1514,7 @@ public struct UsageRepository: Sendable {
         CustomSourceRecord(
             id: row["id"],
             name: row["name"],
-            engine: CustomSourceEngine(rawValue: row["engine"] as String) ?? .claudeCode,
+            plugin: CustomSourcePlugin(rawValue: row["plugin"] as String) ?? .claudeCode,
             directory: row["directory"],
             globPattern: row["glob_pattern"],
             format: CustomSourceFormat(rawValue: row["format"] as String) ?? .unknown,
@@ -1641,5 +1656,219 @@ public struct UsageRepository: Sendable {
         markerBytes: Int
     ) -> String {
         "\(count)|\(minTimestamp)|\(maxTimestamp)|\(markerBytes)|\(minMarker)|\(maxMarker)"
+    }
+
+    // MARK: - Library
+
+    public func upsertLibrarySkills(_ skills: [ScannedSkill], scope: LibraryScope) throws {
+        try database.queue.write { db in
+            try db.execute(
+                sql: "DELETE FROM library_skills WHERE scope = ?",
+                arguments: [scope.rawValue]
+            )
+            for skill in skills {
+                let allowedToolsJSON: String? = skill.allowedTools.map { tools in
+                    (try? JSONSerialization.data(withJSONObject: tools))
+                        .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+                }
+                try db.execute(
+                    sql: """
+                    INSERT OR REPLACE INTO library_skills (path, scope, scope_root, name, is_symlink, resolved_target, is_broken, size_bytes, estimated_tokens, description, allowed_tools, plugin_id, modified_at, scanned_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    arguments: [
+                        skill.path.path,
+                        skill.scope.rawValue,
+                        skill.scopeRoot.path,
+                        skill.name,
+                        skill.isSymlink ? 1 : 0,
+                        skill.resolvedTarget?.path,
+                        skill.isBroken ? 1 : 0,
+                        skill.sizeBytes,
+                        skill.estimatedTokens,
+                        skill.description,
+                        allowedToolsJSON,
+                        skill.pluginId,
+                        skill.modifiedAt.timeIntervalSince1970,
+                        skill.scannedAt.timeIntervalSince1970,
+                    ]
+                )
+            }
+        }
+    }
+
+    public func upsertLibraryMcp(_ servers: [ScannedMcpServer], scope: LibraryScope) throws {
+        try database.queue.write { db in
+            try db.execute(
+                sql: "DELETE FROM library_mcp WHERE scope = ?",
+                arguments: [scope.rawValue]
+            )
+            for server in servers {
+                let argsJSON = (try? JSONSerialization.data(withJSONObject: server.args))
+                    .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+                let envKeysJSON = (try? JSONSerialization.data(withJSONObject: server.envKeys))
+                    .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+                try db.execute(
+                    sql: """
+                    INSERT INTO library_mcp (scope, source_file, name, command, args, env_keys, estimated_tokens, is_disabled, project_root, scanned_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    arguments: [
+                        server.scope.rawValue,
+                        server.sourceFile.path,
+                        server.name,
+                        server.command,
+                        argsJSON,
+                        envKeysJSON,
+                        server.estimatedTokens,
+                        server.isDisabled ? 1 : 0,
+                        server.projectRoot,
+                        server.scannedAt.timeIntervalSince1970,
+                    ]
+                )
+            }
+        }
+    }
+
+    public func upsertLibraryScanState(_ state: LibraryScanState) throws {
+        try database.queue.write { db in
+            try db.execute(
+                sql: """
+                INSERT OR REPLACE INTO library_scan_state (scope, last_scan_at, last_error, skill_count, mcp_count)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                arguments: [
+                    state.scope.rawValue,
+                    state.lastScanAt.timeIntervalSince1970,
+                    state.lastError,
+                    state.skillCount,
+                    state.mcpCount,
+                ]
+            )
+        }
+    }
+
+    public func upsertLibraryPlugins(_ plugins: [ScannedClaudePlugin]) throws {
+        try database.queue.write { db in
+            try db.execute(sql: "DELETE FROM library_plugins")
+            for plugin in plugins {
+                try db.execute(
+                    sql: """
+                    INSERT OR REPLACE INTO library_plugins (full_id, name, marketplace, version, scope, install_path, project_path, installed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    arguments: [
+                        plugin.fullId,
+                        plugin.name,
+                        plugin.marketplace,
+                        plugin.version,
+                        plugin.scope,
+                        plugin.installPath,
+                        plugin.projectPath,
+                        plugin.installedAt?.timeIntervalSince1970,
+                    ]
+                )
+            }
+        }
+    }
+
+    public func loadLibraryPlugins() throws -> [ScannedClaudePlugin] {
+        try database.queue.read { db in
+            let rows = try Row.fetchAll(db, sql: "SELECT * FROM library_plugins ORDER BY full_id")
+            return rows.map { row in
+                ScannedClaudePlugin(
+                    fullId: row["full_id"] ?? "",
+                    name: row["name"] ?? "",
+                    marketplace: row["marketplace"] ?? "",
+                    version: row["version"] ?? "",
+                    scope: row["scope"] ?? "",
+                    installPath: row["install_path"] ?? "",
+                    projectPath: row["project_path"] as String?,
+                    installedAt: (row["installed_at"] as Double?).map { Date(timeIntervalSince1970: $0) }
+                )
+            }
+        }
+    }
+
+    public func loadLibrarySkills() throws -> [ScannedSkill] {
+        try database.queue.read { db in
+            let rows = try Row.fetchAll(db, sql: "SELECT * FROM library_skills ORDER BY scope, name")
+            return rows.compactMap { row -> ScannedSkill? in
+                guard let scopeStr: String = row["scope"],
+                      let scope = LibraryScope(rawValue: scopeStr) else { return nil }
+                let allowedTools: [String]? = (row["allowed_tools"] as String?).flatMap { str in
+                    guard let data = str.data(using: .utf8),
+                          let arr = try? JSONSerialization.jsonObject(with: data) as? [String] else { return nil }
+                    return arr
+                }
+                return ScannedSkill(
+                    scope: scope,
+                    scopeRoot: URL(fileURLWithPath: row["scope_root"] as String? ?? ""),
+                    name: row["name"] ?? "",
+                    path: URL(fileURLWithPath: row["path"] as String? ?? ""),
+                    isSymlink: (row["is_symlink"] as Int?) == 1,
+                    resolvedTarget: (row["resolved_target"] as String?).map { URL(fileURLWithPath: $0) },
+                    isBroken: (row["is_broken"] as Int?) == 1,
+                    sizeBytes: row["size_bytes"] ?? 0,
+                    estimatedTokens: row["estimated_tokens"] ?? 0,
+                    description: row["description"],
+                    allowedTools: allowedTools,
+                    pluginId: row["plugin_id"] as String?,
+                    modifiedAt: Date(timeIntervalSince1970: row["modified_at"] ?? 0),
+                    scannedAt: Date(timeIntervalSince1970: row["scanned_at"] ?? 0)
+                )
+            }
+        }
+    }
+
+    public func loadLibraryMcp() throws -> [ScannedMcpServer] {
+        try database.queue.read { db in
+            let rows = try Row.fetchAll(db, sql: "SELECT * FROM library_mcp ORDER BY scope, name")
+            return rows.compactMap { row -> ScannedMcpServer? in
+                guard let scopeStr: String = row["scope"],
+                      let scope = LibraryScope(rawValue: scopeStr) else { return nil }
+                let args: [String] = (row["args"] as String?).flatMap { str in
+                    guard let data = str.data(using: .utf8),
+                          let arr = try? JSONSerialization.jsonObject(with: data) as? [String] else { return nil }
+                    return arr
+                } ?? []
+                let envKeys: [String] = (row["env_keys"] as String?).flatMap { str in
+                    guard let data = str.data(using: .utf8),
+                          let arr = try? JSONSerialization.jsonObject(with: data) as? [String] else { return nil }
+                    return arr
+                } ?? []
+                return ScannedMcpServer(
+                    scope: scope,
+                    sourceFile: URL(fileURLWithPath: row["source_file"] as String? ?? ""),
+                    name: row["name"] ?? "",
+                    command: row["command"] ?? "",
+                    args: args,
+                    envKeys: envKeys,
+                    estimatedTokens: row["estimated_tokens"] ?? 0,
+                    isDisabled: (row["is_disabled"] as Int?) == 1,
+                    projectRoot: row["project_root"] as String?,
+                    scannedAt: Date(timeIntervalSince1970: row["scanned_at"] ?? 0)
+                )
+            }
+        }
+    }
+
+    public func loadLibraryScanStates() throws -> [LibraryScope: LibraryScanState] {
+        try database.queue.read { db in
+            let rows = try Row.fetchAll(db, sql: "SELECT * FROM library_scan_state")
+            var result: [LibraryScope: LibraryScanState] = [:]
+            for row in rows {
+                guard let scopeStr: String = row["scope"],
+                      let scope = LibraryScope(rawValue: scopeStr) else { continue }
+                result[scope] = LibraryScanState(
+                    scope: scope,
+                    lastScanAt: Date(timeIntervalSince1970: row["last_scan_at"] ?? 0),
+                    lastError: row["last_error"],
+                    skillCount: row["skill_count"] ?? 0,
+                    mcpCount: row["mcp_count"] ?? 0
+                )
+            }
+            return result
+        }
     }
 }

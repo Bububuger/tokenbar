@@ -6,7 +6,6 @@ public typealias CodexParseResult = ParseResult
 private typealias CodexParserThrottle = JSONLThrottleTunables
 
 private final class LockedISO8601TimestampParser: @unchecked Sendable {
-    private let lock = NSLock()
     private let fractionalFormatter: ISO8601DateFormatter
     private let plainFormatter: ISO8601DateFormatter
 
@@ -22,8 +21,9 @@ private final class LockedISO8601TimestampParser: @unchecked Sendable {
 
     func parse(_ value: String?) -> Date? {
         guard let value else { return nil }
-        lock.lock()
-        defer { lock.unlock() }
+        // ISO8601DateFormatter.date(from:) is thread-safe on macOS 10.15+; no
+        // lock needed. The previous NSLock serialized every worker through one
+        // critical section and dominated the bootstrap parse hot path.
         return fractionalFormatter.date(from: value) ?? plainFormatter.date(from: value)
     }
 }

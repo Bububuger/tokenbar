@@ -9,6 +9,7 @@ struct CommandRegistryTests {
         let expected: Set<String> = [
             "events", "prompts", "projects", "sessions", "models", "agents",
             "summary", "timeline", "sources", "checkpoints", "warnings",
+            "skills", "mcp", "plugins",
             "schema", "rebuild", "prompt",
         ]
         #expect(names == expected)

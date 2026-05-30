@@ -5,11 +5,11 @@ import Testing
 
 struct Sprint8StorageTests {
     @Test
-    func builtInSourcesIncludesAllSevenAgents() {
+    func builtInSourcesIncludesAllEightAgents() {
         let sources = BuiltInSources.all()
         let agents = Set(sources.map(\.agent))
-        #expect(sources.count == 7)
-        #expect(agents == Set<AgentKind>([.codex, .claudeCode, .hermes, .geminiCLI, .openclaw, .openCode, .warp]))
+        #expect(sources.count == 8)
+        #expect(agents == Set<AgentKind>([.codex, .claudeCode, .hermes, .geminiCLI, .openclaw, .openCode, .warp, .pi]))
     }
 
     /// Regression: prompt search must hit the FTS5 index (v10 migration),
@@ -107,6 +107,76 @@ struct Sprint8StorageTests {
         #expect(tables.contains("checkpoints"))
         #expect(tables.contains("source_warnings"))
         #expect(tables.contains("custom_sources"))
+    }
+
+    @Test
+    func resetAllDataClearsIndexConfigurationAndSavedPrompts() throws {
+        let dbURL = temporaryDatabaseURL()
+        let repository = try UsageRepository(databaseURL: dbURL)
+        let now = fixedDate()
+
+        _ = try repository.insertCheckpoint(
+            trigger: "seed",
+            startedAt: now,
+            endedAt: now,
+            events: [
+                dbEvent(
+                    id: "event-1",
+                    agent: .codex,
+                    projectName: "tokenbar",
+                    sessionId: "session",
+                    timestamp: now,
+                    inputTokens: 10,
+                    outputTokens: 20,
+                    cacheTokens: 5
+                ),
+            ],
+            prompts: [prompt(id: "prompt-1")],
+            nextWatermarks: [
+                SourceWatermark(
+                    sourcePath: "/tmp/source.jsonl",
+                    agent: .codex,
+                    lastMtime: now,
+                    lastByteOffset: 42,
+                    lastEventId: "event-1",
+                    lastInode: 7,
+                    updatedAt: now
+                ),
+            ],
+            warnings: [
+                UsageSourceWarning(
+                    sourceName: "codex",
+                    sourcePath: "/tmp/source.jsonl",
+                    lineNumber: 1,
+                    message: "warning"
+                ),
+            ],
+            error: nil
+        )
+        try repository.upsertCustomSource(
+            CustomSourceRecord(name: "custom", directory: "/tmp/custom")
+        )
+        try repository.upsertSavedPrompt(
+            SavedPrompt(
+                id: "saved-1",
+                slug: "saved",
+                title: "Saved",
+                body: "body",
+                sourcePromptId: nil,
+                createdAt: now,
+                updatedAt: now
+            )
+        )
+
+        try repository.resetAllData()
+
+        #expect(try repository.allEvents().isEmpty)
+        #expect(try repository.allPrompts().isEmpty)
+        #expect(try repository.watermarks().isEmpty)
+        #expect(try repository.latestWarnings().isEmpty)
+        #expect(try repository.latestCheckpoint() == nil)
+        #expect(try repository.listCustomSources().isEmpty)
+        #expect(try repository.allSavedPrompts().isEmpty)
     }
 
     @Test
@@ -854,7 +924,7 @@ struct Sprint8StorageTests {
         let source = CustomSourceRecord(
             id: "wrapper",
             name: "Wrapper Agent",
-            engine: .claudeCode,
+            plugin: .claudeCode,
             directory: "/tmp/wrapper",
             globPattern: "**/*.jsonl",
             format: .claudeCodeJSONL,
@@ -866,7 +936,7 @@ struct Sprint8StorageTests {
 
         #expect(listed.count == 1)
         #expect(listed.first?.name == "Wrapper Agent")
-        #expect(listed.first?.engine == .claudeCode)
+        #expect(listed.first?.plugin == .claudeCode)
         #expect(listed.first?.format == .claudeCodeJSONL)
     }
 
@@ -899,7 +969,7 @@ struct Sprint8StorageTests {
 
         #expect(listed.count == 1)
         #expect(listed[0].id == "legacy")
-        #expect(listed[0].engine == .claudeCode)
+        #expect(listed[0].plugin == .claudeCode)
         #expect(listed[0].fieldMapping == .default)
         #expect(listed[0].fieldMapping.inputTokens == "usage.input_tokens")
         #expect(listed[0].fieldMapping.outputTokens == "usage.output_tokens")
@@ -914,7 +984,7 @@ struct Sprint8StorageTests {
         let source = CustomSourceRecord(
             id: "mapping",
             name: "Mapping Source",
-            engine: .codex,
+            plugin: .codex,
             directory: "/tmp/mapping",
             globPattern: "**/*.jsonl",
             format: .auto,
@@ -933,12 +1003,12 @@ struct Sprint8StorageTests {
         let firstListed = try repository.listCustomSources()
         let first = try #require(firstListed.first)
         #expect(first.fieldMapping == source.fieldMapping)
-        #expect(first.engine == .codex)
+        #expect(first.plugin == .codex)
 
         let updated = CustomSourceRecord(
             id: source.id,
             name: "Mapping Source Updated",
-            engine: .claudeCode,
+            plugin: .claudeCode,
             directory: "/tmp/mapping",
             globPattern: "**/*.jsonl",
             format: .auto,
@@ -960,7 +1030,7 @@ struct Sprint8StorageTests {
 
         #expect(secondListed.count == 1)
         #expect(second.name == "Mapping Source Updated")
-        #expect(second.engine == .claudeCode)
+        #expect(second.plugin == .claudeCode)
         #expect(second.fieldMapping == updated.fieldMapping)
         #expect(second.enabled == false)
         #expect(second.createdAt.timeIntervalSince1970 == initialCreatedAt.timeIntervalSince1970)
@@ -973,7 +1043,7 @@ struct Sprint8StorageTests {
         let first = CustomSourceRecord(
             id: "first",
             name: "Claude Me",
-            engine: .claudeCode,
+            plugin: .claudeCode,
             directory: "/tmp/claude-me/projects/",
             globPattern: "**/*.jsonl",
             format: .claudeCodeJSONL,
@@ -983,7 +1053,7 @@ struct Sprint8StorageTests {
         let duplicate = CustomSourceRecord(
             id: "second",
             name: "Claude Me Updated",
-            engine: .claudeCode,
+            plugin: .claudeCode,
             directory: "/tmp/claude-me/projects",
             globPattern: "**/*.jsonl",
             format: .claudeCodeJSONL,
@@ -1011,7 +1081,7 @@ struct Sprint8StorageTests {
         let source = CustomSourceRecord(
             id: "custom-source",
             name: "Custom Source",
-            engine: .codex,
+            plugin: .codex,
             directory: "/tmp/custom-source",
             globPattern: "**/rollout-*.jsonl",
             format: .codexJSONL,
@@ -1111,7 +1181,7 @@ struct Sprint8StorageTests {
         let record = CustomSourceRecord(
             id: "claude-source",
             name: "Claude Source",
-            engine: .claudeCode,
+            plugin: .claudeCode,
             directory: directory.path,
             globPattern: "*.jsonl",
             format: .claudeCodeJSONL,
@@ -1155,7 +1225,7 @@ struct Sprint8StorageTests {
         let record = CustomSourceRecord(
             id: "codefuse-claude-source",
             name: "CodeFuse Claude",
-            engine: .claudeCode,
+            plugin: .claudeCode,
             directory: directory.path,
             globPattern: "**/*.jsonl",
             format: .claudeCodeJSONL,
@@ -1187,7 +1257,7 @@ struct Sprint8StorageTests {
         let record = CustomSourceRecord(
             id: "codex-source",
             name: "Codex Source",
-            engine: .codex,
+            plugin: .codex,
             directory: directory.path,
             globPattern: "rollout-*.jsonl",
             format: .codexJSONL,
@@ -1231,7 +1301,7 @@ struct Sprint8StorageTests {
         let record = CustomSourceRecord(
             id: "hermes-source",
             name: "Hermes Source",
-            engine: .hermes,
+            plugin: .hermes,
             directory: directory.path,
             globPattern: "state.db",
             format: .auto,

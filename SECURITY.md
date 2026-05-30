@@ -2,9 +2,9 @@
 
 ## TokenBar's threat model in one paragraph / 一句话讲清威胁模型
 
-TokenBar reads files that AI coding tools (Claude Code, Codex, Gemini CLI, Hermes, OpenClaw, OpenCode, and any **Custom Source** you configure) write **locally** on your machine, indexes them into a local SQLite database, and renders aggregates in a macOS menu-bar app. **There is no network code in the data path.** No telemetry, no analytics SDK, no cloud sync, no account system. The most sensitive data on disk is **captured prompt text** (opt-in), stored at the same path as the index.
+TokenBar reads files that AI coding tools (Claude Code, Codex, Gemini CLI, Hermes, OpenClaw, OpenCode, and any **Custom Source** you configure) write **locally** on your machine, indexes them into a local SQLite database, and renders aggregates in a macOS menu-bar app. **There is no network code in the data path.** No analytics SDK, no cloud sync, no account system. The most sensitive data on disk is **captured prompt text**, stored locally by default so project history, `tbar prompts`, and `tokenbar-report` can work.
 
-> 中文：TokenBar 读你本机上 AI 编码工具已经写下的日志（Claude Code / Codex / Gemini CLI / Hermes / OpenClaw / OpenCode 以及你自配的 Custom Source），落到本地 SQLite，画到菜单栏 App 上 —— **数据通路里没有任何网络代码**。最敏感的本地数据是「你开了 Prompt Capture 之后捕获的 prompt 原文」，存路径与索引一致。
+> 中文：TokenBar 读你本机上 AI 编码工具已经写下的日志（Claude Code / Codex / Gemini CLI / Hermes / OpenClaw / OpenCode 以及你自配的 Custom Source），落到本地 SQLite，画到菜单栏 App 上 —— **数据通路里没有任何网络代码**。最敏感的本地数据是 prompt 原文；它默认本地入库，用于项目历史、`tbar prompts` 和 `tokenbar-report`，不会被自动上传。
 
 ## What we consider a vulnerability / 我们认作漏洞的情况
 
@@ -17,7 +17,7 @@ TokenBar reads files that AI coding tools (Claude Code, Codex, Gemini CLI, Herme
 
 ## What's out of scope / 不算漏洞
 
-- An AI tool you use writes a prompt to disk that TokenBar then indexes. **TokenBar is not the data source** — fix the upstream tool's logging, or turn off Prompt Capture in `Settings → Prompt Capture`.
+- An AI tool you use writes a prompt to disk that TokenBar then indexes locally. **TokenBar is not the upstream data source** — fix the upstream tool's logging, hide prompt text in `Settings → Prompt Text`, or wipe TokenBar's copied prompt rows from Diagnostics.
 - Exporting the local DB via `Settings → Data & Retention → Export` and then losing the resulting file. Export is an explicit user action; the file is yours after it leaves the app.
 - Pricing inaccuracy. Per-million-token rates can be overridden in `Settings → Pricing`; if a built-in default is stale, file a regular issue, not a security report.
 - Bugs that require the attacker to already have **shell access as your user** on macOS. At that point the OS is the security boundary, not TokenBar.
@@ -34,7 +34,7 @@ When reporting, please include:
 
 - TokenBar version (`Resources/Info.plist → CFBundleShortVersionString`)
 - macOS version + chip (Apple silicon / Intel)
-- Whether the issue requires Prompt Capture to be on
+- Whether the issue involves local prompt text rendering, export, or report generation
 - A minimal reproduction (a JSONL file, a Custom Source path glob, a Pricing override string, etc.) — **redact any actual prompt text**
 - Your assessment of severity, if you have one
 

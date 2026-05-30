@@ -233,7 +233,7 @@ struct DiagnosticsView: View {
                                 HStack(spacing: 8) {
                                     Text(source.name)
                                         .font(.system(size: 14, weight: .medium))
-                                    Text(source.engine.isPlugin ? source.engine.displayName : "plugin")
+                                    Text(source.plugin.isPlugin ? source.plugin.displayName : "plugin")
                                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
@@ -282,7 +282,6 @@ struct DiagnosticsView: View {
                         .font(.caption2)
                         .foregroundStyle(TokenBarStyle.muted)
                 }
-
                 let pluginsWithCacheSub = runtimeModel.customSources.filter { $0.isPlugin && $0.inputIncludesCached }
                 if pluginsWithCacheSub.isEmpty {
                     HStack(spacing: 6) {
@@ -316,11 +315,12 @@ struct DiagnosticsView: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     private var executableRuntimeCard: some View {
-        let execSources = runtimeModel.customSources.filter { $0.engine == .pluginExecutable }
+        let execSources = runtimeModel.customSources.filter { $0.plugin == .pluginExecutable }
         return TokenBarCard {
             VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -370,6 +370,7 @@ struct DiagnosticsView: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -994,7 +995,7 @@ private struct DiagnosticsDerivedRows: Sendable, Hashable {
                 state: state,
                 events: eventCount > 0 ? "\(eventCount.formatted()) events" : "pending",
                 when: source.enabled ? "waiting for index" : "disabled",
-                note: source.enabled ? "\(source.engine.displayName) · \(source.globPattern)" : "disabled"
+                note: source.enabled ? "\(source.plugin.displayName) · \(source.globPattern)" : "disabled"
             )
         }
     }

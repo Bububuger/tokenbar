@@ -32,6 +32,7 @@
 		392B545CA8758A61EDD425E5 /* session-very-long-line.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = 0C204E1A6B74185FF917C019 /* session-very-long-line.jsonl */; };
 		3B57EDAC293F7BCC1D7A3E7D /* UsageDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59FF02D649035CCD9095EB47 /* UsageDatabase.swift */; };
 		3D5530F0E70132FDFB5BFA14 /* McpScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEFB77DDF732D99C40B06F08 /* McpScanner.swift */; };
+		694DDB362052CDC707987A4C /* McpConfigEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82219F2BC1AF85389ED4A8EB /* McpConfigEditor.swift */; };
 		3DAB42155F7F30D94EFB368D /* OpenCodeUsageParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5DC9D8F6E2AB2712DA31A30 /* OpenCodeUsageParser.swift */; };
 		3E1B57FFED4C7AAFAE8D194E /* WarpUsageParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 137225CF079EBD0F6D69FDDE /* WarpUsageParser.swift */; };
 		4214DEA3986FBA479FEDAAB5 /* session-overflow.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = 3CB81B998E274AB1DF728489 /* session-overflow.jsonl */; };
@@ -95,6 +96,9 @@
 		AE1AB85CB6664416F1AA32E0 /* SavedPromptCommandSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E9E1FD331DA3821F93F18A1 /* SavedPromptCommandSyncTests.swift */; };
 		AED0C6B6541E2DAFAC22CFFE /* ProjectDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30FBD783481E03850F6713AB /* ProjectDetailView.swift */; };
 		AF9FF8081017FFB0A6956023 /* OpenClawDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 018014789378DE377F9BB0DE /* OpenClawDataSource.swift */; };
+		9250D9635DFF83CE703ED95F /* PiDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D1C9151A81BC6C19A6637F9 /* PiDataSource.swift */; };
+		906D58A651A131BB2B6C475B /* PiUsageEventSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE22918A33093C16887F9D75 /* PiUsageEventSource.swift */; };
+		37DB12812496AAAF2D195622 /* PiUsageParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = E94D167AFB263DBF4F2B2584 /* PiUsageParser.swift */; };
 		B215F14B3C8CBE01D40ED335 /* Performance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57C1E929218F4A780FB7E51D /* Performance.swift */; };
 		B22286C3DD2EB482E404D360 /* OpenClawUsageEventSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A060C64D41F8A6D7AA96A969 /* OpenClawUsageEventSource.swift */; };
 		B3892D97A629E40AA8CF0C07 /* session-multi-model.json in Resources */ = {isa = PBXBuildFile; fileRef = 33A8A21792A072AF5A4A1840 /* session-multi-model.json */; };
@@ -106,6 +110,8 @@
 		BA358A795E26A4A5A899975E /* WarningScenarioTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8CAF38178F208EEAA36C084 /* WarningScenarioTests.swift */; };
 		BADC4DBB7790A2D8A5019C7A /* TokenBarCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = CE68C5C4D63519C0D1AA1A2F /* TokenBarCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		BDE7EC58DB434BC731455A30 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20B7464755AA27280E0EE84C /* ContentView.swift */; };
+		D17B7A9FD6034EAEDA6006E3 /* UpdateNotificationCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72474A1B9CDCFE3842EF2EC7 /* UpdateNotificationCard.swift */; };
+		1977CDB90A7C8E2BAE01BF2B /* MascotDownloadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5629BBB835A1AA038171502 /* MascotDownloadView.swift */; };
 		C048EED90B78F22A64CCD67A /* LibraryModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33EB748937A88E75F4590C95 /* LibraryModels.swift */; };
 		C2EB4EF734E32CC8DE3543DD /* PromptTemplateLinterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0152A458ED7AB993AD3E52 /* PromptTemplateLinterTests.swift */; };
 		C4F3AC90F6E37A26FEDE393C /* UsageAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D7A40FAE174467B1F3B0D16 /* UsageAggregator.swift */; };
@@ -212,6 +218,9 @@
 
 /* Begin PBXFileReference section */
 		018014789378DE377F9BB0DE /* OpenClawDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenClawDataSource.swift; sourceTree = "<group>"; };
+		0D1C9151A81BC6C19A6637F9 /* PiDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiDataSource.swift; sourceTree = "<group>"; };
+		CE22918A33093C16887F9D75 /* PiUsageEventSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiUsageEventSource.swift; sourceTree = "<group>"; };
+		E94D167AFB263DBF4F2B2584 /* PiUsageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiUsageParser.swift; sourceTree = "<group>"; };
 		09D444A9CB79C36F03941643 /* session-valid.jsonl */ = {isa = PBXFileReference; path = "session-valid.jsonl"; sourceTree = "<group>"; };
 		09DFD882EBD47868E553E77F /* SavedPromptStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedPromptStoreTests.swift; sourceTree = "<group>"; };
 		0C204E1A6B74185FF917C019 /* session-very-long-line.jsonl */ = {isa = PBXFileReference; path = "session-very-long-line.jsonl"; sourceTree = "<group>"; };
@@ -224,6 +233,8 @@
 		1EBEA84048CA9EABE8D68CF3 /* PluginManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginManager.swift; sourceTree = "<group>"; };
 		1F2418887544EE623F247E42 /* TokenBarRuntimeModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenBarRuntimeModel.swift; sourceTree = "<group>"; };
 		20B7464755AA27280E0EE84C /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		72474A1B9CDCFE3842EF2EC7 /* UpdateNotificationCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components/UpdateNotificationCard.swift; sourceTree = "<group>"; };
+		A5629BBB835A1AA038171502 /* MascotDownloadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components/MascotDownloadView.swift; sourceTree = "<group>"; };
 		214AE80317DD881CA7F55270 /* CheckpointEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckpointEngine.swift; sourceTree = "<group>"; };
 		24EA28A98B03F968999EE70C /* ArgumentCursor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArgumentCursor.swift; sourceTree = "<group>"; };
 		258FA144E32653FD43395BCF /* PluginSystemTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginSystemTests.swift; sourceTree = "<group>"; };
@@ -355,6 +366,7 @@
 		FAD8276CB0DA9B13316F04F0 /* UsageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageStore.swift; sourceTree = "<group>"; };
 		FD2FC6E1235831C2973107D7 /* PromptExamplesLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptExamplesLoader.swift; sourceTree = "<group>"; };
 		FEFB77DDF732D99C40B06F08 /* McpScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = McpScanner.swift; sourceTree = "<group>"; };
+		82219F2BC1AF85389ED4A8EB /* McpConfigEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = McpConfigEditor.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -406,6 +418,8 @@
 			isa = PBXGroup;
 			children = (
 				20B7464755AA27280E0EE84C /* ContentView.swift */,
+				72474A1B9CDCFE3842EF2EC7 /* UpdateNotificationCard.swift */,
+				A5629BBB835A1AA038171502 /* MascotDownloadView.swift */,
 				338DE4158FF0A0B20EFE953B /* DiagnosticsView.swift */,
 				0F7FC1F2B71FC837231EEBE0 /* IndexingStatusViews.swift */,
 				C932DCFACE02474538C395FC /* LibraryView.swift */,
@@ -447,6 +461,7 @@
 				2F16461F18B6D1E080434F42 /* CodexUsageParser.swift */,
 				814D7254F7A442DE68A0BDAF /* GeminiUsageParser.swift */,
 				7ABA214D8F3D82E52C801A5C /* OpenClawUsageParser.swift */,
+				E94D167AFB263DBF4F2B2584 /* PiUsageParser.swift */,
 				D5DC9D8F6E2AB2712DA31A30 /* OpenCodeUsageParser.swift */,
 				8657BEDEB107A54CD103ED0A /* ParserTypes.swift */,
 				65E8ACD36BC0E34A79B370BC /* PromptExtraction.swift */,
@@ -479,8 +494,11 @@
 				47BCDC84C7B31F09D67141B4 /* LibraryConflictDetector.swift */,
 				D9AB63001486A5F7AD87CC5E /* LibraryWatcher.swift */,
 				FEFB77DDF732D99C40B06F08 /* McpScanner.swift */,
+				82219F2BC1AF85389ED4A8EB /* McpConfigEditor.swift */,
 				018014789378DE377F9BB0DE /* OpenClawDataSource.swift */,
 				A060C64D41F8A6D7AA96A969 /* OpenClawUsageEventSource.swift */,
+				0D1C9151A81BC6C19A6637F9 /* PiDataSource.swift */,
+				CE22918A33093C16887F9D75 /* PiUsageEventSource.swift */,
 				6B00B83D1FC9097D633231C7 /* OpenCodeDataSource.swift */,
 				41542FC51C470B3D79FE5E27 /* OpenCodeUsageEventSource.swift */,
 				AF1D514BC17CE0145D5691D9 /* PluginExecutableRunner.swift */,
@@ -953,6 +971,8 @@
 			files = (
 				3756E6C4F045CE0B2B42B087 /* AppDelegate.swift in Sources */,
 				BDE7EC58DB434BC731455A30 /* ContentView.swift in Sources */,
+				D17B7A9FD6034EAEDA6006E3 /* UpdateNotificationCard.swift in Sources */,
+				1977CDB90A7C8E2BAE01BF2B /* MascotDownloadView.swift in Sources */,
 				CD6DAB3A102A46A57D6C6187 /* DiagnosticsView.swift in Sources */,
 				64EDCDE8CAB9D63E3863CBF8 /* IndexingStatusViews.swift in Sources */,
 				7E73E63FF98631D389670865 /* LibraryView.swift in Sources */,
@@ -1004,8 +1024,12 @@
 				C048EED90B78F22A64CCD67A /* LibraryModels.swift in Sources */,
 				EF89D605FFE83E47AF931903 /* LibraryWatcher.swift in Sources */,
 				3D5530F0E70132FDFB5BFA14 /* McpScanner.swift in Sources */,
+				694DDB362052CDC707987A4C /* McpConfigEditor.swift in Sources */,
 				EACE7763523E9439D3866958 /* NumberFormatting.swift in Sources */,
 				AF9FF8081017FFB0A6956023 /* OpenClawDataSource.swift in Sources */,
+				9250D9635DFF83CE703ED95F /* PiDataSource.swift in Sources */,
+				906D58A651A131BB2B6C475B /* PiUsageEventSource.swift in Sources */,
+				37DB12812496AAAF2D195622 /* PiUsageParser.swift in Sources */,
 				B22286C3DD2EB482E404D360 /* OpenClawUsageEventSource.swift in Sources */,
 				E4E1807A7998E6E019358059 /* OpenClawUsageParser.swift in Sources */,
 				8AB1DEB0E6C721BB1A2F1610 /* OpenCodeDataSource.swift in Sources */,

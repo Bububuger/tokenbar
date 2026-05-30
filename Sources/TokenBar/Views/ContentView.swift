@@ -51,10 +51,15 @@ struct ContentView: View {
                             .environmentObject(runtimeModel)
                             .onAppear { recordRouteViewAppear(.settings) }
                     } else if runtimeModel.mainRoute == .library {
-                        ScrollView {
-                            LibraryView()
-                                .padding(TokenBarStyle.pagePadding)
-                                .onAppear { recordRouteViewAppear(.library) }
+                        VStack(spacing: 0) {
+                            UpdateNotificationCard()
+                                .environmentObject(runtimeModel)
+
+                            ScrollView {
+                                LibraryView()
+                                    .padding(TokenBarStyle.pagePadding)
+                                    .onAppear { recordRouteViewAppear(.library) }
+                            }
                         }
                     } else if runtimeModel.mainRoute == .savedPrompts {
                         // CL-SAVED-1: rendered outside the shared
@@ -62,15 +67,24 @@ struct ContentView: View {
                         // switch-case inside that lazy container left this
                         // route blank on first appearance until the user
                         // scrolled to force a re-measure.
-                        ScrollView {
-                            SavedPromptsListView()
+                        VStack(spacing: 0) {
+                            UpdateNotificationCard()
                                 .environmentObject(runtimeModel)
-                                .padding(TokenBarStyle.pagePadding)
-                                .onAppear { recordRouteViewAppear(.savedPrompts) }
+
+                            ScrollView {
+                                SavedPromptsListView()
+                                    .environmentObject(runtimeModel)
+                                    .padding(TokenBarStyle.pagePadding)
+                                    .onAppear { recordRouteViewAppear(.savedPrompts) }
+                            }
                         }
                     } else {
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: TokenBarStyle.sectionSpacing) {
+                                // Update notification banner at the top
+                                UpdateNotificationCard()
+                                    .environmentObject(runtimeModel)
+
                                 switch runtimeModel.mainRoute {
                                 case .today:
                                     OverviewPage(

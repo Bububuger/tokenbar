@@ -428,6 +428,13 @@ final class TokenBarRuntimeModel: ObservableObject {
         updateDownloadState = .idle
     }
 
+    /// Temporarily dismiss the update notification banner. The notification
+    /// will reappear on next app launch if the update is still available.
+    func dismissUpdateNotification() {
+        availableUpdate = nil
+        resetUpdateDownloadState()
+    }
+
     fileprivate func applyDownloadProgress(_ progress: Double) {
         updateDownloadState = .downloading(progress: progress)
     }
@@ -1522,7 +1529,7 @@ final class TokenBarRuntimeModel: ObservableObject {
 
     func addCustomSource(
         name: String,
-        engine: CustomSourceEngine,
+        plugin: CustomSourcePlugin,
         directory: String,
         globPattern: String,
         format: CustomSourceFormat,
@@ -1530,7 +1537,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         fieldMapping: CustomSourceFieldMapping = .default
     ) async -> CustomSourceSaveResult {
         let started = Date()
-        let effectiveGlobPattern = globPattern.isEmpty ? engine.defaultGlobPattern : globPattern
+        let effectiveGlobPattern = globPattern.isEmpty ? plugin.defaultGlobPattern : globPattern
         let existing = customSources.first {
             CustomSourceRecord.sourcePathKey(directory: $0.directory, globPattern: $0.globPattern)
             == CustomSourceRecord.sourcePathKey(directory: directory, globPattern: effectiveGlobPattern)
@@ -1538,11 +1545,11 @@ final class TokenBarRuntimeModel: ObservableObject {
         let source = CustomSourceRecord(
             id: existing?.id ?? UUID().uuidString,
             name: name.isEmpty ? "Custom Source" : name,
-            engine: engine,
+            plugin: plugin,
             directory: directory,
             globPattern: effectiveGlobPattern,
             format: format,
-            displayAgent: displayAgent.isEmpty ? engine.displayName : displayAgent,
+            displayAgent: displayAgent.isEmpty ? plugin.displayName : displayAgent,
             enabled: existing?.enabled ?? true,
             fieldMapping: fieldMapping,
             createdAt: existing?.createdAt ?? Date()
@@ -1550,7 +1557,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         do {
             try await usageStore.upsertCustomSource(source)
             if let existing,
-               existing.engine != source.engine || existing.format != source.format || existing.fieldMapping != source.fieldMapping {
+               existing.plugin != source.plugin || existing.format != source.format || existing.fieldMapping != source.fieldMapping {
                 try await usageStore.deleteCustomSourceData(id: existing.id)
                 await publishCurrentStoreState(refreshState: .refreshing)
             }
@@ -1574,7 +1581,7 @@ final class TokenBarRuntimeModel: ObservableObject {
     func updateCustomSource(
         _ source: CustomSourceRecord,
         name: String,
-        engine: CustomSourceEngine,
+        plugin: CustomSourcePlugin,
         directory: String,
         globPattern: String,
         format: CustomSourceFormat,
@@ -1584,13 +1591,13 @@ final class TokenBarRuntimeModel: ObservableObject {
         let started = Date()
         var updated = source
         updated.name = name
-        updated.engine = engine
+        updated.plugin = plugin
         updated.directory = directory
-        updated.globPattern = globPattern.isEmpty ? engine.defaultGlobPattern : globPattern
+        updated.globPattern = globPattern.isEmpty ? plugin.defaultGlobPattern : globPattern
         updated.format = format
-        updated.displayAgent = displayAgent.isEmpty ? engine.displayName : displayAgent
+        updated.displayAgent = displayAgent.isEmpty ? plugin.displayName : displayAgent
         updated.fieldMapping = fieldMapping
-        let requiresReindex = source.engine != updated.engine
+        let requiresReindex = source.plugin != updated.plugin
             || source.sourcePathKey != updated.sourcePathKey
             || source.format != updated.format
             || source.fieldMapping != updated.fieldMapping
@@ -2477,9 +2484,47 @@ final class TokenBarRuntimeModel: ObservableObject {
         return result.sorted { $0.fullId < $1.fullId }
     }
 
+    /// Project root + its disabled-server names, parsed from ~/.claude.json's
+    /// `projects.<path>` map. Only projects whose dir still exists on disk are
+    /// returned (a `.mcp.json` lookup follows in the scanner).
+    struct ClaudeJsonProjectMcp {
+        let root: URL
+        let disabled: Set<String>
+    }
+
+    static func claudeJsonProjectMcpInfo(_ configFile: URL) -> [ClaudeJsonProjectMcp] {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: configFile.path),
+              let data = try? Data(contentsOf: configFile),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let projects = json["projects"] as? [String: Any] else { return [] }
+
+        var result: [ClaudeJsonProjectMcp] = []
+        for (path, value) in projects {
+            guard let proj = value as? [String: Any] else { continue }
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else { continue }
+            let disabled = Set((proj["disabledMcpjsonServers"] as? [String]) ?? [])
+            result.append(ClaudeJsonProjectMcp(root: URL(fileURLWithPath: path, isDirectory: true), disabled: disabled))
+        }
+        return result
+    }
+
+    /// Deletes an MCP server from its config file (user `~/.claude.json` or a
+    /// project `.mcp.json`), then rebuilds the snapshot so the row disappears.
+    func deleteMcpServer(name: String, sourceFile: URL) {
+        do {
+            try McpConfigEditor.deleteServer(name: name, configFile: sourceFile)
+            rebuildLibrarySnapshot(trigger: "ui.mcp_deleted")
+        } catch {
+            NSLog("[Library] deleteMcpServer failed for \(name) in \(sourceFile.path): \(error.localizedDescription)")
+            // Rebuild anyway so a stale/already-gone row clears.
+            rebuildLibrarySnapshot(trigger: "ui.mcp_deleted.error")
+        }
+    }
+
     func rebuildLibrarySnapshot(trigger: String) {
         libraryRefreshTask?.cancel()
-
         let userRoots = userSkillRoots()
         let projectRoots = projectSkillRoots()
         let sharedRoots = sharedSkillRoots()
@@ -2568,10 +2613,21 @@ final class TokenBarRuntimeModel: ObservableObject {
             } catch {}
 
             do {
-                let projectMcp = try await self.mcpScanner.scanClaudeJsonProjects(claudeJson)
+                // Project-scope MCP lives in each project's `.mcp.json`; the
+                // enable/disable toggle is tracked in ~/.claude.json's
+                // per-project `disabledMcpjsonServers` array.
+                let projectInfo = Self.claudeJsonProjectMcpInfo(claudeJson)
+                var projectMcp: [ScannedMcpServer] = []
+                for info in projectInfo {
+                    let found = (try? await self.mcpScanner.scanProjectMcpJson(
+                        projectRoot: info.root,
+                        disabledNames: info.disabled
+                    )) ?? []
+                    projectMcp.append(contentsOf: found)
+                }
                 allMcp.append(contentsOf: projectMcp)
                 try? await self.usageStore.upsertLibraryMcp(projectMcp, scope: .project)
-            } catch {}
+            }
 
             let plugins = Self.scanClaudeInstalledPlugins()
             try? await self.usageStore.upsertLibraryPlugins(plugins)

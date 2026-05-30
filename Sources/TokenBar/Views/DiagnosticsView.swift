@@ -24,8 +24,7 @@ struct DiagnosticsView: View {
                 )
             }
             diagStatStrip
-            dataAuditCard
-            sourcesCard
+            tokenDataAndSourcesCard
             pluginSourcesCard
             normalizeActivityCard
             executableRuntimeCard
@@ -380,6 +379,119 @@ struct DiagnosticsView: View {
             .tracking(0.8)
             .foregroundStyle(TokenBarStyle.faint)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var tokenDataAndSourcesCard: some View {
+        TokenBarCard {
+            VStack(alignment: .leading, spacing: 16) {
+                // Token Data Audit Section
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Token Data Audit")
+                                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                            Text("Indexed raw totals by configured source. Cache share is calculated from stored usage_events.")
+                                .font(.caption2)
+                                .foregroundStyle(TokenBarStyle.muted)
+                        }
+                        Spacer()
+                        Text("\(runtimeModel.eventCount.formatted()) events")
+                            .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(TokenBarStyle.faint)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(TokenBarStyle.surfaceRaised, in: Capsule())
+                    }
+
+                    Grid(horizontalSpacing: 14, verticalSpacing: 0) {
+                        GridRow {
+                            auditHead("Source", align: .leading)
+                            auditHead("Input")
+                            auditHead("Output")
+                            auditHead("Cache")
+                            auditHead("Cache %")
+                        }
+                        Divider().gridCellColumns(5).overlay(TokenBarStyle.line)
+                        ForEach(dataAuditRows) { row in
+                            GridRow {
+                                auditCell(row.name, align: .leading)
+                                auditCell(row.input)
+                                auditCell(row.output, color: TokenBarStyle.output)
+                                auditCell(row.cache, color: TokenBarStyle.cache)
+                                auditCell(row.cacheShare, color: row.cacheShareValue < 0.10 ? TokenBarStyle.warn : TokenBarStyle.muted)
+                            }
+                            .padding(.vertical, 8)
+                            Divider().gridCellColumns(5).overlay(TokenBarStyle.line.opacity(0.55))
+                        }
+                    }
+                }
+
+                Divider().overlay(TokenBarStyle.line)
+
+                // Sources Section
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Sources")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+
+                    ForEach(sourceRows) { row in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Button {
+                                withAnimation(.easeOut(duration: 0.18)) {
+                                    expandedSourceId = (expandedSourceId == row.id) ? nil : row.id
+                                }
+                            } label: {
+                                HStack(spacing: 16) {
+                                    Image(systemName: row.icon)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(row.color)
+                                        .frame(width: 24, height: 24)
+                                        .background(row.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(row.name)
+                                            .font(.system(size: 14, weight: .medium))
+                                        Text(row.path)
+                                            .font(.system(size: 12, design: .monospaced))
+                                            .foregroundStyle(TokenBarStyle.muted)
+                                            .lineLimit(1)
+                                        if let note = row.note {
+                                            Text(note)
+                                                .font(.system(size: 11.5, design: .monospaced))
+                                                .foregroundStyle(row.color)
+                                        }
+                                    }
+
+                                    Spacer()
+
+                                    VStack(alignment: .trailing, spacing: 3) {
+                                        Text(row.events)
+                                            .font(.system(size: 12.5, design: .monospaced))
+                                            .monospacedDigit()
+                                        Text(row.when)
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundStyle(TokenBarStyle.faint)
+                                    }
+
+                                    Button("Reparse") {
+                                        TokenBarTelemetry.event("diagnostics.source.reparse.click", metadata: "source=\(row.path)", success: true)
+                                        Task { await runtimeModel.reparseSource(row.path) }
+                                    }
+                                    .controlSize(.small)
+                                    .disabled(runtimeModel.refreshState == .refreshing)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            if expandedSourceId == row.id {
+                                sourceEventsDrawer(matching: row.path)
+                                    .transition(.opacity)
+                            }
+                        }
+                        .padding(.vertical, 10)
+                        .overlay(Divider().overlay(TokenBarStyle.line.opacity(0.7)), alignment: .bottom)
+                    }
+                }
+            }
+        }
     }
 
     private var dataAuditCard: some View {

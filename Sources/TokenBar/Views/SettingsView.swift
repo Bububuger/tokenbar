@@ -155,6 +155,7 @@ struct SettingsView: View {
                         case .general:
                             checkpointSection
                             promptSection
+                            librarySection
                             themeSection
                         case .plugins:
                             pluginsSection
@@ -163,7 +164,6 @@ struct SettingsView: View {
                         case .sources:
                             customSourcesSection
                             retentionSection
-                            librarySection
                         }
                     }
                     .padding(16)

@@ -455,6 +455,7 @@ private struct LibraryTabSelector: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
+            .contentShape(Rectangle())
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(selected ? TokenBarStyle.surface : Color.clear)

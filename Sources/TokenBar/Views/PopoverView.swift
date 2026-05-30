@@ -593,14 +593,8 @@ private struct PopoverFooterIconButton: View {
             withAnimation(.easeOut(duration: 0.12)) {
                 isHovering = hovering
             }
-            // The footer sits on the popover's bottom edge where AppKit's
-            // window resize tracking would otherwise flash the up/down resize
-            // cursor. Force a plain arrow over the button while hovered.
-            if hovering {
-                NSCursor.arrow.push()
-            } else {
-                NSCursor.pop()
-            }
+            // Force arrow cursor to prevent resize cursor from appearing
+            NSCursor.arrow.set()
         }
     }
 }

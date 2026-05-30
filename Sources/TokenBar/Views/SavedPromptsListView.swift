@@ -6,6 +6,7 @@ struct SavedPromptsListView: View {
     @State private var editorTarget: SavedPromptEditorTarget?
     @State private var deletionError: String?
     @State private var showDeletionError = false
+    @State private var promptPendingDelete: SavedPrompt?
 
     var body: some View {
         // CL-SAVED-1: this route is rendered in ContentView outside the
@@ -29,6 +30,23 @@ struct SavedPromptsListView: View {
                 editorTarget = nil
             }
             .environmentObject(runtimeModel)
+        }
+        .alert(
+            "Delete prompt template?",
+            isPresented: Binding(
+                get: { promptPendingDelete != nil },
+                set: { if !$0 { promptPendingDelete = nil } }
+            ),
+            presenting: promptPendingDelete
+        ) { prompt in
+            Button("Cancel", role: .cancel) { promptPendingDelete = nil }
+            Button("Delete", role: .destructive) {
+                let target = prompt
+                promptPendingDelete = nil
+                Task { await delete(target) }
+            }
+        } message: { prompt in
+            Text("This deletes \"\(prompt.title.isEmpty ? prompt.slug : prompt.title)\" and removes ~/.claude/commands/tb/\(prompt.slug).md. This can't be undone.")
         }
         .alert("Couldn't delete prompt template", isPresented: $showDeletionError) {
             Button("OK") { deletionError = nil }
@@ -112,7 +130,7 @@ struct SavedPromptsListView: View {
                     .font(.caption)
                     .foregroundStyle(TokenBarStyle.muted)
                     Button("Delete") {
-                        Task { await delete(prompt) }
+                        promptPendingDelete = prompt
                     }
                     .buttonStyle(.plain)
                     .font(.caption)

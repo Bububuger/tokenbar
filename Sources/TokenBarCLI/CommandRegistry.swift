@@ -160,7 +160,7 @@ enum CommandRegistry {
             filters: ["--db <path>", "--json", "--ndjson"],
             sortFields: [],
             rowFields: [
-                "name", "type", "engine", "rootPath", "globPattern",
+                "name", "type", "plugin", "rootPath", "globPattern",
                 "enabled", "isReadable", "discoveredFileCount",
                 "eventCount", "promptCount", "latestEventTimestamp",
             ],
@@ -205,7 +205,7 @@ enum CommandRegistry {
             filters: ["--db <path>", "--limit N", "--json", "--ndjson"],
             sortFields: [],
             rowFields: [
-                "scope", "sourceFile", "name", "command", "args", "estimatedTokens",
+                "scope", "sourceFile", "name", "command", "args", "estimatedTokens", "isDisabled", "projectRoot",
             ],
             extras: ["Reads the library_mcp table (populated on rebuild)."],
             defaultLimit: 100

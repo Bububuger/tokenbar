@@ -372,6 +372,23 @@ public final class UsageDatabase: @unchecked Sendable {
             );
             """)
         }
+        migrator.registerMigration("v17_library_mcp_disabled_project_root") { db in
+            let columns = try db.columns(in: "library_mcp")
+            if !columns.contains(where: { $0.name == "is_disabled" }) {
+                try db.execute(sql: "ALTER TABLE library_mcp ADD COLUMN is_disabled INTEGER NOT NULL DEFAULT 0;")
+            }
+            if !columns.contains(where: { $0.name == "project_root" }) {
+                try db.execute(sql: "ALTER TABLE library_mcp ADD COLUMN project_root TEXT;")
+            }
+        }
+        migrator.registerMigration("v18_rename_custom_sources_engine_to_plugin") { db in
+            let columns = try db.columns(in: "custom_sources")
+            let hasEngine = columns.contains(where: { $0.name == "engine" })
+            let hasPlugin = columns.contains(where: { $0.name == "plugin" })
+            if hasEngine && !hasPlugin {
+                try db.execute(sql: "ALTER TABLE custom_sources RENAME COLUMN engine TO plugin;")
+            }
+        }
         return migrator
     }
 }

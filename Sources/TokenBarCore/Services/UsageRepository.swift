@@ -876,7 +876,7 @@ public struct UsageRepository: Sendable {
     public func listCustomSources() throws -> [CustomSourceRecord] {
         try database.queue.read { db in
             let rows = try Row.fetchAll(db, sql: """
-            SELECT id, name, engine, directory, glob_pattern, format, display_agent, enabled, field_mapping, created_at,
+            SELECT id, name, plugin, directory, glob_pattern, format, display_agent, enabled, field_mapping, created_at,
                    plugin_id, plugin_version, input_includes_cached, timestamp_format, sqlite_query, executable_config
             FROM custom_sources
             ORDER BY created_at ASC, name ASC
@@ -905,12 +905,12 @@ public struct UsageRepository: Sendable {
             let targetID = (matchingRows.first?["id"] as String?) ?? source.id
             try db.execute(
                 sql: """
-                INSERT INTO custom_sources (id, name, engine, directory, glob_pattern, format, display_agent, enabled, field_mapping, created_at,
+                INSERT INTO custom_sources (id, name, plugin, directory, glob_pattern, format, display_agent, enabled, field_mapping, created_at,
                     plugin_id, plugin_version, input_includes_cached, timestamp_format, sqlite_query, executable_config)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
-                    engine = excluded.engine,
+                    plugin = excluded.plugin,
                     directory = excluded.directory,
                     glob_pattern = excluded.glob_pattern,
                     format = excluded.format,
@@ -927,7 +927,7 @@ public struct UsageRepository: Sendable {
                 arguments: [
                     targetID,
                     source.name,
-                    source.engine.rawValue,
+                    source.plugin.rawValue,
                     source.directory,
                     source.globPattern,
                     source.format.rawValue,
@@ -1514,7 +1514,7 @@ public struct UsageRepository: Sendable {
         CustomSourceRecord(
             id: row["id"],
             name: row["name"],
-            engine: CustomSourceEngine(rawValue: row["engine"] as String) ?? .claudeCode,
+            plugin: CustomSourcePlugin(rawValue: row["plugin"] as String) ?? .claudeCode,
             directory: row["directory"],
             globPattern: row["glob_pattern"],
             format: CustomSourceFormat(rawValue: row["format"] as String) ?? .unknown,
@@ -1710,8 +1710,8 @@ public struct UsageRepository: Sendable {
                     .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
                 try db.execute(
                     sql: """
-                    INSERT INTO library_mcp (scope, source_file, name, command, args, env_keys, estimated_tokens, scanned_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO library_mcp (scope, source_file, name, command, args, env_keys, estimated_tokens, is_disabled, project_root, scanned_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     arguments: [
                         server.scope.rawValue,
@@ -1721,6 +1721,8 @@ public struct UsageRepository: Sendable {
                         argsJSON,
                         envKeysJSON,
                         server.estimatedTokens,
+                        server.isDisabled ? 1 : 0,
+                        server.projectRoot,
                         server.scannedAt.timeIntervalSince1970,
                     ]
                 )
@@ -1843,6 +1845,8 @@ public struct UsageRepository: Sendable {
                     args: args,
                     envKeys: envKeys,
                     estimatedTokens: row["estimated_tokens"] ?? 0,
+                    isDisabled: (row["is_disabled"] as Int?) == 1,
+                    projectRoot: row["project_root"] as String?,
                     scannedAt: Date(timeIntervalSince1970: row["scanned_at"] ?? 0)
                 )
             }

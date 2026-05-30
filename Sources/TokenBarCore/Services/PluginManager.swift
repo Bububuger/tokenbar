@@ -80,7 +80,7 @@ public actor PluginManager {
             return CustomSourceRecord(
                 id: "plugin-\(manifest.id)",
                 name: manifest.name,
-                engine: .claudeCode,
+                plugin: .claudeCode,
                 directory: src.directory,
                 globPattern: src.glob,
                 format: .unknown,
@@ -96,7 +96,7 @@ public actor PluginManager {
             return CustomSourceRecord(
                 id: "plugin-\(manifest.id)",
                 name: manifest.name,
-                engine: .pluginSqlite,
+                plugin: .pluginSqlite,
                 directory: src.directory,
                 globPattern: src.glob,
                 format: .unknown,
@@ -113,7 +113,7 @@ public actor PluginManager {
             return CustomSourceRecord(
                 id: "plugin-\(manifest.id)",
                 name: manifest.name,
-                engine: .pluginExecutable,
+                plugin: .pluginExecutable,
                 directory: Self.pluginDirectory(for: manifest.id).path,
                 globPattern: "*",
                 format: .unknown,

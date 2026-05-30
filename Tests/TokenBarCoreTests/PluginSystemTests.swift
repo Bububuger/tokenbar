@@ -526,7 +526,7 @@ struct PluginManagerTests {
 
         #expect(record.pluginId == "test-jsonl")
         #expect(record.pluginVersion == "1.0.0")
-        #expect(record.engine == .claudeCode)
+        #expect(record.plugin == .claudeCode)
         #expect(record.directory == "~/.test/logs")
         #expect(record.globPattern == "*.jsonl")
         #expect(record.inputIncludesCached == false)
@@ -541,7 +541,7 @@ struct PluginManagerTests {
         let record = manager.manifestToRecord(manifest)
 
         #expect(record.pluginId == "test-sqlite")
-        #expect(record.engine == .pluginSqlite)
+        #expect(record.plugin == .pluginSqlite)
         #expect(record.sqliteQuery != nil)
         #expect(record.sqliteQuery?.table == "events")
     }
@@ -554,7 +554,7 @@ struct PluginManagerTests {
         let record = manager.manifestToRecord(manifest)
 
         #expect(record.pluginId == "test-exec")
-        #expect(record.engine == .pluginExecutable)
+        #expect(record.plugin == .pluginExecutable)
         #expect(record.executableConfig != nil)
         #expect(record.executableConfig?.command == "python3")
         #expect(record.inputIncludesCached == true)
@@ -708,12 +708,12 @@ struct PluginDBMigrationTests {
     }
 }
 
-// MARK: - CustomSourceEngine Tests
+// MARK: - CustomSourcePlugin Tests
 
-struct CustomSourceEnginePluginTests {
+struct CustomSourcePluginPluginTests {
     @Test
     func pluginSqliteProperties() {
-        let engine = CustomSourceEngine.pluginSqlite
+        let engine = CustomSourcePlugin.pluginSqlite
         #expect(engine.isPlugin == true)
         #expect(engine.agentKind == .custom)
         #expect(engine.parserKind == .custom)
@@ -722,7 +722,7 @@ struct CustomSourceEnginePluginTests {
 
     @Test
     func pluginExecutableProperties() {
-        let engine = CustomSourceEngine.pluginExecutable
+        let engine = CustomSourcePlugin.pluginExecutable
         #expect(engine.isPlugin == true)
         #expect(engine.agentKind == .custom)
         #expect(engine.parserKind == .custom)
@@ -731,9 +731,9 @@ struct CustomSourceEnginePluginTests {
 
     @Test
     func existingEnginesNotPlugin() {
-        #expect(CustomSourceEngine.claudeCode.isPlugin == false)
-        #expect(CustomSourceEngine.codex.isPlugin == false)
-        #expect(CustomSourceEngine.hermes.isPlugin == false)
+        #expect(CustomSourcePlugin.claudeCode.isPlugin == false)
+        #expect(CustomSourcePlugin.codex.isPlugin == false)
+        #expect(CustomSourcePlugin.hermes.isPlugin == false)
     }
 }
 

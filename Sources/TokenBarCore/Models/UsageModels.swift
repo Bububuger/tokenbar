@@ -8,6 +8,7 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
     case openclaw
     case openCode
     case warp
+    case pi
     case custom
 
     public var displayName: String {
@@ -26,6 +27,8 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
             "OpenCode"
         case .warp:
             "Warp"
+        case .pi:
+            "Pi"
         case .custom:
             "Custom"
         }
@@ -47,6 +50,8 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
             0.00
         case .warp:
             2.00
+        case .pi:
+            2.00
         case .custom:
             0.15
         }
@@ -61,6 +66,7 @@ public enum ParserKind: String, Sendable, Hashable {
     case openclaw
     case openCode
     case warp
+    case pi
     case sample
     case custom
 }
@@ -85,13 +91,14 @@ public enum CustomSourceFormat: String, CaseIterable, Sendable, Hashable {
     }
 }
 
-public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codable {
+public enum CustomSourcePlugin: String, CaseIterable, Sendable, Hashable, Codable {
     case claudeCode
     case codex
     case hermes
     case gemini
     case openclaw
     case openCode
+    case pi
     case pluginSqlite
     case pluginExecutable
 
@@ -109,6 +116,8 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             "OpenClaw"
         case .openCode:
             "OpenCode"
+        case .pi:
+            "Pi"
         case .pluginSqlite:
             "Plugin (SQLite)"
         case .pluginExecutable:
@@ -130,6 +139,8 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             "**/sessions/*.jsonl"
         case .openCode:
             "opencode.db"
+        case .pi:
+            "sessions/**/*.jsonl"
         case .pluginSqlite:
             "*.db"
         case .pluginExecutable:
@@ -151,6 +162,8 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             .openclaw
         case .openCode:
             .openCode
+        case .pi:
+            .pi
         case .pluginSqlite, .pluginExecutable:
             .custom
         }
@@ -170,6 +183,8 @@ public enum CustomSourceEngine: String, CaseIterable, Sendable, Hashable, Codabl
             .openclaw
         case .openCode:
             .openCode
+        case .pi:
+            .pi
         case .pluginSqlite, .pluginExecutable:
             .custom
         }
@@ -652,7 +667,7 @@ public struct CheckpointSummary: Identifiable, Sendable, Hashable {
 public struct CustomSourceRecord: Identifiable, Sendable, Hashable {
     public let id: String
     public var name: String
-    public var engine: CustomSourceEngine
+    public var plugin: CustomSourcePlugin
     public var directory: String
     public var globPattern: String
     public var format: CustomSourceFormat
@@ -670,7 +685,7 @@ public struct CustomSourceRecord: Identifiable, Sendable, Hashable {
     public init(
         id: String = UUID().uuidString,
         name: String,
-        engine: CustomSourceEngine = .claudeCode,
+        plugin: CustomSourcePlugin = .claudeCode,
         directory: String,
         globPattern: String = "**/*.jsonl",
         format: CustomSourceFormat = .auto,
@@ -687,7 +702,7 @@ public struct CustomSourceRecord: Identifiable, Sendable, Hashable {
     ) {
         self.id = id
         self.name = name
-        self.engine = engine
+        self.plugin = plugin
         self.directory = directory
         self.globPattern = globPattern
         self.format = format

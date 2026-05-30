@@ -9,7 +9,7 @@ enum SourcesCommand {
     struct Row: Encodable {
         let name: String
         let type: String                // "builtin" | "custom"
-        let engine: String?             // for custom; the CustomSourceEngine raw
+        let plugin: String?             // for custom; the CustomSourcePlugin raw
         let agent: String?              // resolved AgentKind raw
         let rootPath: String
         let globPattern: String?
@@ -54,7 +54,7 @@ enum SourcesCommand {
             rows.append(Row(
                 name: status.sourceName,
                 type: "builtin",
-                engine: nil,
+                plugin: nil,
                 agent: source.agent.rawValue,
                 rootPath: status.rootPath,
                 globPattern: nil,
@@ -77,8 +77,8 @@ enum SourcesCommand {
             rows.append(Row(
                 name: record.name,
                 type: "custom",
-                engine: record.engine.rawValue,
-                agent: record.engine.agentKind.rawValue,
+                plugin: record.plugin.rawValue,
+                agent: record.plugin.agentKind.rawValue,
                 rootPath: record.directory,
                 globPattern: record.globPattern,
                 enabled: record.enabled,

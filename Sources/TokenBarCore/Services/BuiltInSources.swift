@@ -27,6 +27,10 @@ public enum BuiltInSources {
             OpenCodeUsageEventSource(),
             WarpUsageEventSource(),
             PiUsageEventSource(),
+            QoderUsageEventSource(),
+            KiroUsageEventSource(),
+            KimiUsageEventSource(),
+            AntigravityUsageEventSource(),
         ]
     }
 }

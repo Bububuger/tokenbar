@@ -170,6 +170,30 @@ enum TokenBarStyle {
                 dark: NSColor(red: 0.98, green: 0.80, blue: 0.30, alpha: 1),
                 light: NSColor(red: 0.72, green: 0.55, blue: 0.12, alpha: 1)
             )
+        case "Qoder":
+            return adaptiveColor(
+                "TokenBarQoder",
+                dark: NSColor(red: 0.55, green: 0.78, blue: 0.98, alpha: 1),
+                light: NSColor(red: 0.20, green: 0.45, blue: 0.78, alpha: 1)
+            )
+        case "Kiro":
+            return adaptiveColor(
+                "TokenBarKiro",
+                dark: NSColor(red: 0.70, green: 0.66, blue: 0.98, alpha: 1),
+                light: NSColor(red: 0.40, green: 0.34, blue: 0.78, alpha: 1)
+            )
+        case "Kimi Code":
+            return adaptiveColor(
+                "TokenBarKimi",
+                dark: NSColor(red: 0.98, green: 0.55, blue: 0.45, alpha: 1),
+                light: NSColor(red: 0.78, green: 0.30, blue: 0.22, alpha: 1)
+            )
+        case "Antigravity":
+            return adaptiveColor(
+                "TokenBarAntigravity",
+                dark: NSColor(red: 0.45, green: 0.88, blue: 0.82, alpha: 1),
+                light: NSColor(red: 0.18, green: 0.58, blue: 0.54, alpha: 1)
+            )
         default:
             return muted
         }

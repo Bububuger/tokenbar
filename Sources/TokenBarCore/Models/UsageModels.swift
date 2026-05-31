@@ -9,6 +9,10 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
     case openCode
     case warp
     case pi
+    case qoder
+    case kiro
+    case kimi
+    case antigravity
     case custom
 
     public var displayName: String {
@@ -29,6 +33,14 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
             "Warp"
         case .pi:
             "Pi"
+        case .qoder:
+            "Qoder"
+        case .kiro:
+            "Kiro"
+        case .kimi:
+            "Kimi Code"
+        case .antigravity:
+            "Antigravity"
         case .custom:
             "Custom"
         }
@@ -52,6 +64,14 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
             2.00
         case .pi:
             2.00
+        case .qoder:
+            2.15
+        case .kiro:
+            2.15
+        case .kimi:
+            0.15
+        case .antigravity:
+            0.50
         case .custom:
             0.15
         }
@@ -67,6 +87,10 @@ public enum ParserKind: String, Sendable, Hashable {
     case openCode
     case warp
     case pi
+    case qoder
+    case kiro
+    case kimi
+    case antigravity
     case sample
     case custom
 }

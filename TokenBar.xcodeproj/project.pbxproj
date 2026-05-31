@@ -15,6 +15,22 @@
 		0ED0B2EBB5AE33375CC8CF5A /* JSONLWatermarkLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6437D03BB0B04953688295F /* JSONLWatermarkLoader.swift */; };
 		11BD35E76314C84AABA18971 /* Sprint9IncrementalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8350DE0668F07E1A23EFC9F4 /* Sprint9IncrementalTests.swift */; };
 		1201D600D3A75409FF46FEF4 /* PiUsageParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1CF15AC0F8231F14BD2360E /* PiUsageParser.swift */; };
+		0BD2D51C4491A714C549CCAA /* QoderUsageParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = C74DD14B681FAA9837F8B019 /* QoderUsageParser.swift */; };
+		04BC58ECA56FDBFBA8E380AD /* QoderDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADC158A9E942166762233965 /* QoderDataSource.swift */; };
+		60422A20884C14A968A56176 /* QoderUsageEventSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0967E61EEFD643C13E55606E /* QoderUsageEventSource.swift */; };
+		8050475721691974C47CB0AF /* KiroUsageParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94CA0B561B60085D3A9590E4 /* KiroUsageParser.swift */; };
+		9A1362912C3E69A28C879C25 /* KiroDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55670A26EA1BA1BE4C0DED1F /* KiroDataSource.swift */; };
+		96AD40C4B52897D7CC9035F9 /* KiroUsageEventSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAE246282DF7D34FD18CB6EF /* KiroUsageEventSource.swift */; };
+		526369963643AB8C6D515F90 /* KimiUsageParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FCF77F7414C0965A2000769 /* KimiUsageParser.swift */; };
+		72EFE264FD3B2F35D3144C61 /* KimiDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F87DB9579F2CA098FA99697 /* KimiDataSource.swift */; };
+		D64E3E024BE5743E2E76F7C0 /* KimiUsageEventSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F22053C858FA978F7C7C8A1 /* KimiUsageEventSource.swift */; };
+		BDB8D052E2D92FFD627851A0 /* AntigravityUsageParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CCD36D206658FBDE7C25282 /* AntigravityUsageParser.swift */; };
+		DA35A541B37929A0C6887C65 /* AntigravityDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4145FDDD4A4939BA37A48120 /* AntigravityDataSource.swift */; };
+		31AB5580E7213527F884C45C /* AntigravityUsageEventSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = C04A679E9090025C756F136C /* AntigravityUsageEventSource.swift */; };
+		63E9DA14A1D18E60CDD33369 /* QoderUsageParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8354140D5E299C4196A78F98 /* QoderUsageParserTests.swift */; };
+		062E19E381ED24F708A127F0 /* KiroUsageParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EE68C0FBC310BCD2BB17F6F /* KiroUsageParserTests.swift */; };
+		2CD3E949322390860EEBCF67 /* KimiUsageParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E5CB6AC108EE579EF4E9127 /* KimiUsageParserTests.swift */; };
+		DB3408EB35EE7DC0CC8D7269 /* AntigravityUsageParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DB784CEED97181A551A430E /* AntigravityUsageParserTests.swift */; };
 		13473CCEC11872670DEB7346 /* PromptTemplatePreviewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84ED46F5F5614A4628F27FFC /* PromptTemplatePreviewTests.swift */; };
 		13C6A572B337CECA1363DD7B /* WarpUsageParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98C0AAB42EE381A923F00048 /* WarpUsageParserTests.swift */; };
 		19F556FC44FDA1BA8BC35444 /* Aggregation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E15456AA376C9D15A280DE88 /* Aggregation.swift */; };
@@ -241,6 +257,22 @@
 		2AA4A0890E48063F579F5DB7 /* PluginRegistryClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginRegistryClient.swift; sourceTree = "<group>"; };
 		2E0199F0D8EFAC5FAEFCE323 /* DiscoveryCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryCache.swift; sourceTree = "<group>"; };
 		2E563023618B625EAC0E48C9 /* PiDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiDataSource.swift; sourceTree = "<group>"; };
+		C74DD14B681FAA9837F8B019 /* QoderUsageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QoderUsageParser.swift; sourceTree = "<group>"; };
+		ADC158A9E942166762233965 /* QoderDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QoderDataSource.swift; sourceTree = "<group>"; };
+		0967E61EEFD643C13E55606E /* QoderUsageEventSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QoderUsageEventSource.swift; sourceTree = "<group>"; };
+		94CA0B561B60085D3A9590E4 /* KiroUsageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KiroUsageParser.swift; sourceTree = "<group>"; };
+		55670A26EA1BA1BE4C0DED1F /* KiroDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KiroDataSource.swift; sourceTree = "<group>"; };
+		DAE246282DF7D34FD18CB6EF /* KiroUsageEventSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KiroUsageEventSource.swift; sourceTree = "<group>"; };
+		3FCF77F7414C0965A2000769 /* KimiUsageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiUsageParser.swift; sourceTree = "<group>"; };
+		5F87DB9579F2CA098FA99697 /* KimiDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiDataSource.swift; sourceTree = "<group>"; };
+		3F22053C858FA978F7C7C8A1 /* KimiUsageEventSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiUsageEventSource.swift; sourceTree = "<group>"; };
+		2CCD36D206658FBDE7C25282 /* AntigravityUsageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityUsageParser.swift; sourceTree = "<group>"; };
+		4145FDDD4A4939BA37A48120 /* AntigravityDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityDataSource.swift; sourceTree = "<group>"; };
+		C04A679E9090025C756F136C /* AntigravityUsageEventSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityUsageEventSource.swift; sourceTree = "<group>"; };
+		8354140D5E299C4196A78F98 /* QoderUsageParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QoderUsageParserTests.swift; sourceTree = "<group>"; };
+		0EE68C0FBC310BCD2BB17F6F /* KiroUsageParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KiroUsageParserTests.swift; sourceTree = "<group>"; };
+		6E5CB6AC108EE579EF4E9127 /* KimiUsageParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KimiUsageParserTests.swift; sourceTree = "<group>"; };
+		3DB784CEED97181A551A430E /* AntigravityUsageParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityUsageParserTests.swift; sourceTree = "<group>"; };
 		2F16461F18B6D1E080434F42 /* CodexUsageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexUsageParser.swift; sourceTree = "<group>"; };
 		30FBD783481E03850F6713AB /* ProjectDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDetailView.swift; sourceTree = "<group>"; };
 		31D12696CE05F7AECE31A8E5 /* EventCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventCommands.swift; sourceTree = "<group>"; };
@@ -469,6 +501,10 @@
 				D5DC9D8F6E2AB2712DA31A30 /* OpenCodeUsageParser.swift */,
 				8657BEDEB107A54CD103ED0A /* ParserTypes.swift */,
 				F1CF15AC0F8231F14BD2360E /* PiUsageParser.swift */,
+				C74DD14B681FAA9837F8B019 /* QoderUsageParser.swift */,
+				94CA0B561B60085D3A9590E4 /* KiroUsageParser.swift */,
+				3FCF77F7414C0965A2000769 /* KimiUsageParser.swift */,
+				2CCD36D206658FBDE7C25282 /* AntigravityUsageParser.swift */,
 				65E8ACD36BC0E34A79B370BC /* PromptExtraction.swift */,
 				95322CB20E0BEB0733741D67 /* TokenNormalizer.swift */,
 				137225CF079EBD0F6D69FDDE /* WarpUsageParser.swift */,
@@ -506,6 +542,14 @@
 				41542FC51C470B3D79FE5E27 /* OpenCodeUsageEventSource.swift */,
 				2E563023618B625EAC0E48C9 /* PiDataSource.swift */,
 				A7689F9835649DAAB35C3B6E /* PiUsageEventSource.swift */,
+				ADC158A9E942166762233965 /* QoderDataSource.swift */,
+				0967E61EEFD643C13E55606E /* QoderUsageEventSource.swift */,
+				55670A26EA1BA1BE4C0DED1F /* KiroDataSource.swift */,
+				DAE246282DF7D34FD18CB6EF /* KiroUsageEventSource.swift */,
+				5F87DB9579F2CA098FA99697 /* KimiDataSource.swift */,
+				3F22053C858FA978F7C7C8A1 /* KimiUsageEventSource.swift */,
+				4145FDDD4A4939BA37A48120 /* AntigravityDataSource.swift */,
+				C04A679E9090025C756F136C /* AntigravityUsageEventSource.swift */,
 				AF1D514BC17CE0145D5691D9 /* PluginExecutableRunner.swift */,
 				1EBEA84048CA9EABE8D68CF3 /* PluginManager.swift */,
 				2AA4A0890E48063F579F5DB7 /* PluginRegistryClient.swift */,
@@ -635,6 +679,10 @@
 				FB2BEDAA52758903C1A5DE44 /* McpScannerTests.swift */,
 				760EDFDB66351F65724427BB /* OpenCodeUsageParserTests.swift */,
 				3C1DD0E6A16F9D342FE5E9F2 /* PiUsageParserTests.swift */,
+				8354140D5E299C4196A78F98 /* QoderUsageParserTests.swift */,
+				0EE68C0FBC310BCD2BB17F6F /* KiroUsageParserTests.swift */,
+				6E5CB6AC108EE579EF4E9127 /* KimiUsageParserTests.swift */,
+				3DB784CEED97181A551A430E /* AntigravityUsageParserTests.swift */,
 				258FA144E32653FD43395BCF /* PluginSystemTests.swift */,
 				EE0152A458ED7AB993AD3E52 /* PromptTemplateLinterTests.swift */,
 				84ED46F5F5614A4628F27FFC /* PromptTemplatePreviewTests.swift */,
@@ -1054,6 +1102,18 @@
 				D40DFFD6F79C3E159B0179DE /* PiDataSource.swift in Sources */,
 				B6F196C3F93B9C8C6B949B55 /* PiUsageEventSource.swift in Sources */,
 				1201D600D3A75409FF46FEF4 /* PiUsageParser.swift in Sources */,
+				04BC58ECA56FDBFBA8E380AD /* QoderDataSource.swift in Sources */,
+				60422A20884C14A968A56176 /* QoderUsageEventSource.swift in Sources */,
+				0BD2D51C4491A714C549CCAA /* QoderUsageParser.swift in Sources */,
+				9A1362912C3E69A28C879C25 /* KiroDataSource.swift in Sources */,
+				96AD40C4B52897D7CC9035F9 /* KiroUsageEventSource.swift in Sources */,
+				8050475721691974C47CB0AF /* KiroUsageParser.swift in Sources */,
+				72EFE264FD3B2F35D3144C61 /* KimiDataSource.swift in Sources */,
+				D64E3E024BE5743E2E76F7C0 /* KimiUsageEventSource.swift in Sources */,
+				526369963643AB8C6D515F90 /* KimiUsageParser.swift in Sources */,
+				DA35A541B37929A0C6887C65 /* AntigravityDataSource.swift in Sources */,
+				31AB5580E7213527F884C45C /* AntigravityUsageEventSource.swift in Sources */,
+				BDB8D052E2D92FFD627851A0 /* AntigravityUsageParser.swift in Sources */,
 				8BF45CA0D83A70F1BDF53A9B /* PluginExecutableRunner.swift in Sources */,
 				4FA9E493A8BB950A09DE5E73 /* PluginManager.swift in Sources */,
 				DD8725CF370B910C83BF3A50 /* PluginManifest.swift in Sources */,
@@ -1106,6 +1166,10 @@
 				90E219F02122AA530A8CD709 /* McpScannerTests.swift in Sources */,
 				70A31C892E296F8E4AA57A31 /* OpenCodeUsageParserTests.swift in Sources */,
 				31986815D9AC246547C88777 /* PiUsageParserTests.swift in Sources */,
+				63E9DA14A1D18E60CDD33369 /* QoderUsageParserTests.swift in Sources */,
+				062E19E381ED24F708A127F0 /* KiroUsageParserTests.swift in Sources */,
+				2CD3E949322390860EEBCF67 /* KimiUsageParserTests.swift in Sources */,
+				DB3408EB35EE7DC0CC8D7269 /* AntigravityUsageParserTests.swift in Sources */,
 				F86CBC87B5907E3889D79CDC /* PluginSystemTests.swift in Sources */,
 				C2EB4EF734E32CC8DE3543DD /* PromptTemplateLinterTests.swift in Sources */,
 				13473CCEC11872670DEB7346 /* PromptTemplatePreviewTests.swift in Sources */,

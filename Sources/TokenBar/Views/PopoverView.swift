@@ -53,6 +53,7 @@ struct PopoverView: View {
                     TokenBarIndexingStatusCard(
                         state: runtimeModel.indexingState,
                         compact: true,
+                        showSourceList: false,
                         onPause: { runtimeModel.pauseInitialIndexing() },
                         onRetry: { runtimeModel.retryInitialIndexing() },
                         onOpenDiagnostics: { openMain(route: .diagnostics) }

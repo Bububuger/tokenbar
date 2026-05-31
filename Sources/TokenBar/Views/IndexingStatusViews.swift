@@ -4,37 +4,29 @@ struct TokenBarIndexingStatusCard: View {
     let state: TokenBarIndexingState
     var compact = false
     var showActions = true
+    /// Render the full per-source row list. Off in the popover and overview
+    /// (where many plugins would balloon the card into a long scroll); on in
+    /// Diagnostics, where the per-source detail is the point.
+    var showSourceList = true
     var onPause: (() -> Void)?
     var onRetry: (() -> Void)?
     var onOpenDiagnostics: (() -> Void)?
 
     var body: some View {
         TokenBarCard(padding: compact ? 12 : TokenBarStyle.cardPadding) {
-            VStack(alignment: .leading, spacing: compact ? 10 : 14) {
+            VStack(alignment: .leading, spacing: compact ? 8 : 10) {
                 header
                 ProgressView(value: state.progress)
                     .progressViewStyle(.linear)
                     .tint(TokenBarStyle.accent)
 
-                HStack(spacing: 10) {
-                    Label(summaryText, systemImage: iconName)
-                        .font(.caption)
-                        .foregroundStyle(TokenBarStyle.muted)
-                        .lineLimit(1)
-                    Spacer()
-                    if state.isPartial {
-                        Text("partial")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(TokenBarStyle.warn)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 2)
-                            .background(TokenBarStyle.warn.opacity(0.12), in: Capsule())
-                    }
-                }
+                dataLine
 
-                VStack(spacing: 6) {
-                    ForEach(state.sources) { source in
-                        sourceRow(source)
+                if showSourceList {
+                    VStack(spacing: 6) {
+                        ForEach(state.sources) { source in
+                            sourceRow(source)
+                        }
                     }
                 }
 
@@ -43,6 +35,40 @@ struct TokenBarIndexingStatusCard: View {
                 }
             }
         }
+    }
+
+    /// A single tight line of aggregate numbers — replaces the long per-source
+    /// list when `showSourceList` is off. Keeps the data ("N events · X/Y
+    /// sources · M files · elapsed"), surfaces a failed-count chip when some
+    /// sources errored, and a "partial" chip while still running.
+    private var dataLine: some View {
+        HStack(spacing: 8) {
+            Label(summaryText, systemImage: iconName)
+                .font(.caption)
+                .foregroundStyle(TokenBarStyle.muted)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 6)
+            if failedSourceCount > 0 {
+                chip("\(failedSourceCount) failed", color: TokenBarStyle.warn)
+            }
+            if state.isPartial {
+                chip("partial", color: TokenBarStyle.warn)
+            }
+        }
+    }
+
+    private func chip(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.12), in: Capsule())
+    }
+
+    private var failedSourceCount: Int {
+        state.sources.filter { $0.phase == .failed }.count
     }
 
     private var header: some View {
@@ -170,18 +196,22 @@ struct TokenBarIndexingStatusCard: View {
     }
 
     private var summaryText: String {
-        var parts = [
-            "\(state.checkedFiles.formatted()) files checked",
-            "\(state.sources.count) sources",
-        ]
-        if let cpuBudgetPercent = state.cpuBudgetPercent {
-            parts.append("~\(formatCPU(cpuBudgetPercent)) CPU")
+        var parts: [String] = []
+        if state.eventsIndexed > 0 || state.phase == .completed {
+            parts.append("\(state.eventsIndexed.formatted()) events")
+        }
+        let total = state.sources.count
+        if total > 0 {
+            parts.append("\(state.completedSourceCount)/\(total) sources")
+        }
+        if state.checkedFiles > 0 {
+            parts.append("\(state.checkedFiles.formatted()) files")
         }
         if let startedAt = state.startedAt {
             let ended = state.endedAt ?? Date()
-            parts.append("\(formatElapsed(ended.timeIntervalSince(startedAt))) elapsed")
+            parts.append(formatElapsed(ended.timeIntervalSince(startedAt)))
         }
-        return parts.joined(separator: " · ")
+        return parts.isEmpty ? "Reading local agent history" : parts.joined(separator: " · ")
     }
 
     private var iconName: String {
@@ -252,12 +282,5 @@ struct TokenBarIndexingStatusCard: View {
         let minutes = Int(seconds / 60)
         let remainder = Int(seconds) % 60
         return "\(minutes)m \(remainder)s"
-    }
-
-    private func formatCPU(_ value: Double) -> String {
-        if value.rounded() == value {
-            return "\(Int(value))%"
-        }
-        return String(format: "%.1f%%", value)
     }
 }

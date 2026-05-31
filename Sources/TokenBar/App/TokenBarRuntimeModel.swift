@@ -241,10 +241,26 @@ final class TokenBarRuntimeModel: ObservableObject {
     /// `completed` exposes the on-disk DMG path so a follow-up click can
     /// `NSWorkspace.open` it; `failed` shows the error inline.
     @Published private(set) var updateDownloadState: AppUpdateDownloadState = .idle
+    /// Live download detail (bytes done/total + speed) derived from the
+    /// `0…1` progress stream, so the popover can show "26.5 / 42.8 MB ·
+    /// 9.4 MB/s · 2s remaining". `nil` until the first sampled tick.
+    @Published private(set) var downloadMetrics: DownloadMetrics?
+    /// Timestamp of the last successful (or attempted) update check, for the
+    /// popover's "Last checked Xm ago" line. Mirrors `UpdateChecker`'s
+    /// persisted value but published for SwiftUI.
+    @Published private(set) var lastUpdateCheckAt: Date?
+    /// Drives the full-bleed restart-theater overlay mounted at the
+    /// ContentView root (the popover can't escape its sidebar anchor). Set
+    /// true when the user clicks Restart; the overlay clears it when done.
+    @Published var isRestartTheaterActive = false
+    /// Version string the restart theater carries away (the "v0.1.1" parcel).
+    @Published var restartTargetVersion: String?
     private let updateChecker = UpdateChecker()
     private let updateDownloader = AppUpdateDownloader()
     private var updateCheckTask: Task<Void, Never>?
     private var updateDownloadTask: Task<Void, Never>?
+    private var lastProgressSample: (date: Date, bytes: Int64)?
+    private var smoothedBytesPerSec: Double = 0
 
     // MARK: - Library
     @Published private(set) var librarySnapshot: LibrarySnapshot = .empty
@@ -359,6 +375,12 @@ final class TokenBarRuntimeModel: ObservableObject {
     private func startUpdateCheckLoop() {
         updateCheckTask?.cancel()
         updateCheckTask = Task { [weak self] in
+            // Surface the persisted last-checked timestamp before the first
+            // live ping, so the popover isn't blank on launch.
+            if let self {
+                let persisted = await self.updateChecker.lastChecked
+                await MainActor.run { self.lastUpdateCheckAt = persisted }
+            }
             // Initial check 5s after launch — let bootstrap finish first.
             try? await Task.sleep(for: .seconds(5))
             while !Task.isCancelled {
@@ -366,6 +388,7 @@ final class TokenBarRuntimeModel: ObservableObject {
                     if let result = await self.updateChecker.checkNow() {
                         await MainActor.run {
                             self.availableUpdate = result.isNewer ? result : nil
+                            self.lastUpdateCheckAt = Date()
                         }
                     }
                 }
@@ -384,6 +407,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         if let result = await updateChecker.checkNow() {
             availableUpdate = result.isNewer ? result : nil
         }
+        lastUpdateCheckAt = Date()
     }
 
     /// Kick off the in-app update download. Sets `updateDownloadState` to
@@ -395,15 +419,19 @@ final class TokenBarRuntimeModel: ObservableObject {
         }
         updateDownloadTask?.cancel()
         updateDownloadState = .downloading(progress: 0)
+        downloadMetrics = nil
+        lastProgressSample = nil
+        smoothedBytesPerSec = 0
         let downloader = updateDownloader
         let version = update.latestVersion
+        let totalBytes = update.dmgSizeBytes
         let sink = UpdateDownloadSink(model: self)
         updateDownloadTask = Task {
             do {
                 let destination = try await downloader.download(
                     from: dmgURL,
                     version: version,
-                    onProgress: { progress in sink.publishProgress(progress) }
+                    onProgress: { progress in sink.publishProgress(progress, totalBytes: totalBytes) }
                 )
                 sink.publishOutcome(.completed(localURL: destination))
             } catch {
@@ -426,6 +454,9 @@ final class TokenBarRuntimeModel: ObservableObject {
         updateDownloadTask?.cancel()
         updateDownloadTask = nil
         updateDownloadState = .idle
+        downloadMetrics = nil
+        lastProgressSample = nil
+        smoothedBytesPerSec = 0
     }
 
     /// Temporarily dismiss the update notification banner. The notification
@@ -435,13 +466,86 @@ final class TokenBarRuntimeModel: ObservableObject {
         resetUpdateDownloadState()
     }
 
-    fileprivate func applyDownloadProgress(_ progress: Double) {
+    fileprivate func applyDownloadProgress(_ progress: Double, totalBytes: Int64?) {
         updateDownloadState = .downloading(progress: progress)
+        guard let total = totalBytes, total > 0 else {
+            // No known size — fall back to percentage-only display.
+            downloadMetrics = nil
+            return
+        }
+        let bytesDone = Int64(Double(total) * min(1, max(0, progress)))
+        let now = Date()
+        if let last = lastProgressSample {
+            let dt = now.timeIntervalSince(last.date)
+            if dt >= 0.25 {
+                let instant = Double(bytesDone - last.bytes) / dt
+                // EMA smoothing so the readout doesn't jitter on bursty I/O.
+                smoothedBytesPerSec = smoothedBytesPerSec == 0
+                    ? instant
+                    : 0.6 * smoothedBytesPerSec + 0.4 * instant
+                lastProgressSample = (now, bytesDone)
+                publishMetrics(bytesDone: bytesDone, total: total)
+            }
+        } else {
+            lastProgressSample = (now, bytesDone)
+            publishMetrics(bytesDone: bytesDone, total: total)
+        }
+    }
+
+    private func publishMetrics(bytesDone: Int64, total: Int64) {
+        let speed = max(0, smoothedBytesPerSec)
+        let remaining = speed > 1 ? Double(total - bytesDone) / speed : nil
+        downloadMetrics = DownloadMetrics(
+            bytesDone: bytesDone,
+            bytesTotal: total,
+            bytesPerSec: speed,
+            secondsRemaining: remaining
+        )
     }
 
     fileprivate func applyDownloadOutcome(_ outcome: AppUpdateDownloadState) {
         updateDownloadState = outcome
     }
+
+#if DEBUG
+    /// Debug-only: inject a synthetic "update available" so the popover flow
+    /// (available → downloading → ready → restart) can be exercised without a
+    /// real newer GitHub release. Triggered from the About popover's "?"
+    /// context menu.
+    func debugForceAvailableUpdate() {
+        availableUpdate = UpdateCheckResult(
+            currentVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0",
+            latestVersion: "99.0.0",
+            releaseURL: URL(string: "https://github.com/Bububuger/tokenbar/releases/latest")!,
+            dmgURL: URL(string: "https://example.invalid/TokenBar-99.0.0.dmg"),
+            dmgSizeBytes: 42_800 * 1024,
+            isNewer: true
+        )
+        lastUpdateCheckAt = Date()
+        resetUpdateDownloadState()
+    }
+
+    /// Debug-only: fake a ~3s download with smooth progress + live metrics so
+    /// the run-pose, progress bar, MB/s and ETA can be reviewed without a real
+    /// network transfer. Ends in `.completed` with a throwaway URL.
+    func debugSimulateDownload() {
+        guard let total = availableUpdate?.dmgSizeBytes else { return }
+        updateDownloadTask?.cancel()
+        updateDownloadState = .downloading(progress: 0)
+        downloadMetrics = nil
+        lastProgressSample = nil
+        smoothedBytesPerSec = 0
+        updateDownloadTask = Task { @MainActor in
+            let steps = 60
+            for i in 0...steps {
+                if Task.isCancelled { return }
+                applyDownloadProgress(Double(i) / Double(steps), totalBytes: total)
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            applyDownloadOutcome(.completed(localURL: URL(fileURLWithPath: "/tmp/tokenbar-fake.dmg")))
+        }
+    }
+#endif
 
     private func observeSystemPowerEvents() {
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -1041,6 +1145,12 @@ final class TokenBarRuntimeModel: ObservableObject {
 
         guard !Task.isCancelled else { return }
         let finishedAt = Date()
+        // A single source failing must not present the whole index as failed.
+        // As long as at least one source wrote a checkpoint, the index is
+        // usable → report `.completed` (the per-source failures still surface
+        // as a "N failed" chip + in Diagnostics). Only when *nothing* indexed
+        // do we fall through to the `.failed` state.
+        let indexUsable = wroteCheckpoint
         let finalState: UsageStoreState
         if lastError != nil || !wroteCheckpoint {
             finalState = await usageStore.applyCheckpoint(
@@ -1070,13 +1180,16 @@ final class TokenBarRuntimeModel: ObservableObject {
             ),
             rebuildError: lastError ?? finalState.lastRebuildError
         )
+        let someFailed = lastError != nil
         publishIndexingTotals(
-            phase: lastError == nil ? .completed : .failed,
+            phase: indexUsable ? .completed : .failed,
             checkedFiles: totalFiles,
             eventsIndexed: totalEvents,
             promptsIndexed: totalPrompts,
             activeSourceName: nil,
-            message: lastError == nil ? "Local index ready" : "Indexing finished with source issues",
+            message: indexUsable
+                ? (someFailed ? "Local index ready · some sources skipped" : "Local index ready")
+                : "Indexing finished with source issues",
             endedAt: finishedAt
         )
         TokenBarTelemetry.event(
@@ -1086,7 +1199,9 @@ final class TokenBarRuntimeModel: ObservableObject {
             elapsed: finishedAt.timeIntervalSince(startedAt),
             error: lastError
         )
-        if lastError == nil {
+        // Auto-dismiss whenever the index is usable (including partial
+        // success). A hard failure (`.failed`) stays up so the user can Retry.
+        if indexUsable {
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(2))
                 await MainActor.run {
@@ -2708,9 +2823,9 @@ private final class UpdateDownloadSink: @unchecked Sendable {
     private weak var model: TokenBarRuntimeModel?
     init(model: TokenBarRuntimeModel) { self.model = model }
 
-    func publishProgress(_ progress: Double) {
+    func publishProgress(_ progress: Double, totalBytes: Int64?) {
         Task { @MainActor [weak model] in
-            model?.applyDownloadProgress(progress)
+            model?.applyDownloadProgress(progress, totalBytes: totalBytes)
         }
     }
 

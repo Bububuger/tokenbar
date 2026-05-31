@@ -51,15 +51,10 @@ struct ContentView: View {
                             .environmentObject(runtimeModel)
                             .onAppear { recordRouteViewAppear(.settings) }
                     } else if runtimeModel.mainRoute == .library {
-                        VStack(spacing: 0) {
-                            UpdateNotificationCard()
-                                .environmentObject(runtimeModel)
-
-                            ScrollView {
-                                LibraryView()
-                                    .padding(TokenBarStyle.pagePadding)
-                                    .onAppear { recordRouteViewAppear(.library) }
-                            }
+                        ScrollView {
+                            LibraryView()
+                                .padding(TokenBarStyle.pagePadding)
+                                .onAppear { recordRouteViewAppear(.library) }
                         }
                     } else if runtimeModel.mainRoute == .savedPrompts {
                         // CL-SAVED-1: rendered outside the shared
@@ -67,24 +62,15 @@ struct ContentView: View {
                         // switch-case inside that lazy container left this
                         // route blank on first appearance until the user
                         // scrolled to force a re-measure.
-                        VStack(spacing: 0) {
-                            UpdateNotificationCard()
+                        ScrollView {
+                            SavedPromptsListView()
                                 .environmentObject(runtimeModel)
-
-                            ScrollView {
-                                SavedPromptsListView()
-                                    .environmentObject(runtimeModel)
-                                    .padding(TokenBarStyle.pagePadding)
-                                    .onAppear { recordRouteViewAppear(.savedPrompts) }
-                            }
+                                .padding(TokenBarStyle.pagePadding)
+                                .onAppear { recordRouteViewAppear(.savedPrompts) }
                         }
                     } else {
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: TokenBarStyle.sectionSpacing) {
-                                // Update notification banner at the top
-                                UpdateNotificationCard()
-                                    .environmentObject(runtimeModel)
-
                                 switch runtimeModel.mainRoute {
                                 case .today:
                                     OverviewPage(
@@ -118,6 +104,20 @@ struct ContentView: View {
             .animation(.smooth(duration: 0.22), value: runtimeModel.mainRoute)
         }
         .frame(minWidth: 1280, minHeight: 980)
+        .overlay {
+            // Full-bleed restart theater — mounted at the root so it escapes
+            // the sidebar popover's anchor and covers the whole window.
+            if runtimeModel.isRestartTheaterActive {
+                RestartOverlayView(
+                    version: runtimeModel.restartTargetVersion ?? "",
+                    onDone: { runtimeModel.isRestartTheaterActive = false }
+                )
+                .environmentObject(runtimeModel)
+                .transition(.opacity)
+                .zIndex(100)
+            }
+        }
+        .animation(.easeInOut(duration: 0.22), value: runtimeModel.isRestartTheaterActive)
         .foregroundStyle(TokenBarStyle.foreground)
         .background(WindowAccessor { window in
             // Stop SwiftUI/AppKit from auto-focusing the first TextField
@@ -764,7 +764,7 @@ private struct TokenBarSidebar: View {
                     .fill(dotColor)
                     .frame(width: 6, height: 6)
                     .shadow(color: dotColor.opacity(0.55), radius: 5)
-                TokenBarVersionLabel()
+                AboutHelpButton()
                 Spacer()
                 Text(lastIndexedAt == nil ? "first scan…" : tokenbarRelativeTime(lastIndexedAt))
                     .font(.system(size: 10.5, design: .monospaced))
@@ -955,6 +955,8 @@ private struct OverviewPage: View {
                 if runtimeModel.showsIndexingCard {
                     TokenBarIndexingStatusCard(
                         state: runtimeModel.indexingState,
+                        compact: true,
+                        showSourceList: false,
                         onPause: { runtimeModel.pauseInitialIndexing() },
                         onRetry: { runtimeModel.retryInitialIndexing() },
                         onOpenDiagnostics: { runtimeModel.navigate(to: .diagnostics, source: "overview.initial_index") }
@@ -1515,94 +1517,53 @@ private struct OnboardingCard: View {
     }
 }
 
-/// Popover-footer version label. Three modes:
-///
-/// 1. No update available → "v1.3.1", click opens GitHub releases page.
-/// 2. Update available + idle → "v1.3.1 → 1.4.0 [Download]", click starts
-///    in-app download with a progress bar replacing the button.
-/// 3. Download completed → "v1.3.1 → 1.4.0 [Install]", click opens the DMG
-///    (mounts it + reveals in Finder so the user can drag-replace the app).
-struct TokenBarVersionLabel: View {
+/// Sidebar-footer version label + the "?" that opens the About / version-
+/// updater popover (design §00e). Shows a compact `v<version>` and a help
+/// button; the button carries a pulsing lime dot when an update is available.
+/// The full update flow (check → download → restart) lives in the popover.
+struct AboutHelpButton: View {
     @EnvironmentObject var runtimeModel: TokenBarRuntimeModel
-    @Environment(\.openURL) private var openURL
+    @State private var showAbout = false
+    @State private var badgePulse = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var hasUpdate: Bool { runtimeModel.availableUpdate != nil }
 
     var body: some View {
         HStack(spacing: 6) {
-            Button(action: openReleaseNotes) {
-                HStack(spacing: 4) {
-                    Text("v\(currentVersion)")
-                        .font(.system(size: 10.5, design: .monospaced))
-                    if let update = runtimeModel.availableUpdate {
-                        Text("→ \(update.latestVersion)")
-                            .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(TokenBarStyle.accent)
+            Text("v\(currentVersion)")
+                .font(.system(size: 10.5, design: .monospaced))
+            Button { showAbout.toggle() } label: {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: 12))
+                    .foregroundStyle(hasUpdate ? TokenBarStyle.lime : TokenBarStyle.faint)
+                    .overlay(alignment: .topTrailing) {
+                        if hasUpdate {
+                            Circle()
+                                .fill(TokenBarStyle.lime)
+                                .frame(width: 5, height: 5)
+                                .shadow(color: TokenBarStyle.lime.opacity(0.7), radius: 3)
+                                .scaleEffect(badgePulse && !reduceMotion ? 1.4 : 1)
+                                .opacity(badgePulse && !reduceMotion ? 0.6 : 1)
+                                .offset(x: 2, y: -1)
+                        }
                     }
-                }
             }
             .buttonStyle(.plain)
-            .help(runtimeModel.availableUpdate == nil
-                  ? "Open releases page on GitHub"
-                  : "Open release notes for v\(runtimeModel.availableUpdate!.latestVersion)")
-
-            if runtimeModel.availableUpdate != nil {
-                updateActionView
+            .help(hasUpdate ? "Update available — open About" : "About TokenBar")
+            .popover(isPresented: $showAbout, arrowEdge: .top) {
+                AboutVersionPopover(onClose: { showAbout = false })
+                    .environmentObject(runtimeModel)
             }
         }
-    }
-
-    @ViewBuilder
-    private var updateActionView: some View {
-        switch runtimeModel.updateDownloadState {
-        case .idle:
-            if runtimeModel.availableUpdate?.dmgURL != nil {
-                Button("Download", action: { runtimeModel.downloadAvailableUpdate() })
-                    .buttonStyle(.borderless)
-                    .controlSize(.mini)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(TokenBarStyle.accent)
-            }
-        case .downloading(let progress):
-            HStack(spacing: 4) {
-                ProgressView(value: progress)
-                    .progressViewStyle(.linear)
-                    .frame(width: 64)
-                Text("\(Int(progress * 100))%")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(TokenBarStyle.muted)
-            }
-        case .completed:
-            Button("Install", action: openDownloadedDMG)
-                .buttonStyle(.borderless)
-                .controlSize(.mini)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(TokenBarStyle.accent)
-                .help("Open the downloaded DMG; drag TokenBar.app to /Applications/")
-        case .failed(let message):
-            Button("Retry") { runtimeModel.downloadAvailableUpdate() }
-                .buttonStyle(.borderless)
-                .controlSize(.mini)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(TokenBarStyle.error)
-                .help("Download failed: \(message). Click to retry.")
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) { badgePulse = true }
         }
     }
 
     private var currentVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
-    }
-
-    private func openReleaseNotes() {
-        if let url = runtimeModel.availableUpdate?.releaseURL {
-            openURL(url)
-        } else {
-            openURL(URL(string: "https://github.com/Bububuger/tokenbar/releases/latest")!)
-        }
-        Task { await runtimeModel.checkForUpdatesNow() }
-    }
-
-    private func openDownloadedDMG() {
-        guard let dmg = runtimeModel.consumeCompletedUpdate() else { return }
-        NSWorkspace.shared.open(dmg)
     }
 }
 

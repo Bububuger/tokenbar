@@ -9,6 +9,23 @@ public enum AppUpdateDownloadState: Sendable, Equatable {
     case failed(message: String)
 }
 
+/// Human-facing download detail derived from the `0…1` progress stream plus
+/// the known DMG size: absolute bytes, smoothed speed, and an ETA. Drives the
+/// popover's "26.5 / 42.8 MB · 9.4 MB/s · 2s remaining" line.
+public struct DownloadMetrics: Sendable, Equatable {
+    public let bytesDone: Int64
+    public let bytesTotal: Int64
+    public let bytesPerSec: Double
+    public let secondsRemaining: Double?
+
+    public init(bytesDone: Int64, bytesTotal: Int64, bytesPerSec: Double, secondsRemaining: Double?) {
+        self.bytesDone = bytesDone
+        self.bytesTotal = bytesTotal
+        self.bytesPerSec = bytesPerSec
+        self.secondsRemaining = secondsRemaining
+    }
+}
+
 /// Lightweight non-Sparkle updater. The chosen design (see refactor notes):
 /// click → URLSession download with progress → save to ~/Downloads → caller
 /// `NSWorkspace.open` the DMG. The user then drags TokenBar.app to

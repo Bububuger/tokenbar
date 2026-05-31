@@ -8,14 +8,19 @@ public struct UpdateCheckResult: Sendable, Hashable {
     /// Direct download URL for the macOS DMG asset on the GitHub release.
     /// `nil` when the release exposes no DMG (e.g. cli-only release).
     public let dmgURL: URL?
+    /// Byte size of the DMG asset, from the GitHub release manifest. Drives
+    /// the download popover's "26.5 / 42.8 MB" absolute readout. `nil` when
+    /// the manifest omits it.
+    public let dmgSizeBytes: Int64?
     /// True iff `latestVersion` parses as a newer semver than `currentVersion`.
     public let isNewer: Bool
 
-    public init(currentVersion: String, latestVersion: String, releaseURL: URL, dmgURL: URL?, isNewer: Bool) {
+    public init(currentVersion: String, latestVersion: String, releaseURL: URL, dmgURL: URL?, dmgSizeBytes: Int64?, isNewer: Bool) {
         self.currentVersion = currentVersion
         self.latestVersion = latestVersion
         self.releaseURL = releaseURL
         self.dmgURL = dmgURL
+        self.dmgSizeBytes = dmgSizeBytes
         self.isNewer = isNewer
     }
 }
@@ -103,19 +108,18 @@ public actor UpdateChecker {
         let releaseURL = (payload["html_url"] as? String).flatMap(URL.init(string:))
             ?? URL(string: "https://github.com/\(repository)/releases/latest")!
         let assets = payload["assets"] as? [[String: Any]] ?? []
-        let dmgURL: URL? = assets
-            .compactMap { asset -> URL? in
-                guard let name = asset["name"] as? String, name.hasSuffix(".dmg"),
-                      let downloadURL = (asset["browser_download_url"] as? String).flatMap(URL.init(string:))
-                else { return nil }
-                return downloadURL
-            }
-            .first
+        let dmgAsset: [String: Any]? = assets.first { asset in
+            (asset["name"] as? String)?.hasSuffix(".dmg") == true
+                && (asset["browser_download_url"] as? String) != nil
+        }
+        let dmgURL: URL? = (dmgAsset?["browser_download_url"] as? String).flatMap(URL.init(string:))
+        let dmgSizeBytes: Int64? = (dmgAsset?["size"] as? NSNumber)?.int64Value
         return UpdateCheckResult(
             currentVersion: currentVersion,
             latestVersion: latestVersion,
             releaseURL: releaseURL,
             dmgURL: dmgURL,
+            dmgSizeBytes: dmgSizeBytes,
             isNewer: Self.compare(latestVersion, isNewerThan: currentVersion)
         )
     }

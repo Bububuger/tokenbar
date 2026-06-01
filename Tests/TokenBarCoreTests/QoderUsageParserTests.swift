@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import GRDB
 @testable import TokenBarCore
 
 /// Loads Subagent A's committed fixture
@@ -60,6 +61,38 @@ struct QoderUsageParserTests {
 
     private func total(_ e: UsageEvent) -> Int {
         e.inputTokens + e.outputTokens + e.cacheReadTokens + e.cacheCreationTokens + (e.reasoningTokens ?? 0)
+    }
+
+    /// Regression for the "no such column: s.workspace" failure: newer Qoder
+    /// installs drop `chat_session.workspace`, which previously threw and failed
+    /// the whole source (sticking the indexing progress bar near completion).
+    /// The parser must probe the schema and still parse, falling back to
+    /// `project_name` / "qoder" for attribution.
+    @Test
+    func parsesWhenWorkspaceColumnIsMissing() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("qoder-noworkspace-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let dbURL = dir.appendingPathComponent("local.db")
+
+        let queue = try DatabaseQueue(path: dbURL.path)
+        try queue.write { db in
+            // chat_session WITHOUT a `workspace` column (has project_name instead).
+            try db.execute(sql: """
+                CREATE TABLE chat_session (session_id TEXT PRIMARY KEY, project_name TEXT);
+                CREATE TABLE chat_message (id TEXT PRIMARY KEY, session_id TEXT, gmt_create INTEGER, token_info TEXT, model_info TEXT);
+                INSERT INTO chat_session VALUES ('s1', 'my-project');
+                INSERT INTO chat_message VALUES ('m1', 's1', 1736467199000,
+                    '{"prompt_tokens":1000,"completion_tokens":200,"cached_tokens":0}',
+                    '{"model":"gpt-5"}');
+                """)
+        }
+
+        let result = try QoderUsageParser.parse(databaseURL: dbURL)
+        #expect(result.events.count == 1)
+        #expect(result.events[0].outputTokens == 200)
+        #expect(result.events[0].projectName == "my-project")
     }
 }
 

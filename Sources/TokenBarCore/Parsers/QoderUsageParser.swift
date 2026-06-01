@@ -50,15 +50,27 @@ public enum QoderUsageParser {
                 arguments += [ts, ts, effectiveWatermark.lastEventId ?? ""]
             }
 
+            // Qoder's schema drifts across versions: the `chat_session.workspace`
+            // column the JOIN relied on is absent on newer installs (they expose
+            // `project_uri` / `project_name` instead), which made the query throw
+            // "no such column: s.workspace" and fail the whole source — sticking
+            // the indexing progress bar. Probe the columns and select the first
+            // workspace-like one that exists; if none and no session table at
+            // all, drop the JOIN entirely and fall back to a "qoder" project.
+            let sessionColumns = Set(((try? db.columns(in: "chat_session")) ?? []).map { $0.name })
+            let workspaceColumn = ["workspace", "project_uri", "project_name"].first { sessionColumns.contains($0) }
+            let workspaceSelect = workspaceColumn.map { "s.\($0)   AS workspace" } ?? "NULL          AS workspace"
+            let sessionJoin = workspaceColumn != nil ? "LEFT JOIN chat_session s ON s.session_id = m.session_id" : ""
+
             let rows = try Row.fetchAll(db, sql: """
             SELECT m.id          AS id,
                    m.session_id  AS session_id,
                    m.gmt_create  AS gmt_create,
                    m.token_info  AS token_info,
                    m.model_info  AS model_info,
-                   s.workspace   AS workspace
+                   \(workspaceSelect)
             FROM chat_message m
-            LEFT JOIN chat_session s ON s.session_id = m.session_id
+            \(sessionJoin)
             WHERE 1=1 \(filter)
             ORDER BY m.gmt_create ASC, m.id ASC
             """, arguments: arguments)

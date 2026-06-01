@@ -75,7 +75,10 @@ struct TokenBarIndexingState: Sendable, Hashable {
     }
 
     var completedSourceCount: Int {
-        sources.filter { $0.phase == .indexed || $0.phase == .skipped }.count
+        // `.failed` is terminal too — a source that errored is "done", just
+        // unsuccessfully. Counting it keeps the progress bar from sticking
+        // below 100% (e.g. 13/14 = 93%) when one source can't be read.
+        sources.filter { $0.phase == .indexed || $0.phase == .skipped || $0.phase == .failed }.count
     }
 
     var progress: Double {
@@ -2181,19 +2184,29 @@ final class TokenBarRuntimeModel: ObservableObject {
                 message: message
             )
         }
+        // A single failed source must not present the whole refresh as failed
+        // or stick the progress card. Report `.completed` as long as at least
+        // one source produced a terminal non-failed state; the failed source
+        // still surfaces as a "N failed" chip + in Diagnostics. Only when every
+        // source failed do we report `.failed`.
+        let allFailed = !sourceStates.isEmpty && sourceStates.allSatisfy { $0.phase == .failed }
+        let finalPhase: TokenBarIndexingPhase = allFailed ? .failed : .completed
         indexingState = TokenBarIndexingState(
-            phase: result.failure == nil ? .completed : .failed,
+            phase: finalPhase,
             sources: sourceStates,
             startedAt: indexingState.startedAt,
             endedAt: endedAt,
             checkedFiles: statuses.reduce(0) { $0 + $1.discoveredFileCount },
             eventsIndexed: eventsAdded,
             promptsIndexed: promptsAdded,
-            message: refreshIndexingMessage(for: trigger, phase: result.failure == nil ? .completed : .failed),
+            message: refreshIndexingMessage(for: trigger, phase: finalPhase),
             activeSourceName: nil,
             cpuBudgetPercent: indexingState.cpuBudgetPercent
         )
-        if result.failure == nil {
+        // Auto-dismiss whenever the index is usable (including a partial run
+        // where some sources failed). A total failure stays up so the user can
+        // see it and retry.
+        if !allFailed {
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(6))
                 await MainActor.run {

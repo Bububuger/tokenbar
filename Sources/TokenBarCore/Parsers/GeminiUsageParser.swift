@@ -178,6 +178,9 @@ public enum GeminiUsageParser {
 
     static func parseTimestamp(_ value: String?) -> Date? {
         guard let value else { return nil }
+        if let date = ISO8601Fast.parseUTC(value) {
+            return date
+        }
         if let date = iso8601WithFractional.date(from: value) {
             return date
         }

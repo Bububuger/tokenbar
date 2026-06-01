@@ -84,7 +84,7 @@ public enum KimiUsageParser {
             return Date(timeIntervalSince1970: n.doubleValue / 1000.0)
         }
         if let iso = object["timestamp"] as? String {
-            return iso8601WithFractional.date(from: iso) ?? iso8601NoFractional.date(from: iso)
+            return ISO8601Fast.parseUTC(iso) ?? iso8601WithFractional.date(from: iso) ?? iso8601NoFractional.date(from: iso)
         }
         return nil
     }

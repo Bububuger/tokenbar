@@ -21,6 +21,11 @@ private final class LockedISO8601TimestampParser: @unchecked Sendable {
 
     func parse(_ value: String?) -> Date? {
         guard let value else { return nil }
+        // Fast hand-rolled UTC parse first (see ISO8601Fast); the ICU-backed
+        // ISO8601DateFormatter dominated the parse hot path on large sources.
+        if let date = ISO8601Fast.parseUTC(value) {
+            return date
+        }
         // ISO8601DateFormatter.date(from:) is thread-safe on macOS 10.15+; no
         // lock needed. The previous NSLock serialized every worker through one
         // critical section and dominated the bootstrap parse hot path.

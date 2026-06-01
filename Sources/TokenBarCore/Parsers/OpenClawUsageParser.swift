@@ -114,7 +114,7 @@ public enum OpenClawUsageParser {
             return Date(timeIntervalSince1970: n.doubleValue / 1000.0)
         }
         if let outerIso = outer["timestamp"] as? String {
-            return iso8601WithFractional.date(from: outerIso) ?? iso8601NoFractional.date(from: outerIso)
+            return ISO8601Fast.parseUTC(outerIso) ?? iso8601WithFractional.date(from: outerIso) ?? iso8601NoFractional.date(from: outerIso)
         }
         return nil
     }

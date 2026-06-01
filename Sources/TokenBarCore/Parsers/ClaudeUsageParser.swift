@@ -315,8 +315,10 @@ public enum ClaudeUsageParser {
     }
 
     // ISO8601DateFormatter.date(from:) is thread-safe on macOS 10.15+; we
-    // share two read-only instances to avoid rebuilding ICU SimpleDateFormat
-    // (which dominated the parse hot path — see commit message).
+    // share two read-only instances to avoid rebuilding ICU SimpleDateFormat.
+    // These are now only a FALLBACK — `parseTimestamp` first tries the shared
+    // hand-rolled `ISO8601Fast` parser, which avoids ICU entirely and was the
+    // fix for indexing stalling near completion on large custom sources.
     nonisolated(unsafe) private static let iso8601WithFractional: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -331,6 +333,10 @@ public enum ClaudeUsageParser {
 
     static func parseTimestamp(_ value: String?) -> Date? {
         guard let value else { return nil }
+        if let date = ISO8601Fast.parseUTC(value) {
+            return date
+        }
+        // Fallback for any non-conforming timestamp (offsets, missing Z, etc.).
         if let date = iso8601WithFractional.date(from: value) {
             return date
         }

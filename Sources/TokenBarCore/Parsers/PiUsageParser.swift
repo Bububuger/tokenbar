@@ -130,12 +130,12 @@ public enum PiUsageParser {
             return Date(timeIntervalSince1970: n.doubleValue / 1000.0)
         }
         if let messageIso = messageDict["timestamp"] as? String {
-            if let d = iso8601WithFractional.date(from: messageIso) ?? iso8601NoFractional.date(from: messageIso) {
+            if let d = ISO8601Fast.parseUTC(messageIso) ?? iso8601WithFractional.date(from: messageIso) ?? iso8601NoFractional.date(from: messageIso) {
                 return d
             }
         }
         if let outerIso = outer["timestamp"] as? String {
-            return iso8601WithFractional.date(from: outerIso) ?? iso8601NoFractional.date(from: outerIso)
+            return ISO8601Fast.parseUTC(outerIso) ?? iso8601WithFractional.date(from: outerIso) ?? iso8601NoFractional.date(from: outerIso)
         }
         return nil
     }

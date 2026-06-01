@@ -39,6 +39,17 @@ cask "tokenbar" do
   # The path inside the .app is produced by script/release.sh step [4/6].
   binary "#{appdir}/TokenBar.app/Contents/MacOS/tbar"
 
+  # Strip `com.apple.quarantine` so the embedded `tbar` CLI isn't silently
+  # killed by Gatekeeper on first invocation. The .app GUI flow gets a
+  # one-time Gatekeeper prompt, but the CLI binary has no UI to surface it —
+  # before this hook, `tbar help` would exit 0 with no output for a brand
+  # new install. Failure is non-fatal (older OSes / no xattr binary etc.).
+  postflight do
+    system_command "/usr/bin/xattr",
+                   args: ["-r", "-d", "com.apple.quarantine", "#{appdir}/TokenBar.app"],
+                   must_succeed: false
+  end
+
   zap trash: [
     "~/Library/Application Support/com.javis.TokenBar",
     "~/Library/Preferences/com.javis.TokenBar.plist",

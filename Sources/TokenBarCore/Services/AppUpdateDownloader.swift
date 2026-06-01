@@ -43,6 +43,12 @@ public actor AppUpdateDownloader {
     /// Download `dmgURL` to `~/Downloads/TokenBar-<version>.dmg`. Reports
     /// progress via `onProgress` (called on a background URLSession queue,
     /// caller is responsible for hopping to MainActor for UI updates).
+    ///
+    /// Uses a delegate-driven `downloadTask` rather than the async
+    /// `session.download(from:)` convenience: the latter does NOT invoke a
+    /// session delegate's `didWriteData`, so progress would be stuck at 0%
+    /// until the whole file lands. The continuation is resumed from
+    /// `didCompleteWithError` once the file has been staged.
     public func download(
         from dmgURL: URL,
         version: String,
@@ -52,30 +58,34 @@ public actor AppUpdateDownloader {
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Downloads", isDirectory: true)
         let destination = downloads.appendingPathComponent("TokenBar-\(version).dmg")
 
-        let delegate = ProgressDelegate(onProgress: onProgress)
+        let delegate = ProgressDelegate(onProgress: onProgress, destination: destination)
         let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
 
-        let (tempURL, response) = try await session.download(from: dmgURL)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
+        return try await withCheckedThrowingContinuation { continuation in
+            delegate.completion = continuation
+            session.downloadTask(with: dmgURL).resume()
         }
-
-        if FileManager.default.fileExists(atPath: destination.path) {
-            try? FileManager.default.removeItem(at: destination)
-        }
-        try FileManager.default.moveItem(at: tempURL, to: destination)
-        return destination
     }
 }
 
 /// URLSessionDownloadDelegate that funnels `didWriteData` byte counts back
-/// to the caller as `0…1` progress. Sendable-safe because every closure call
-/// crosses the actor boundary; the receiver hops to `MainActor` for UI.
+/// to the caller as `0…1` progress, stages the finished file into
+/// `destination`, and resumes the awaiting continuation. Sendable-safe
+/// because every closure call crosses the actor boundary; the receiver hops
+/// to `MainActor` for UI.
 private final class ProgressDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     let onProgress: @Sendable (Double) -> Void
-    init(onProgress: @escaping @Sendable (Double) -> Void) {
+    let destination: URL
+    var completion: CheckedContinuation<URL, Error>?
+    /// Set in `didFinishDownloadingTo` (which must move the temp file before
+    /// it returns), then consumed in `didCompleteWithError`.
+    private var stagedURL: URL?
+    private var stagingError: Error?
+
+    init(onProgress: @escaping @Sendable (Double) -> Void, destination: URL) {
         self.onProgress = onProgress
+        self.destination = destination
     }
 
     func urlSession(
@@ -95,8 +105,38 @@ private final class ProgressDelegate: NSObject, URLSessionDownloadDelegate, @unc
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
-        // The async `session.download(from:)` API handles destination
-        // staging itself; this delegate just streams progress.
-        _ = location
+        // The system deletes `location` as soon as this method returns, so the
+        // move MUST happen synchronously here — not later in the continuation.
+        do {
+            if let http = downloadTask.response as? HTTPURLResponse,
+               !(200..<300).contains(http.statusCode) {
+                stagingError = URLError(.badServerResponse)
+                return
+            }
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try? FileManager.default.removeItem(at: destination)
+            }
+            try FileManager.default.moveItem(at: location, to: destination)
+            stagedURL = destination
+        } catch {
+            stagingError = error
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
+        defer { completion = nil }
+        if let error {
+            completion?.resume(throwing: error)
+        } else if let stagingError {
+            completion?.resume(throwing: stagingError)
+        } else if let stagedURL {
+            completion?.resume(returning: stagedURL)
+        } else {
+            completion?.resume(throwing: URLError(.cannotCreateFile))
+        }
     }
 }

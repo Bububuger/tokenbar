@@ -5,6 +5,8 @@ enum TokenBarMainRoute: Equatable, Hashable {
     case settings
     case savedPrompts
     case project(String)
+    case source(String)
+    case model(String)
 }
 
 extension TokenBarMainRoute {
@@ -22,6 +24,10 @@ extension TokenBarMainRoute {
             "saved_prompts"
         case .project(let name):
             "project:\(name)"
+        case .source(let name):
+            "source:\(name)"
+        case .model(let name):
+            "model:\(name)"
         }
     }
 }

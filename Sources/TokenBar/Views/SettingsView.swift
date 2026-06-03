@@ -453,24 +453,11 @@ struct SettingsView: View {
 
     // Built-in plugins (parsers) shipped with TokenBar. These are the native
     // adapters BuiltInSources wires up; shown read-only so users can see what's
-    // covered out of the box, above the community gallery.
-    private struct BuiltInPlugin: Identifiable {
-        let id: String
-        let name: String       // AgentKind.displayName, drives agentColor
-        let defaultPath: String
-    }
-
-    private var builtInPlugins: [BuiltInPlugin] {
-        [
-            BuiltInPlugin(id: "claudeCode", name: "Claude Code", defaultPath: "~/.claude/projects"),
-            BuiltInPlugin(id: "codex", name: "Codex", defaultPath: "~/.codex/sessions"),
-            BuiltInPlugin(id: "gemini", name: "Gemini CLI", defaultPath: "~/.gemini/tmp"),
-            BuiltInPlugin(id: "openCode", name: "OpenCode", defaultPath: "~/.local/share/opencode"),
-            BuiltInPlugin(id: "openclaw", name: "OpenClaw", defaultPath: "~/.openclaw/agents"),
-            BuiltInPlugin(id: "hermes", name: "Hermes", defaultPath: "~/.hermes/state.db"),
-            BuiltInPlugin(id: "warp", name: "Warp", defaultPath: "~/Library/Group Containers/*.warp/.../warp.sqlite"),
-            BuiltInPlugin(id: "pi", name: "Pi", defaultPath: "~/.pi/agent"),
-        ]
+    // covered out of the box, above the community gallery. Single source of
+    // truth is BuiltInSources.catalog() — Settings and Diagnostics both render
+    // from it so the built-in list can no longer drift.
+    private var builtInPlugins: [BuiltInSources.CatalogEntry] {
+        BuiltInSources.catalog()
     }
 
     private var pluginsSection: some View {
@@ -496,7 +483,7 @@ struct SettingsView: View {
         }
     }
 
-    private func builtInPluginTile(_ plugin: BuiltInPlugin) -> some View {
+    private func builtInPluginTile(_ plugin: BuiltInSources.CatalogEntry) -> some View {
         HStack(spacing: 11) {
             Circle()
                 .fill(TokenBarStyle.agentColor(plugin.name))
@@ -534,14 +521,9 @@ struct SettingsView: View {
                 SettingsIndexingProgressStrip(state: runtimeModel.indexingState)
             }
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                customSourceTile(name: "Codex", path: "~/.codex/sessions", color: TokenBarStyle.agentColor("Codex"), enabled: true)
-                customSourceTile(name: "Claude Code", path: "~/.claude/projects", color: TokenBarStyle.agentColor("Claude Code"), enabled: true)
-                customSourceTile(name: "Hermes", path: "~/.hermes/state.db", color: TokenBarStyle.agentColor("Hermes"), enabled: true)
-                customSourceTile(name: "Gemini CLI", path: "~/.gemini/tmp/**/chats/*.json", color: TokenBarStyle.agentColor("Gemini CLI"), enabled: true)
-                customSourceTile(name: "OpenClaw", path: "~/.openclaw/agents/**/sessions/*.jsonl", color: TokenBarStyle.agentColor("OpenClaw"), enabled: true)
-                customSourceTile(name: "OpenCode", path: "~/.local/share/opencode/opencode.db", color: TokenBarStyle.agentColor("OpenCode"), enabled: true)
-                customSourceTile(name: "Warp", path: "~/Library/Group Containers/*.dev.warp/.../warp.sqlite", color: TokenBarStyle.agentColor("Warp"), enabled: true)
-                customSourceTile(name: "Pi", path: "~/.pi/agent/sessions/**/*.jsonl", color: TokenBarStyle.agentColor("Pi"), enabled: true)
+                ForEach(builtInPlugins) { entry in
+                    customSourceTile(name: entry.name, path: entry.defaultPath, color: TokenBarStyle.agentColor(entry.name), enabled: true)
+                }
                 ForEach(runtimeModel.customSources) { source in
                     editableCustomSourceTile(source: source)
                 }

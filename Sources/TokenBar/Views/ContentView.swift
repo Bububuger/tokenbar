@@ -6,8 +6,11 @@ struct ContentView: View {
     @EnvironmentObject private var runtimeModel: TokenBarRuntimeModel
     @State private var selectedRange = "30d"
     @State private var sidebarProjectsCache: [UsageBreakdown] = []
+    @State private var sidebarSourcesCache: [UsageBreakdown] = []
+    @State private var sidebarModelsCache: [UsageBreakdown] = []
     @State private var isSidebarProjectsLoading = false
     @State private var hasSidebarProjectsLoaded = false
+    @State private var detailPageData: DetailPageData?
     @State private var overviewRangeMetrics = TokenBarOverviewRangeMetrics.empty
     @State private var isOverviewRangeUpdating = false
     @State private var projectPageData: ProjectPageData?
@@ -22,7 +25,8 @@ struct ContentView: View {
             TokenBarSidebar(
                 activeRoute: runtimeModel.mainRoute,
                 projects: sidebarProjects,
-                archivedProjectNames: runtimeModel.archivedProjectNames,
+                sources: sidebarSourcesCache,
+                models: sidebarModelsCache,
                 warnings: warningCount,
                 refreshState: runtimeModel.refreshState,
                 lastIndexedAt: runtimeModel.diagnostics.lastIndexedAt,
@@ -32,8 +36,8 @@ struct ContentView: View {
                 onSelectSettings: { runtimeModel.navigate(to: .settings, source: "sidebar.settings") },
                 onSelectSavedPrompts: { runtimeModel.navigate(to: .savedPrompts, source: "sidebar.saved_prompts") },
                 onSelectProject: { runtimeModel.openProject(named: $0, source: "sidebar.project") },
-                onArchiveProject: { runtimeModel.archiveProject(named: $0, source: "sidebar.project_context") },
-                onRestoreProject: { runtimeModel.restoreProject(named: $0, source: "sidebar.project_context") }
+                onSelectSource: { runtimeModel.openSource(named: $0, source: "sidebar.source") },
+                onSelectModel: { runtimeModel.openModel(named: $0, source: "sidebar.model") }
             )
             .frame(width: TokenBarStyle.sidebarWidth)
 
@@ -92,6 +96,10 @@ struct ContentView: View {
                                     EmptyView()
                                 case .project(let projectName):
                                     projectPage(projectName)
+                                case .source(let sourceName):
+                                    sourcePage(sourceName)
+                                case .model(let modelName):
+                                    modelPage(modelName)
                                 }
                             }
                             .padding(TokenBarStyle.pagePadding)
@@ -147,6 +155,9 @@ struct ContentView: View {
         .task(id: projectPageTaskID) {
             await rebuildProjectPageData(reason: "route_range_events")
         }
+        .task(id: detailPageTaskID) {
+            await rebuildDetailPageData(reason: "route_events")
+        }
         .onAppear {
             recordRouteRender(runtimeModel.mainRoute, previous: nil, reason: "appear")
         }
@@ -194,6 +205,17 @@ struct ContentView: View {
         ].joined(separator: "|")
     }
 
+    private var detailPageTaskID: String {
+        switch runtimeModel.mainRoute {
+        case .source(let name):
+            return "source:\(name)|\(runtimeModel.eventSignature)"
+        case .model(let name):
+            return "model:\(name)|\(runtimeModel.eventSignature)"
+        default:
+            return "none|\(runtimeModel.mainRoute.telemetryName)"
+        }
+    }
+
     @MainActor
     private func rebuildSidebarProjects(reason: String) async {
         let selection = selectedRange
@@ -222,6 +244,22 @@ struct ContentView: View {
         sidebarProjectsCache = rows
         hasSidebarProjectsLoaded = true
         isSidebarProjectsLoading = false
+        // Sources / Models sidebar lists are all-time token rankings computed
+        // from the in-memory events (same data the detail pages drill into).
+        // Sources are keyed per configured source (built-in agent or named
+        // custom source), not by raw agent — so each custom source the user
+        // added shows up individually.
+        let events = runtimeModel.events
+        let customNames = runtimeModel.customSourceNamesById
+        let (sources, models) = await Task.detached(priority: .utility) {
+            (
+                tokenbarSourceBreakdowns(events: events, customNamesById: customNames),
+                tokenbarModelBreakdownsAsBreakdowns(events: events)
+            )
+        }.value
+        guard selection == selectedRange else { return }
+        sidebarSourcesCache = sources
+        sidebarModelsCache = models
         TokenBarTelemetry.timing(
             "main.sidebar.projects.compute",
             startedAt: started,
@@ -314,6 +352,49 @@ struct ContentView: View {
         )
     }
 
+    @MainActor
+    private func rebuildDetailPageData(reason: String) async {
+        let route = runtimeModel.mainRoute
+        let key: DetailPageData.Key
+        switch route {
+        case .source(let name):
+            key = .source(name)
+        case .model(let name):
+            key = .model(name)
+        default:
+            return
+        }
+        let eventSignature = runtimeModel.eventSignature
+        if detailPageData?.isCurrent(key: key, eventSignature: eventSignature) == true {
+            return
+        }
+        let started = Date()
+        let allEvents = runtimeModel.events
+        let customNames = runtimeModel.customSourceNamesById
+        let events = await Task.detached(priority: .userInitiated) { () -> [UsageEvent] in
+            switch key {
+            case .source(let name):
+                return allEvents.filter { tokenbarSourceName(for: $0, customNamesById: customNames) == name }
+            case .model(let name):
+                return allEvents.filter { event in
+                    let resolved = event.modelName?.isEmpty == false ? event.modelName! : event.agent.displayName
+                    return resolved == name
+                }
+            }
+        }.value
+        guard !Task.isCancelled,
+              runtimeModel.mainRoute == route,
+              runtimeModel.eventSignature == eventSignature else {
+            return
+        }
+        detailPageData = DetailPageData(key: key, eventSignature: eventSignature, events: events)
+        TokenBarTelemetry.timing(
+            "main.detail.page_data.compute",
+            startedAt: started,
+            metadata: "key=\(key.telemetry) events=\(events.count) reason=\(reason)"
+        )
+    }
+
     @ViewBuilder
     private func projectPage(_ projectName: String) -> some View {
         let isDetailReady = (runtimeModel.projectDetail?.projectName == projectName)
@@ -365,6 +446,44 @@ struct ContentView: View {
             }
         }
         .animation(.easeOut(duration: 0.22), value: isDetailReady)
+    }
+
+    @ViewBuilder
+    private func sourcePage(_ sourceName: String) -> some View {
+        let events = detailPageData?.events(for: .source(sourceName)) ?? []
+        SourceDetailView(
+            sourceName: sourceName,
+            events: events,
+            allTimeSummary: tokenbarSummary(events),
+            allTimeCost: tokenbarEstimatedCost(events: events),
+            selectedRange: $selectedRange,
+            refreshState: runtimeModel.refreshState,
+            onRefresh: { Task { await runtimeModel.refresh() } },
+            onBack: { runtimeModel.navigate(to: .today, source: "source.back") },
+            onSelectProject: { runtimeModel.openProject(named: $0, source: "source.project_share") }
+        )
+        .id(sourceName)
+        .onAppear { recordRouteViewAppear(.source(sourceName)) }
+        .transition(.opacity)
+    }
+
+    @ViewBuilder
+    private func modelPage(_ modelName: String) -> some View {
+        let events = detailPageData?.events(for: .model(modelName)) ?? []
+        ModelDetailView(
+            modelName: modelName,
+            events: events,
+            allTimeSummary: tokenbarSummary(events),
+            allTimeCost: tokenbarEstimatedCost(events: events),
+            selectedRange: $selectedRange,
+            refreshState: runtimeModel.refreshState,
+            onRefresh: { Task { await runtimeModel.refresh() } },
+            onBack: { runtimeModel.navigate(to: .today, source: "model.back") },
+            onSelectProject: { runtimeModel.openProject(named: $0, source: "model.project_share") }
+        )
+        .id(modelName)
+        .onAppear { recordRouteViewAppear(.model(modelName)) }
+        .transition(.opacity)
     }
 
     private func beginRouteTransition(from previous: TokenBarMainRoute, to route: TokenBarMainRoute) {
@@ -615,6 +734,32 @@ private struct ProjectPageData: Sendable {
     }
 }
 
+private struct DetailPageData: Sendable {
+    enum Key: Sendable, Equatable {
+        case source(String)
+        case model(String)
+
+        var telemetry: String {
+            switch self {
+            case .source(let name): "source:\(name)"
+            case .model(let name): "model:\(name)"
+            }
+        }
+    }
+
+    let key: Key
+    let eventSignature: String
+    let events: [UsageEvent]
+
+    func isCurrent(key: Key, eventSignature: String) -> Bool {
+        self.key == key && self.eventSignature == eventSignature
+    }
+
+    func events(for key: Key) -> [UsageEvent]? {
+        self.key == key ? events : nil
+    }
+}
+
 private struct ProjectDetailPendingView: View {
     let projectName: String
 
@@ -638,15 +783,31 @@ private struct ProjectDetailPendingView: View {
     }
 }
 
-private enum ProjectArchiveMode: String, CaseIterable {
-    case active = "Active"
-    case archived = "Archived"
+private enum SidebarListTab: String, CaseIterable {
+    case projects, sources, models
+
+    var title: String {
+        switch self {
+        case .projects: "Projects"
+        case .sources: "Sources"
+        case .models: "Models"
+        }
+    }
+
+    var searchPlaceholder: String {
+        switch self {
+        case .projects: "Search projects"
+        case .sources: "Search sources"
+        case .models: "Search models"
+        }
+    }
 }
 
 private struct TokenBarSidebar: View {
     let activeRoute: TokenBarMainRoute
     let projects: [UsageBreakdown]
-    let archivedProjectNames: Set<String>
+    let sources: [UsageBreakdown]
+    let models: [UsageBreakdown]
     let warnings: Int
     let refreshState: RefreshState
     let lastIndexedAt: Date?
@@ -656,10 +817,10 @@ private struct TokenBarSidebar: View {
     let onSelectSettings: () -> Void
     let onSelectSavedPrompts: () -> Void
     let onSelectProject: (String) -> Void
-    let onArchiveProject: (String) -> Void
-    let onRestoreProject: (String) -> Void
+    let onSelectSource: (String) -> Void
+    let onSelectModel: (String) -> Void
     @State private var projectSearchText = ""
-    @State private var projectArchiveMode: ProjectArchiveMode = .active
+    @State private var listTab: SidebarListTab = .projects
 
     var body: some View {
         VStack(spacing: 0) {
@@ -684,64 +845,24 @@ private struct TokenBarSidebar: View {
             .padding(.bottom, 12)
 
             VStack(alignment: .leading, spacing: 9) {
-                HStack(spacing: 7) {
-                    Image(systemName: "folder")
-                    Text("Projects")
-                    Spacer()
-                    Text(projectCountLabel)
-                        .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-                }
-                .font(.system(size: 10.5, weight: .semibold))
-                .tracking(0.8)
-                .foregroundStyle(TokenBarStyle.faint)
-                .textCase(.uppercase)
-
-                projectArchivePicker
+                listTabPicker
 
                 sidebarSearchField
 
-                // CL-P1-012: scroll once project count exceeds the visible
-                // 12 slots so long workspaces stay reachable.
+                // CL-P1-012: scroll once row count exceeds the visible slots
+                // so long workspaces / source / model lists stay reachable.
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(spacing: 1) {
-                        if filteredProjects.isEmpty {
-                            Text(emptyProjectsMessage)
+                        if filteredRows.isEmpty {
+                            Text(emptyListMessage)
                                 .font(.caption)
                                 .foregroundStyle(TokenBarStyle.faint)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
                         }
-                        ForEach(filteredProjects) { project in
-                            Button {
-                                onSelectProject(project.name)
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Text(project.name)
-                                        .font(.system(size: 13, weight: selectedProject(project.name) ? .semibold : .regular))
-                                        .lineLimit(1)
-                                    Spacer()
-                                    Text(tokenbarTokens(project.summary.totalTokens))
-                                        .font(.system(size: 11, design: .monospaced))
-                                        .foregroundStyle(TokenBarStyle.faint)
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 7)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                                .background(
-                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                        .fill(selectedProject(project.name)
-                                              ? Color(nsColor: .controlAccentColor).opacity(0.18)
-                                              : Color.clear)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .foregroundStyle(selectedProject(project.name) ? TokenBarStyle.foreground : TokenBarStyle.muted)
-                            .contextMenu {
-                                projectContextMenu(for: project)
-                            }
+                        ForEach(filteredRows) { row in
+                            sidebarListRow(row)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -797,48 +918,34 @@ private struct TokenBarSidebar: View {
         activeRoute == .savedPrompts
     }
 
-    private var activeProjects: [UsageBreakdown] {
-        projects.filter { !archivedProjectNames.contains($0.name) }
-    }
-
-    private var archivedProjects: [UsageBreakdown] {
-        projects.filter { archivedProjectNames.contains($0.name) }
-    }
-
-    private var scopedProjects: [UsageBreakdown] {
-        switch projectArchiveMode {
-        case .active:
-            return activeProjects
-        case .archived:
-            return archivedProjects
+    private var filteredRows: [UsageBreakdown] {
+        let base: [UsageBreakdown]
+        switch listTab {
+        case .projects: base = projects
+        case .sources:  base = sources
+        case .models:   base = models
         }
-    }
-
-    private var filteredProjects: [UsageBreakdown] {
         let query = projectSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return scopedProjects }
-        return scopedProjects.filter { project in
-            project.name.localizedCaseInsensitiveContains(query)
+        guard !query.isEmpty else { return base }
+        return base.filter { $0.name.localizedCaseInsensitiveContains(query) }
+    }
+
+    private var emptyListMessage: String {
+        let searching = !projectSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        switch listTab {
+        case .projects:
+            return searching ? "No matching projects" : "No projects indexed yet"
+        case .sources:
+            return searching ? "No matching sources" : "No sources indexed yet"
+        case .models:
+            return searching ? "No matching models" : "No models indexed yet"
         }
     }
 
-    private var projectCountLabel: String {
-        projectSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "\(scopedProjects.count)"
-            : "\(filteredProjects.count)/\(scopedProjects.count)"
-    }
-
-    private var emptyProjectsMessage: String {
-        if projectSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return projectArchiveMode == .active ? "No active projects" : "No archived projects"
-        }
-        return "No matching projects"
-    }
-
-    private var projectArchivePicker: some View {
-        Picker("Project list", selection: $projectArchiveMode) {
-            ForEach(ProjectArchiveMode.allCases, id: \.self) { mode in
-                Text(mode.rawValue).tag(mode)
+    private var listTabPicker: some View {
+        Picker("List", selection: $listTab) {
+            ForEach(SidebarListTab.allCases, id: \.self) { tab in
+                Text(tab.title).tag(tab)
             }
         }
         .pickerStyle(.segmented)
@@ -846,12 +953,59 @@ private struct TokenBarSidebar: View {
         .controlSize(.small)
     }
 
+    @ViewBuilder
+    private func sidebarListRow(_ row: UsageBreakdown) -> some View {
+        let selected = isRowSelected(row.name)
+        Button {
+            switch listTab {
+            case .projects: onSelectProject(row.name)
+            case .sources:  onSelectSource(row.name)
+            case .models:   onSelectModel(row.name)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                if listTab != .projects {
+                    Circle()
+                        .fill(TokenBarStyle.agentColor(row.name))
+                        .frame(width: 7, height: 7)
+                }
+                Text(row.name)
+                    .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                    .lineLimit(1)
+                Spacer()
+                Text(tokenbarTokens(row.summary.totalTokens))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(TokenBarStyle.faint)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(selected ? Color(nsColor: .controlAccentColor).opacity(0.18) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .foregroundStyle(selected ? TokenBarStyle.foreground : TokenBarStyle.muted)
+    }
+
+    private func isRowSelected(_ name: String) -> Bool {
+        switch (listTab, activeRoute) {
+        case (.projects, .project(let n)): return n == name
+        case (.sources, .source(let n)):   return n == name
+        case (.models, .model(let n)):     return n == name
+        default: return false
+        }
+    }
+
     private var sidebarSearchField: some View {
         HStack(spacing: 7) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(TokenBarStyle.faint)
-            TextField("Search projects", text: $projectSearchText)
+            TextField(listTab.searchPlaceholder, text: $projectSearchText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12, design: .monospaced))
             if !projectSearchText.isEmpty {
@@ -869,31 +1023,6 @@ private struct TokenBarSidebar: View {
         .frame(height: 28)
         .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
-    }
-
-    private func selectedProject(_ name: String) -> Bool {
-        if case .project(let projectName) = activeRoute {
-            return projectName == name
-        }
-        return false
-    }
-
-    @ViewBuilder
-    private func projectContextMenu(for project: UsageBreakdown) -> some View {
-        if archivedProjectNames.contains(project.name) {
-            Button {
-                onRestoreProject(project.name)
-                projectArchiveMode = .active
-            } label: {
-                Label("Restore Project", systemImage: "tray.and.arrow.up")
-            }
-        } else {
-            Button {
-                onArchiveProject(project.name)
-            } label: {
-                Label("Archive Project", systemImage: "archivebox")
-            }
-        }
     }
 
     private func routeRow(icon: String, title: String, value: String, selected: Bool, action: @escaping () -> Void) -> some View {

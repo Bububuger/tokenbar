@@ -567,8 +567,24 @@ func tokenbarBreakdownsFromEvents(
     return Array(sorted.prefix(topCount))
 }
 
-func tokenbarAgentShare(events: [UsageEvent], topCount: Int = 5) -> [AgentShareSlice] {
-    let total = tokenbarSummary(events).totalTokens
+/// All-time model rankings as `UsageBreakdown` rows for the sidebar Models
+/// tab. Buckets a nil/empty model name under the agent display name, matching
+/// `tokenbarModelBreakdowns`.
+func tokenbarModelBreakdownsAsBreakdowns(events: [UsageEvent]) -> [UsageBreakdown] {
+    Dictionary(grouping: events) { event in
+        event.modelName?.isEmpty == false ? event.modelName! : event.agent.displayName
+    }
+    .map { name, grouped in UsageBreakdown(name: name, summary: tokenbarSummary(grouped)) }
+    .filter { $0.summary.totalTokens > 0 }
+    .sorted { lhs, rhs in
+        if lhs.summary.totalTokens == rhs.summary.totalTokens {
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+        return lhs.summary.totalTokens > rhs.summary.totalTokens
+    }
+}
+
+func tokenbarAgentShare(events: [UsageEvent], topCount: Int = 5) -> [AgentShareSlice] {    let total = tokenbarSummary(events).totalTokens
     guard total > 0 else { return [] }
 
     return Dictionary(grouping: events) { $0.agent.displayName }

@@ -123,6 +123,8 @@ final class TokenBarRuntimeModel: ObservableObject {
     @Published private(set) var lastCheckpoint: CheckpointSummary?
     @Published private(set) var refreshState: RefreshState
     @Published private(set) var selectedProjectName: String?
+    @Published private(set) var selectedSourceName: String?
+    @Published private(set) var selectedModelName: String?
     @Published private(set) var projectDetail: ProjectDetailSnapshot?
     @Published private(set) var customSources: [CustomSourceRecord]
     @Published private(set) var savedPrompts: [SavedPrompt] = []
@@ -1324,6 +1326,52 @@ final class TokenBarRuntimeModel: ObservableObject {
                 success: detail != nil,
                 elapsed: Date().timeIntervalSince(started)
             )
+        }
+    }
+
+    func openSource(named name: String, source: String = "sidebar.source") {
+        selectedSourceName = name
+        TokenBarTelemetry.event(
+            "source.open",
+            metadata: "source=\(source) agent=\(name) events=\(eventCount)",
+            success: true
+        )
+        navigate(to: .source(name), source: source)
+    }
+
+    func openModel(named name: String, source: String = "sidebar.model") {
+        selectedModelName = name
+        TokenBarTelemetry.event(
+            "model.open",
+            metadata: "source=\(source) model=\(name) events=\(eventCount)",
+            success: true
+        )
+        navigate(to: .model(name), source: source)
+    }
+
+    /// Map of custom-source record id → user-given name, used to attribute
+    /// custom-source events (id prefix `custom:<recordId>:`) back to the
+    /// specific source the user configured rather than the underlying agent.
+    var customSourceNamesById: [String: String] {
+        Dictionary(uniqueKeysWithValues: customSources.map { ($0.id, $0.name) })
+    }
+
+    /// Events attributed to a given source, all-time. A source is either a
+    /// built-in agent (matched by display name) or a named custom source
+    /// (matched via the `custom:<recordId>:` id prefix). Reads the in-memory
+    /// `events` set — the same data Overview / Project detail compute from.
+    func sourceEvents(named name: String) -> [UsageEvent] {
+        let namesById = customSourceNamesById
+        return events.filter { tokenbarSourceName(for: $0, customNamesById: namesById) == name }
+    }
+
+    /// Events attributed to a given model, all-time. A nil/empty `modelName`
+    /// on an event is bucketed under its agent display name (mirrors the
+    /// model-breakdown grouping), so matching uses that same fallback.
+    func modelEvents(modelName name: String) -> [UsageEvent] {
+        events.filter { event in
+            let resolved = event.modelName?.isEmpty == false ? event.modelName! : event.agent.displayName
+            return resolved == name
         }
     }
 

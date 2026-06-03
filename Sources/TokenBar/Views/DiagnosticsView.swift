@@ -25,7 +25,6 @@ struct DiagnosticsView: View {
             }
             diagStatStrip
             tokenDataAndSourcesCard
-            pluginSourcesCard
             normalizeActivityCard
             executableRuntimeCard
             warningsCard
@@ -165,13 +164,10 @@ struct DiagnosticsView: View {
     }
 
     private var diagStatStrip: some View {
-        let builtinCount = sourceRows.filter { !$0.id.hasPrefix("custom|") && !$0.id.hasPrefix("plugin-") }.count
-        let pluginCount = runtimeModel.customSources.filter { $0.isPlugin }.count
-        let builtinWarnings = sourceRows.filter { $0.state != .ok && !$0.id.hasPrefix("custom|") }.count
-        let pluginWarnings = runtimeModel.customSources.filter { $0.isPlugin && !$0.enabled }.count
+        let totalSources = sourceRows.count
+        let sourceWarnings = sourceRows.filter { $0.state != .ok }.count
         return HStack(spacing: 12) {
-            diagStatTile(value: "\(builtinCount)", label: "built-in sources", sub: "\(builtinWarnings) warning\(builtinWarnings == 1 ? "" : "s")", subWarn: builtinWarnings > 0)
-            diagStatTile(value: "\(pluginCount)", label: "plugins installed", sub: "\(pluginWarnings) warning\(pluginWarnings == 1 ? "" : "s")", subWarn: pluginWarnings > 0)
+            diagStatTile(value: "\(totalSources)", label: "sources", sub: "\(sourceWarnings) warning\(sourceWarnings == 1 ? "" : "s")", subWarn: sourceWarnings > 0)
             diagStatTile(value: "\(runtimeModel.eventCount.formatted())", label: "total events", sub: "across all sources", subWarn: false)
             diagStatTile(value: "\(runtimeModel.diagnostics.parserWarningCount)", label: "warnings", sub: "from latest refresh", subWarn: runtimeModel.diagnostics.parserWarningCount > 0)
         }
@@ -193,82 +189,6 @@ struct DiagnosticsView: View {
         .padding(14)
         .background(TokenBarStyle.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
-    }
-
-    private var pluginSourcesCard: some View {
-        let pluginSources = runtimeModel.customSources.filter { $0.isPlugin }
-        return TokenBarCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Plugin Sources")
-                            .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        Text("Community manifests via registry \u{00B7} \(pluginSources.count) installed")
-                            .font(.caption2)
-                            .foregroundStyle(TokenBarStyle.muted)
-                    }
-                    Spacer()
-                    Button("manage in Settings \u{2192} Plugins") {}
-                        .font(.system(size: 11))
-                        .foregroundStyle(TokenBarStyle.accent)
-                        .buttonStyle(.plain)
-                }
-
-                if pluginSources.isEmpty {
-                    Text("No plugins installed. Install from Settings \u{2192} Plugins.")
-                        .font(.caption)
-                        .foregroundStyle(TokenBarStyle.muted)
-                        .padding(.vertical, 8)
-                } else {
-                    ForEach(pluginSources, id: \.id) { source in
-                        HStack(spacing: 14) {
-                            Text(String(source.name.prefix(2)).uppercased())
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .frame(width: 28, height: 28)
-                                .background(TokenBarStyle.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 7))
-                                .foregroundStyle(TokenBarStyle.accent)
-
-                            VStack(alignment: .leading, spacing: 3) {
-                                HStack(spacing: 8) {
-                                    Text(source.name)
-                                        .font(.system(size: 14, weight: .medium))
-                                    Text(source.plugin.isPlugin ? source.plugin.displayName : "plugin")
-                                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(Color(red: 0.83, green: 0.97, blue: 0.42).opacity(0.12), in: Capsule())
-                                        .foregroundStyle(Color(red: 0.83, green: 0.97, blue: 0.42))
-                                }
-                                Text(source.directory)
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .foregroundStyle(TokenBarStyle.muted)
-                                    .lineLimit(1)
-                                if source.inputIncludesCached {
-                                    Text("inputIncludesCached:true \u{00B7} normalizer subtracts cache_read on every event")
-                                        .font(.system(size: 11, design: .monospaced))
-                                        .foregroundStyle(TokenBarStyle.input)
-                                }
-                            }
-
-                            Spacer()
-
-                            VStack(alignment: .trailing, spacing: 3) {
-                                Text(source.enabled ? "enabled" : "paused")
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(source.enabled ? TokenBarStyle.cache : TokenBarStyle.faint)
-                                if let version = source.pluginVersion {
-                                    Text("v\(version)")
-                                        .font(.system(size: 10.5, design: .monospaced))
-                                        .foregroundStyle(TokenBarStyle.faint)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 10)
-                        .overlay(Divider().overlay(TokenBarStyle.line.opacity(0.7)), alignment: .bottom)
-                    }
-                }
-            }
-        }
     }
 
     private var normalizeActivityCard: some View {
@@ -973,40 +893,18 @@ private struct DiagnosticsDerivedRows: Sendable, Hashable {
 
         let sourceRows: [SourceRow]
         if statuses.isEmpty {
-            let builtInRows = [
+            // No live per-source statuses yet (pre-first-refresh): render every
+            // built-in from the shared catalog so this list matches Settings.
+            let builtInRows = BuiltInSources.catalog().map { entry in
                 builtInSourceRow(
-                    id: "builtin|claude",
-                    name: "Claude Code",
-                    path: "~/.claude/projects/",
-                    count: builtInCounts[.claudeCode, default: 0],
+                    id: "builtin|\(entry.id)",
+                    name: entry.name,
+                    path: entry.defaultPath,
+                    count: builtInCounts[entry.agent, default: 0],
                     lastIndexedAt: lastIndexedAt,
-                    note: nil
-                ),
-                builtInSourceRow(
-                    id: "builtin|codex",
-                    name: "Codex",
-                    path: "~/.codex/sessions/",
-                    count: builtInCounts[.codex, default: 0],
-                    lastIndexedAt: lastIndexedAt,
-                    note: nil
-                ),
-                builtInSourceRow(
-                    id: "builtin|hermes",
-                    name: "Hermes",
-                    path: "~/.hermes/state.db",
-                    count: builtInCounts[.hermes, default: 0],
-                    lastIndexedAt: lastIndexedAt,
-                    note: "session-level model attribution"
-                ),
-                builtInSourceRow(
-                    id: "builtin|warp",
-                    name: "Warp",
-                    path: WarpUsageEventSource.discoverDatabasePath() ?? "~/Library/Group Containers/*.dev.warp/.../warp.sqlite",
-                    count: builtInCounts[.warp, default: 0],
-                    lastIndexedAt: lastIndexedAt,
-                    note: "conversation-level total tokens"
-                ),
-            ]
+                    note: entry.agent == .hermes ? "session-level model attribution" : nil
+                )
+            }
             sourceRows = builtInRows + customSourceRows(
                 customSources: customSources,
                 customCounts: customCounts,

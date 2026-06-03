@@ -33,4 +33,29 @@ public enum BuiltInSources {
             AntigravityUsageEventSource(),
         ]
     }
+
+    /// One catalog entry per built-in source. The Settings (Built-in Plugins /
+    /// Custom Sources tiles) and Diagnostics (Sources fallback) screens render
+    /// from this single list so they can no longer drift from each other or
+    /// from `all()`. Names and paths are pulled straight off the live sources,
+    /// keeping the catalog honest by construction.
+    public struct CatalogEntry: Identifiable, Sendable, Hashable {
+        public let id: String          // AgentKind.rawValue
+        public let name: String        // source's display name
+        public let defaultPath: String // canonical root path
+        public let agent: AgentKind
+    }
+
+    /// Built-in sources in display/scan order, paired with their canonical
+    /// metadata. Derived from `all()` so adding a source stays a one-line change.
+    public static func catalog() -> [CatalogEntry] {
+        all().map { source in
+            CatalogEntry(
+                id: source.agent.rawValue,
+                name: source.sourceName,
+                defaultPath: source.rootPath,
+                agent: source.agent
+            )
+        }
+    }
 }

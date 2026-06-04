@@ -49,11 +49,19 @@ echo ""
 
 # ── 1. Bump version in Info.plist ─────────────────────────────────────────────
 
-echo "→ [1/6] Updating Info.plist version to $VERSION"
+echo "→ [1/6] Updating Info.plist + latest-version.json to $VERSION"
 PLIST="$ROOT_DIR/Resources/Info.plist"
 /usr/libexec/PlistBuddy -c "Set CFBundleShortVersionString $VERSION" "$PLIST"
 BUILD_NUMBER=$(date +%s)
 /usr/libexec/PlistBuddy -c "Set CFBundleVersion $BUILD_NUMBER" "$PLIST"
+
+cat > "$ROOT_DIR/latest-version.json" <<VEOF
+{
+  "version": "$VERSION",
+  "dmg": "https://github.com/Bububuger/tokenbar/releases/download/v$VERSION/TokenBar-$VERSION.dmg",
+  "release_url": "https://github.com/Bububuger/tokenbar/releases/tag/v$VERSION"
+}
+VEOF
 
 # ── 2. Regenerate Xcode project ───────────────────────────────────────────────
 

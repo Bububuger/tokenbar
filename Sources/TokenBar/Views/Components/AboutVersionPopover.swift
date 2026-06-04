@@ -470,12 +470,12 @@ struct AboutVersionPopover: View {
     private func startCheck() {
         transient = .checking
         Task {
-            async let check: Void = runtimeModel.checkForUpdatesNow()
-            // Minimum dwell so the think-pose spinner is visible even when
-            // GitHub answers instantly (mirrors the mockup's ~1.4s).
+            async let check = runtimeModel.checkForUpdatesNow()
             try? await Task.sleep(for: .milliseconds(1200))
-            _ = await check
-            didCheckThisSession = true
+            let succeeded = await check
+            if succeeded {
+                didCheckThisSession = true
+            }
             transient = nil
         }
     }

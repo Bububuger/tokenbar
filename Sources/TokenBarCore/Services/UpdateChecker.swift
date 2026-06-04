@@ -91,7 +91,43 @@ public actor UpdateChecker {
         bundle.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     }
 
+    /// Primary: fetch `latest-version.json` from raw.githubusercontent.com
+    /// (CDN, no API rate limit). Falls back to the GitHub Releases API.
     private func fetchLatest() async throws -> UpdateCheckResult {
+        if let result = try? await fetchFromVersionFile() {
+            return result
+        }
+        return try await fetchFromReleasesAPI()
+    }
+
+    private func fetchFromVersionFile() async throws -> UpdateCheckResult {
+        let url = URL(string: "https://raw.githubusercontent.com/\(repository)/main/latest-version.json")!
+        var request = URLRequest(url: url)
+        request.setValue("TokenBar/\(currentVersion)", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 10
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+        guard let latestVersion = payload["version"] as? String else {
+            throw URLError(.cannotParseResponse)
+        }
+        let releaseURL = (payload["release_url"] as? String).flatMap(URL.init(string:))
+            ?? URL(string: "https://github.com/\(repository)/releases/latest")!
+        let dmgURL = (payload["dmg"] as? String).flatMap(URL.init(string:))
+        return UpdateCheckResult(
+            currentVersion: currentVersion,
+            latestVersion: latestVersion,
+            releaseURL: releaseURL,
+            dmgURL: dmgURL,
+            dmgSizeBytes: nil,
+            isNewer: Self.compare(latestVersion, isNewerThan: currentVersion)
+        )
+    }
+
+    private func fetchFromReleasesAPI() async throws -> UpdateCheckResult {
         var request = URLRequest(url: URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("TokenBar/\(currentVersion)", forHTTPHeaderField: "User-Agent")

@@ -407,12 +407,17 @@ final class TokenBarRuntimeModel: ObservableObject {
     }
 
     /// Force-check on user demand (popover label click). Updates
-    /// `availableUpdate` regardless of the 24h throttle.
-    func checkForUpdatesNow() async {
+    /// `availableUpdate` regardless of the 24h throttle. Returns false
+    /// when the network call failed (rate-limited, offline, etc.) so the
+    /// caller can distinguish "checked and up-to-date" from "couldn't check".
+    @discardableResult
+    func checkForUpdatesNow() async -> Bool {
         if let result = await updateChecker.checkNow() {
             availableUpdate = result.isNewer ? result : nil
+            lastUpdateCheckAt = Date()
+            return true
         }
-        lastUpdateCheckAt = Date()
+        return false
     }
 
     /// Kick off the in-app update download. Sets `updateDownloadState` to

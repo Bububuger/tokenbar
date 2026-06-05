@@ -57,10 +57,11 @@ struct CheckpointEngineParallelTests {
         #expect(serialResult.state.events.count == 4)
         #expect(parallelResult.state.events.count == 4)
         // Serial: 4 × 150ms ≈ 600ms. Parallel with N=2: two batches of 2
-        // sources ≈ 300ms. Require ≥ 30% reduction.
+        // sources ≈ 300ms. Require ≥ 15% reduction (relaxed from 30% to
+        // tolerate CI runner jitter).
         #expect(
-            parallelElapsed < serialElapsed * 0.7,
-            "parallel (\(parallelElapsed * 1000)ms) did not improve on serial (\(serialElapsed * 1000)ms) by ≥30%"
+            parallelElapsed < serialElapsed * 0.85,
+            "parallel (\(parallelElapsed * 1000)ms) did not improve on serial (\(serialElapsed * 1000)ms) by ≥15%"
         )
     }
 

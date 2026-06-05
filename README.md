@@ -5,13 +5,13 @@
 ### See your AI token spend, live.
 ### 把每一笔 AI 编码 token，钉在你的菜单栏上。
 
-A macOS menu-bar app that aggregates **Claude Code · Codex · Gemini · Hermes · OpenClaw · OpenCode** usage from your local logs.
+A macOS menu-bar app that aggregates **Claude Code · Codex · Gemini CLI · Hermes · OpenClaw · OpenCode · Warp · Pi · Qoder · Kiro · Kimi Code · Antigravity** usage from your local logs.
 Live tokens, real cost — by project, by agent, by model. **No data upload · No signup · No account.** (One outbound call: an opt-out 24h GitHub-releases version check.)
 
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-007AFF?logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![Swift 6](https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white)](https://www.swift.org/)
 [![SwiftUI](https://img.shields.io/badge/SwiftUI-MenuBarExtra-2D9CDB?logo=swift&logoColor=white)](https://developer.apple.com/xcode/swiftui/)
-[![Version](https://img.shields.io/badge/version-1.3.2-22c55e)](Resources/Info.plist)
+[![Version](https://img.shields.io/badge/version-1.8.4-22c55e)](Resources/Info.plist)
 [![CI](https://github.com/Bububuger/tokenbar/actions/workflows/ci.yml/badge.svg)](https://github.com/Bububuger/tokenbar/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-D22128?logo=apache&logoColor=white)](LICENSE)
 
@@ -60,10 +60,10 @@ You're paying for Claude, Codex, Gemini and a long tail of CLI agents that all s
 
 ## 🔌 Supported Sources / 已支持的数据源
 
-TokenBar ships with **six** zero-config engines. Local-only data — TokenBar only reads the files these CLIs already write themselves; nothing about your usage ever ships off your machine.
+TokenBar ships with **twelve** zero-config engines. Local-only data — TokenBar only reads the files these CLIs already write themselves; nothing about your usage ever ships off your machine.
 
 <p align="center">
-  <img src="docs/assets/sources-grid.png" alt="Claude Code · Codex · Gemini CLI · Hermes · OpenClaw · OpenCode" width="100%" />
+  <img src="docs/assets/sources-grid.png" alt="Claude Code · Codex · Gemini CLI · Hermes · OpenClaw · OpenCode · Warp · Pi · Qoder · Kiro · Kimi Code · Antigravity" width="100%" />
 </p>
 
 **Custom sources / 自定义数据源** — *"Point TokenBar at any agent that writes JSONL or sqlite locally."* Configure path glob + field mapping in `Settings → Custom Sources`. Schema validation runs before save, so a bad path can't poison the index.
@@ -100,9 +100,9 @@ The script regenerates the Xcode project (`xcodegen generate --spec project.yml`
 
 **On first launch:**
 
-1. Grant **Full Disk Access** to TokenBar — only needed for engines whose default path is outside the sandbox (`~/.openclaw`, custom sources). The 6 built-ins are read-only.
+1. Grant **Full Disk Access** to TokenBar — only needed for engines whose default path is outside the sandbox (`~/.openclaw`, custom sources). The 12 built-ins are read-only.
 2. Wait for the **bootstrap catch-up** banner — first index of historical sessions takes seconds-to-minutes depending on how many CLIs you've been using. Run `tbar rebuild` from the terminal if you want to force a full reparse instead.
-3. Open `Settings → Custom Sources` if you want to point TokenBar at an agent that isn't one of the six built-ins.
+3. Open `Settings → Custom Sources` if you want to point TokenBar at an agent that isn't one of the twelve built-ins.
 
 <br />
 
@@ -211,7 +211,7 @@ Targets are wired in [`project.yml`](project.yml). The shell-first workflow is d
 TokenBar is intentionally small — the bar for changes is "does it still feel like a glance, not a tab?". The short version of how to contribute lives in [`CONTRIBUTING.md`](CONTRIBUTING.md); the full collaboration workflow is in [`AGENTS.md`](AGENTS.md).
 
 - **New data source?** Try **Custom Sources** in Settings first. If that's not enough, see [`Sources/TokenBarCore/Services/`](Sources/TokenBarCore/Services/) for the engine pattern.
-- **Bugs**: file via the templates at [Issues → New](https://github.com/Bububuger/tokenbar/issues/new/choose) — the bug template asks which of the 6 sources is affected.
+- **Bugs**: file via the templates at [Issues → New](https://github.com/Bububuger/tokenbar/issues/new/choose) — the bug template asks which of the 12 sources is affected.
 - **Security**: please **do not** file public issues; see [`SECURITY.md`](SECURITY.md).
 
 <br />

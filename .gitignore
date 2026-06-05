@@ -34,3 +34,11 @@ CACHE-SPLIT-CHECKLIST.md
 # Design assets — local reference only, not tracked in git.
 design/
 build/
+
+# Local-only working docs — not pushed to public repo.
+HANDOFF.md
+docs/work-items/
+tmp/
+
+# tokenbar-report skill — local development only.
+skills/

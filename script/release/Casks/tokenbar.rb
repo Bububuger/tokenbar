@@ -19,8 +19,8 @@
 #   tbar schema --json | jq .schema.dataWindow
 
 cask "tokenbar" do
-  version "1.8.4"
-  sha256 "787fb625a9482926020bb81bb71df7f076d49c5e2209bccebf661deb2d10d9f1"
+  version "1.8.5"
+  sha256 "7c88c87cbece0b374d1d190d84500f6619059e512719a5c1a124d9835ceec19c"
 
   url "https://github.com/Bububuger/tokenbar/releases/download/v#{version}/TokenBar-#{version}.dmg"
   name "TokenBar"

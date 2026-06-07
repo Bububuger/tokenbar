@@ -1,6 +1,25 @@
 import SwiftUI
 import TokenBarCore
 
+// MARK: - Skill detail selection state
+
+@MainActor
+final class SkillDetailSelection: ObservableObject {
+    @Published var item: LibrarySkillItem?
+    @Published var scope: LibraryScope = .user
+    @Published var scopeLabel: String = ""
+
+    func select(_ item: LibrarySkillItem, scope: LibraryScope, scopeLabel: String) {
+        self.item = item
+        self.scope = scope
+        self.scopeLabel = scopeLabel
+    }
+
+    func dismiss() {
+        item = nil
+    }
+}
+
 // MARK: - Data models
 
 enum LibraryTab: String, CaseIterable {
@@ -254,16 +273,6 @@ typealias LibraryScope = TokenBarCore.LibraryScope
 
 // MARK: - Helpers
 
-private func duplicateNames(in dirs: [LibrarySkillDir]) -> Set<String> {
-    var counts: [String: Int] = [:]
-    for d in dirs {
-        for item in d.items where item.isReal {
-            counts[item.name, default: 0] += 1
-        }
-    }
-    return Set(counts.filter { $0.value >= 2 }.keys)
-}
-
 // MARK: - Scope pill
 
 private struct ScopePill: View {
@@ -305,84 +314,6 @@ private struct ScopePill: View {
         case .project: Color(red: 0.78, green: 0.90, blue: 0.39).opacity(0.30)
         case .shared: Color.white.opacity(0.16)
         case .plugin: Color(red: 0.85, green: 0.55, blue: 0.95).opacity(0.30)
-        }
-    }
-}
-
-// MARK: - Filter pills
-
-private enum SkillFilter: String, CaseIterable {
-    case all
-    case real
-    case symlinks
-    case duplicates
-    case broken
-}
-
-private struct FilterPillButton: View {
-    let label: String
-    let count: Int
-    let isActive: Bool
-    let tone: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Text(label)
-                    .font(.system(size: 11.5, weight: .medium))
-                Text("\(count)")
-                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .background(countBackground, in: Capsule())
-                    .foregroundStyle(countForeground)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(pillBackground, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(pillForeground)
-    }
-
-    private var pillForeground: Color {
-        guard isActive else { return TokenBarStyle.faint }
-        switch tone {
-        case "sym": return TokenBarStyle.input
-        case "dup": return Color(red: 1.0, green: 0.71, blue: 0.33)
-        case "err": return Color(red: 0.89, green: 0.42, blue: 0.42)
-        default: return TokenBarStyle.foreground
-        }
-    }
-
-    private var pillBackground: Color {
-        guard isActive else { return .clear }
-        switch tone {
-        case "sym": return TokenBarStyle.input.opacity(0.12)
-        case "dup": return Color(red: 1.0, green: 0.71, blue: 0.33).opacity(0.12)
-        case "err": return Color(red: 0.89, green: 0.42, blue: 0.42).opacity(0.12)
-        default: return Color.white.opacity(0.08)
-        }
-    }
-
-    private var countBackground: Color {
-        guard isActive else { return Color.white.opacity(0.04) }
-        switch tone {
-        case "sym": return TokenBarStyle.input.opacity(0.22)
-        case "dup": return Color(red: 1.0, green: 0.71, blue: 0.33).opacity(0.22)
-        case "err": return Color(red: 0.89, green: 0.42, blue: 0.42).opacity(0.22)
-        default: return Color.white.opacity(0.10)
-        }
-    }
-
-    private var countForeground: Color {
-        guard isActive else { return TokenBarStyle.faint }
-        switch tone {
-        case "sym": return TokenBarStyle.input
-        case "dup": return Color(red: 1.0, green: 0.71, blue: 0.33)
-        case "err": return Color(red: 0.89, green: 0.42, blue: 0.42)
-        default: return .white
         }
     }
 }
@@ -469,78 +400,130 @@ private struct LibraryTabSelector: View {
     }
 }
 
-// MARK: - Skill row
+// MARK: - Skill card (Codex-inspired grid card)
 
-private struct LibrarySkillRow: View {
+private struct SkillCardView: View {
     let item: LibrarySkillItem
-    let isDuplicate: Bool
-    @EnvironmentObject private var runtimeModel: TokenBarRuntimeModel
-    @State private var showDeleteAlert = false
+    let scope: LibraryScope
+    let onSelect: () -> Void
+    @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: item.isReal ? "doc" : "arrow.up.right")
-                .font(.system(size: 10, weight: .medium))
-                .frame(width: 18)
-                .foregroundStyle(item.broken ? TokenBarStyle.error : (item.isReal ? TokenBarStyle.muted : TokenBarStyle.input))
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
+        Button(action: onSelect) {
+            HStack(spacing: 10) {
+                typeIcon
+                VStack(alignment: .leading, spacing: 2) {
                     Text(item.name)
                         .font(.system(size: 13, weight: .medium, design: .monospaced))
                         .foregroundStyle(item.broken ? TokenBarStyle.error : TokenBarStyle.foreground)
                         .lineLimit(1)
-
-                    if isDuplicate {
-                        duplicatePill
-                    }
-
-                    if !item.isReal {
-                        HStack(spacing: 4) {
-                            Text("\u{2192}")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(TokenBarStyle.input)
-                            Text(item.target ?? "")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(item.broken ? TokenBarStyle.error : TokenBarStyle.input)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 1)
-                                .background(
-                                    (item.broken ? TokenBarStyle.error : TokenBarStyle.input).opacity(0.08),
-                                    in: RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                )
-                                .lineLimit(1)
-                        }
-                    }
-
-                    if item.broken {
-                        brokenPill
-                    }
+                    Text(item.desc)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(TokenBarStyle.faint)
+                        .lineLimit(1)
                 }
-
-                Text(item.desc)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(TokenBarStyle.faint)
-                    .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .trailing, spacing: 3) {
+                    ctxBadge
+                    statusIcon
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(TokenBarStyle.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(cardBorderColor, lineWidth: 1)
+        )
+        .offset(y: isHovered ? -1 : 0)
+        .animation(.easeOut(duration: 0.12), value: isHovered)
+        .onHover { isHovered = $0 }
+    }
 
-            costCell
+    private var typeIcon: some View {
+        Image(systemName: item.isReal ? "book.closed.fill" : "arrow.up.right")
+            .font(.system(size: 12, weight: .medium))
+            .frame(width: 34, height: 34)
+            .background(
+                item.isReal
+                    ? Color.white.opacity(0.05)
+                    : TokenBarStyle.input.opacity(0.12),
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
+            .foregroundStyle(item.broken ? TokenBarStyle.error : (item.isReal ? TokenBarStyle.muted : TokenBarStyle.input))
+    }
 
-            HStack(spacing: 6) {
-                iconButton(systemName: "folder", tooltip: "Open in Finder") {
-                    revealInFinder()
+    private var ctxBadge: some View {
+        Group {
+            if let ctx = item.contextK {
+                HStack(spacing: 0) {
+                    Text(String(format: "%.1f", ctx))
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    Text("K")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(TokenBarStyle.faint)
                 }
-                iconButton(systemName: "trash", tooltip: "Delete", isDanger: true) {
-                    showDeleteAlert = true
-                }
+            } else {
+                Text("\u{2014}")
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(TokenBarStyle.faint)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .overlay(alignment: .bottom) {
-            TokenBarStyle.line.frame(height: 1)
-                .padding(.leading, 46)
+    }
+
+    private var statusIcon: some View {
+        Group {
+            if item.broken {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(TokenBarStyle.error)
+            } else {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(TokenBarStyle.lime)
+            }
+        }
+    }
+
+    private var cardBorderColor: Color {
+        if item.broken { return TokenBarStyle.error.opacity(0.35) }
+        if isHovered { return TokenBarStyle.input.opacity(0.50) }
+        return TokenBarStyle.line
+    }
+}
+
+// MARK: - Skill detail panel (modal overlay)
+
+private struct SkillDetailPanel: View {
+    let item: LibrarySkillItem
+    let scope: LibraryScope
+    let scopeLabel: String
+    let onClose: () -> Void
+    @EnvironmentObject private var runtimeModel: TokenBarRuntimeModel
+    @State private var showDeleteAlert = false
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.45)
+                .ignoresSafeArea()
+                .onTapGesture { onClose() }
+
+            VStack(alignment: .leading, spacing: 0) {
+                headerSection
+                Divider().background(TokenBarStyle.line)
+                descriptionSection
+                Divider().background(TokenBarStyle.line)
+                infoTable
+                Divider().background(TokenBarStyle.line)
+                footerButtons
+            }
+            .frame(width: 520)
+            .background(TokenBarStyle.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
+            .shadow(color: .black.opacity(0.4), radius: 30, y: 10)
         }
         .alert("Delete \(item.name)?", isPresented: $showDeleteAlert) {
             Button("Cancel", role: .cancel) {}
@@ -548,13 +531,171 @@ private struct LibrarySkillRow: View {
         } message: {
             Text(item.isReal
                  ? "This permanently moves the skill directory to the Trash:\n\(item.path)"
-                 : "This removes the symlink only — the target it points to is untouched:\n\(item.path)")
+                 : "This removes the symlink only \u{2014} the target it points to is untouched:\n\(item.path)")
         }
     }
 
-    private func revealInFinder() {
-        let url = URL(fileURLWithPath: item.path)
-        NSWorkspace.shared.activateFileViewerSelecting([url])
+    private var headerSection: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: item.isReal ? "book.closed.fill" : "arrow.up.right")
+                .font(.system(size: 18, weight: .medium))
+                .frame(width: 48, height: 48)
+                .background(
+                    item.isReal
+                        ? Color.white.opacity(0.05)
+                        : TokenBarStyle.input.opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
+                .foregroundStyle(item.broken ? TokenBarStyle.error : (item.isReal ? TokenBarStyle.muted : TokenBarStyle.input))
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(item.name)
+                        .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(TokenBarStyle.foreground)
+                    Text("Skill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(TokenBarStyle.faint)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Color.white.opacity(0.06), in: Capsule())
+                }
+                ScopePill(scope: scope, label: scopeLabel)
+            }
+
+            Spacer()
+
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 28, height: 28)
+                    .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(TokenBarStyle.muted)
+        }
+        .padding(20)
+    }
+
+    private var descriptionSection: some View {
+        Text(item.desc.isEmpty ? "No description" : item.desc)
+            .font(.system(size: 13))
+            .foregroundStyle(item.desc.isEmpty ? TokenBarStyle.faint : TokenBarStyle.muted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+    }
+
+    private var infoTable: some View {
+        VStack(spacing: 0) {
+            infoRow(label: "Type", value: {
+                HStack(spacing: 6) {
+                    Image(systemName: item.isReal ? "book.closed.fill" : "arrow.up.right")
+                        .font(.system(size: 10, weight: .medium))
+                    Text(item.isReal ? "Real file" : "Symlink")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                }
+                .foregroundStyle(item.isReal ? TokenBarStyle.muted : TokenBarStyle.input)
+            })
+
+            if !item.isReal {
+                infoRow(label: "Target", value: {
+                    HStack(spacing: 6) {
+                        Text(item.target ?? "unknown")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(item.broken ? TokenBarStyle.error : TokenBarStyle.muted)
+                            .lineLimit(1)
+                        if item.broken {
+                            Text("missing")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(TokenBarStyle.error)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(TokenBarStyle.error.opacity(0.12), in: Capsule())
+                        }
+                    }
+                })
+            }
+
+            infoRow(label: "Context cost", value: {
+                if let ctx = item.contextK {
+                    Text("\(String(format: "%.1f", ctx))K tokens")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(TokenBarStyle.cost)
+                } else {
+                    Text("unknown")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(TokenBarStyle.faint)
+                }
+            })
+
+            infoRow(label: "Size on disk", value: {
+                Text(item.size)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(TokenBarStyle.muted)
+            })
+
+            infoRow(label: "Last modified", value: {
+                Text(item.modified)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(TokenBarStyle.muted)
+            })
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func infoRow<V: View>(label: String, @ViewBuilder value: () -> V) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundStyle(TokenBarStyle.faint)
+                .frame(width: 110, alignment: .leading)
+            value()
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+    }
+
+    private var footerButtons: some View {
+        HStack {
+            Button {
+                showDeleteAlert = true
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 10, weight: .medium))
+                    Text("Uninstall")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .padding(.horizontal, 14)
+                .frame(height: 30)
+                .background(Color.white.opacity(0.02), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(TokenBarStyle.muted)
+
+            Spacer()
+
+            Button {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.path)])
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 10, weight: .medium))
+                    Text("Reveal in Finder")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .padding(.horizontal, 14)
+                .frame(height: 30)
+                .background(Color.white.opacity(0.02), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(TokenBarStyle.muted)
+        }
+        .padding(20)
     }
 
     private func deleteToTrash() {
@@ -562,130 +703,63 @@ private struct LibrarySkillRow: View {
         var resulting: NSURL?
         do {
             try FileManager.default.trashItem(at: url, resultingItemURL: &resulting)
-            // Immediate UI refresh — FSEvents will also fire, but the
-            // debouncer delays that by ~3s and the user expects to see the
-            // row disappear right away.
             runtimeModel.rebuildLibrarySnapshot(trigger: "ui.skill_deleted")
         } catch {
-            // Trash can fail for symlinks pointing into non-Finder-managed
-            // locations or when the parent dir lacks write permission.
-            // Fall back to a hard remove so the row clears either way.
             try? FileManager.default.removeItem(at: url)
             runtimeModel.rebuildLibrarySnapshot(trigger: "ui.skill_deleted.fallback")
         }
-    }
-
-    private var costCell: some View {
-        VStack(alignment: .trailing, spacing: 1) {
-            if let ctx = item.contextK {
-                HStack(spacing: 0) {
-                    Text(String(format: "%.1f", ctx))
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    Text("K")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(TokenBarStyle.faint)
-                }
-            } else {
-                Text("\u{2014}")
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
-                    .foregroundStyle(TokenBarStyle.faint)
-            }
-            Text("ctx")
-                .font(.system(size: 9.5, weight: .semibold))
-                .foregroundStyle(TokenBarStyle.faint)
-                .textCase(.uppercase)
-            HStack(spacing: 0) {
-                Text(item.size)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(TokenBarStyle.faint)
-                Text(" on disk")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(TokenBarStyle.faint.opacity(0.7))
-            }
-        }
-        .frame(width: 80, alignment: .trailing)
-    }
-
-    private var duplicatePill: some View {
-        HStack(spacing: 3) {
-            Image(systemName: "doc.on.doc")
-                .font(.system(size: 8, weight: .semibold))
-            Text("duplicate name")
-                .font(.system(size: 10, weight: .semibold))
-        }
-        .foregroundStyle(Color(red: 1.0, green: 0.71, blue: 0.33))
-        .padding(.horizontal, 7)
-        .padding(.vertical, 2)
-        .background(Color(red: 1.0, green: 0.71, blue: 0.33).opacity(0.10), in: Capsule())
-        .overlay(Capsule().stroke(Color(red: 1.0, green: 0.71, blue: 0.33).opacity(0.25), lineWidth: 1))
-    }
-
-    private var brokenPill: some View {
-        HStack(spacing: 3) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 8, weight: .semibold))
-            Text("target missing")
-                .font(.system(size: 10, weight: .semibold))
-        }
-        .foregroundStyle(TokenBarStyle.error)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 2)
-        .background(TokenBarStyle.error.opacity(0.10), in: Capsule())
-        .overlay(Capsule().stroke(TokenBarStyle.error.opacity(0.25), lineWidth: 1))
-    }
-
-    private func iconButton(systemName: String, tooltip: String, isDanger: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 10, weight: .medium))
-                .frame(width: 24, height: 24)
-                .background(Color.white.opacity(0.02), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(isDanger ? TokenBarStyle.error : TokenBarStyle.muted)
-        .help(tooltip)
+        onClose()
     }
 }
 
-// MARK: - Skill directory card (collapsible)
+// MARK: - Skills tab body (Codex-inspired card grid)
 
-private struct SkillDirCard: View {
+private enum ScopeFilter: String, CaseIterable {
+    case all
+    case user
+    case project
+    case shared
+}
+
+// MARK: - Collapsible skill section
+
+private struct SkillSectionView: View {
     let dir: LibrarySkillDir
-    let dupNames: Set<String>
-    let filter: SkillFilter
+    let onSelect: (LibrarySkillItem, LibraryScope, String) -> Void
     @State private var isOpen = false
 
-    private var filteredItems: [LibrarySkillItem] {
-        dir.items.filter { item in
-            switch filter {
-            case .all: true
-            case .real: item.isReal
-            case .symlinks: !item.isReal
-            case .duplicates: item.isReal && dupNames.contains(item.name)
-            case .broken: item.broken
-            }
-        }
-    }
+    private let gridColumns = [
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10)
+    ]
 
     var body: some View {
-        if filter != .all && filteredItems.isEmpty { EmptyView() } else {
-            VStack(spacing: 0) {
-                directoryHeader
-                if isOpen {
-                    ForEach(filteredItems) { item in
-                        LibrarySkillRow(item: item, isDuplicate: item.isReal && dupNames.contains(item.name))
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader
+            if isOpen {
+                LazyVGrid(columns: gridColumns, spacing: 10) {
+                    ForEach(dir.items) { item in
+                        SkillCardView(item: item, scope: dir.scope) {
+                            onSelect(item, dir.scope, dir.label)
+                        }
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
-            .background(TokenBarStyle.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
         }
+        .background(TokenBarStyle.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
     }
 
-    private var directoryHeader: some View {
-        Button { withAnimation(.easeOut(duration: 0.15)) { isOpen.toggle() } } label: {
-            HStack(spacing: 12) {
+    private var sectionHeader: some View {
+        let real = dir.items.filter(\.isReal).count
+        let sym = dir.items.count - real
+        let ctx = dir.items.reduce(0.0) { $0 + ($1.contextK ?? 0) }
+        return Button {
+            withAnimation(.easeOut(duration: 0.15)) { isOpen.toggle() }
+        } label: {
+            HStack(spacing: 10) {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .bold))
                     .rotationEffect(.degrees(isOpen ? 90 : 0))
@@ -693,33 +767,22 @@ private struct SkillDirCard: View {
 
                 ScopePill(scope: dir.scope, label: dir.label)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(dir.path)
-                        .font(.system(size: 11.5, design: .monospaced))
-                        .foregroundStyle(TokenBarStyle.faint)
-                        .lineLimit(1)
-                    Text(dir.sub)
-                        .font(.system(size: 11))
-                        .foregroundStyle(TokenBarStyle.faint.opacity(0.7))
-                        .lineLimit(1)
-                }
+                Text(dir.path)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(TokenBarStyle.faint)
+                    .lineLimit(1)
 
                 Spacer()
 
-                dirCounts
-
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: dir.path)])
-                } label: {
-                    Text("Reveal")
-                        .font(.system(size: 11, weight: .medium))
-                        .padding(.horizontal, 9)
-                        .frame(height: 24)
-                        .background(Color.white.opacity(0.02), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
+                HStack(spacing: 3) {
+                    Text("\(real) real")
+                    Text("\u{00B7}")
+                    Text("\(sym) symlink")
+                    Text("\u{00B7}")
+                    Text(String(format: "%.1fK ctx", ctx))
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(TokenBarStyle.muted)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(TokenBarStyle.faint)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -730,90 +793,65 @@ private struct SkillDirCard: View {
             if isOpen { TokenBarStyle.line.frame(height: 1) }
         }
     }
-
-    private var dirCounts: some View {
-        let total = dir.items.count
-        let real = dir.items.filter(\.isReal).count
-        let sym = total - real
-        let ctxTotal = dir.items.reduce(0.0) { $0 + ($1.contextK ?? 0) }
-        let brokenCt = dir.items.filter(\.broken).count
-        return HStack(spacing: 4) {
-            countChip("\(total)", label: "total", color: TokenBarStyle.muted)
-            sepDot
-            countChip("\(real)", label: "real", color: TokenBarStyle.foreground)
-            sepDot
-            countChip("\(sym)", label: "symlink", color: TokenBarStyle.input)
-            sepDot
-            countChip(String(format: "%.1f", ctxTotal), label: "K ctx", color: TokenBarStyle.cost)
-            if brokenCt > 0 {
-                sepDot
-                countChip("\(brokenCt)", label: "broken", color: TokenBarStyle.error)
-            }
-        }
-        .font(.system(size: 11, design: .monospaced))
-    }
-
-    private var sepDot: some View {
-        Text("\u{00B7}")
-            .foregroundStyle(TokenBarStyle.faint.opacity(0.5))
-    }
-
-    private func countChip(_ value: String, label: String, color: Color) -> some View {
-        HStack(spacing: 3) {
-            Text(value)
-                .foregroundStyle(color)
-            Text(label)
-                .font(.system(size: 10))
-                .foregroundStyle(TokenBarStyle.faint)
-        }
-    }
 }
 
-// MARK: - Skills tab body
+// MARK: - Skills tab body (Codex-inspired card grid)
 
 private struct SkillsBody: View {
     let skillDirs: [LibrarySkillDir]
     let onRescan: () -> Void
-    @State private var filter: SkillFilter = .all
-    @State private var searchText = ""
+    @EnvironmentObject private var detailSelection: SkillDetailSelection
+    @State private var scopeFilter: ScopeFilter = .all
 
-    private var dupNames: Set<String> { duplicateNames(in: skillDirs) }
     private var total: Int { skillDirs.reduce(0) { $0 + $1.items.count } }
-    private var realCount: Int { skillDirs.reduce(0) { $0 + $1.items.filter(\.isReal).count } }
-    private var symCount: Int { total - realCount }
-    private var dupCount: Int { skillDirs.reduce(0) { $0 + $1.items.filter { $0.isReal && dupNames.contains($0.name) }.count } }
-    private var brokenCount: Int { skillDirs.reduce(0) { $0 + $1.items.filter(\.broken).count } }
+
+    private var filteredDirs: [LibrarySkillDir] {
+        guard scopeFilter != .all else { return skillDirs }
+        return skillDirs.filter { dir in
+            switch scopeFilter {
+            case .all: true
+            case .user: dir.scope == .user
+            case .project: dir.scope == .project
+            case .shared: dir.scope == .shared
+            }
+        }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Graph view disabled — force-directed layout for ~300 skills
-            // without real link semantics never produced a useful constellation.
-            // List view is the only mode while we revisit the design.
+        VStack(alignment: .leading, spacing: 16) {
             toolbar
-            ForEach(skillDirs) { dir in
-                SkillDirCard(dir: dir, dupNames: dupNames, filter: filter)
+            ForEach(filteredDirs) { dir in
+                SkillSectionView(dir: dir) { item, scope, label in
+                    detailSelection.select(item, scope: scope, scopeLabel: label)
+                }
             }
         }
     }
 
     private var toolbar: some View {
         HStack(spacing: 10) {
-            searchField(placeholder: "Search \(total) skills\u{2026}")
-            filterSegment
-            Spacer()
-            ghostButton(icon: "arrow.clockwise", label: "Rescan", action: onRescan)
-            primaryButton(icon: "plus", label: "Add symlink\u{2026}")
+            searchField(placeholder: "Search \(total) skills\u{2026}", maxWidth: .infinity)
+            scopePicker
         }
         .padding(.vertical, 4)
     }
 
-    private var filterSegment: some View {
+    private var scopePicker: some View {
         HStack(spacing: 0) {
-            FilterPillButton(label: "All", count: total, isActive: filter == .all, tone: "") { filter = .all }
-            FilterPillButton(label: "Real", count: realCount, isActive: filter == .real, tone: "") { filter = .real }
-            FilterPillButton(label: "Symlinks", count: symCount, isActive: filter == .symlinks, tone: "sym") { filter = .symlinks }
-            FilterPillButton(label: "Duplicates", count: dupCount, isActive: filter == .duplicates, tone: "dup") { filter = .duplicates }
-            FilterPillButton(label: "Broken", count: brokenCount, isActive: filter == .broken, tone: "err") { filter = .broken }
+            ForEach(ScopeFilter.allCases, id: \.self) { filter in
+                Button { scopeFilter = filter } label: {
+                    Text(filter == .all ? "All" : filter.rawValue.capitalized)
+                        .font(.system(size: 11.5, weight: scopeFilter == filter ? .semibold : .medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            scopeFilter == filter ? Color.white.opacity(0.08) : .clear,
+                            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        )
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(scopeFilter == filter ? TokenBarStyle.foreground : TokenBarStyle.faint)
+            }
         }
         .padding(2)
         .background(Color.white.opacity(0.02), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -1261,7 +1299,7 @@ private struct MCPBody: View {
 
 // MARK: - Shared toolbar helpers
 
-@MainActor private func searchField(placeholder: String) -> some View {
+@MainActor private func searchField(placeholder: String, maxWidth: CGFloat = 260) -> some View {
     HStack(spacing: 7) {
         Image(systemName: "magnifyingglass")
             .font(.system(size: 11, weight: .medium))
@@ -1275,7 +1313,7 @@ private struct MCPBody: View {
     .frame(height: 30)
     .background(TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
     .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
-    .frame(maxWidth: 260)
+    .frame(maxWidth: maxWidth)
 }
 
 @MainActor private func ghostButton(icon: String?, label: String, action: @escaping () -> Void = {}) -> some View {
@@ -1341,7 +1379,10 @@ struct LibraryView: View {
             )
             switch selectedTab {
             case .skills:
-                SkillsBody(skillDirs: skillDirs, onRescan: { runtimeModel.rebuildLibrarySnapshot(trigger: "manual.rescan") })
+                SkillsBody(
+                    skillDirs: skillDirs,
+                    onRescan: { runtimeModel.rebuildLibrarySnapshot(trigger: "manual.rescan") }
+                )
             case .plugins:
                 PluginsBody(plugins: plugins, onRescan: { runtimeModel.rebuildLibrarySnapshot(trigger: "manual.rescan") })
             case .mcp:
@@ -1380,5 +1421,29 @@ struct LibraryView: View {
         .padding(.vertical, 8)
         .background(TokenBarStyle.error.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(TokenBarStyle.error.opacity(0.2), lineWidth: 1))
+    }
+}
+
+struct LibraryContainer: View {
+    @StateObject private var detailSelection = SkillDetailSelection()
+    @EnvironmentObject private var runtimeModel: TokenBarRuntimeModel
+
+    var body: some View {
+        ScrollView {
+            LibraryView()
+                .padding(TokenBarStyle.pagePadding)
+        }
+        .overlay {
+            if let item = detailSelection.item {
+                SkillDetailPanel(
+                    item: item,
+                    scope: detailSelection.scope,
+                    scopeLabel: detailSelection.scopeLabel,
+                    onClose: { detailSelection.dismiss() }
+                )
+                .environmentObject(runtimeModel)
+            }
+        }
+        .environmentObject(detailSelection)
     }
 }

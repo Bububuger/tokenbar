@@ -55,11 +55,9 @@ struct ContentView: View {
                             .environmentObject(runtimeModel)
                             .onAppear { recordRouteViewAppear(.settings) }
                     } else if runtimeModel.mainRoute == .library {
-                        ScrollView {
-                            LibraryView()
-                                .padding(TokenBarStyle.pagePadding)
-                                .onAppear { recordRouteViewAppear(.library) }
-                        }
+                        LibraryContainer()
+                            .environmentObject(runtimeModel)
+                            .onAppear { recordRouteViewAppear(.library) }
                     } else if runtimeModel.mainRoute == .savedPrompts {
                         // CL-SAVED-1: rendered outside the shared
                         // ScrollView+LazyVStack chassis. Nesting a single

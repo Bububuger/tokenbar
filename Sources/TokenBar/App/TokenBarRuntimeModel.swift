@@ -450,9 +450,24 @@ final class TokenBarRuntimeModel: ObservableObject {
         }
     }
 
-    /// Called by the popover after the user clicks the post-download
-    /// "Install" affordance. Returns the local DMG URL the view should
-    /// hand off to `NSWorkspace.open` (which mounts it + opens Finder).
+    /// Mount the downloaded DMG, replace the running .app in-place, and
+    /// relaunch. Called when the user clicks "Restart" after a successful
+    /// download. On success the current process exits and the new version
+    /// starts; on failure the download state flips to `.failed`.
+    func performInstallAndRelaunch() {
+        guard case .completed(let dmgURL) = updateDownloadState else { return }
+        let bundleURL = Bundle.main.bundleURL
+        Task {
+            do {
+                try await updateDownloader.installAndRelaunch(dmgPath: dmgURL, appBundleURL: bundleURL)
+            } catch {
+                await MainActor.run {
+                    self.updateDownloadState = .failed(message: error.localizedDescription)
+                }
+            }
+        }
+    }
+
     func consumeCompletedUpdate() -> URL? {
         if case .completed(let url) = updateDownloadState {
             return url

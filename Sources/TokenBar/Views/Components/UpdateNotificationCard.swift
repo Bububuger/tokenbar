@@ -87,11 +87,11 @@ struct UpdateNotificationCard: View {
 
         case .completed:
             Button("安装更新") {
-                openDownloadedDMG()
+                runtimeModel.performInstallAndRelaunch()
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
-            .help("打开下载的 DMG，将 TokenBar.app 拖到 /Applications/")
+            .help("安装新版本并重启 TokenBar")
 
         case .failed:
             Button("重试下载") {
@@ -103,10 +103,6 @@ struct UpdateNotificationCard: View {
         }
     }
 
-    private func openDownloadedDMG() {
-        guard let dmg = runtimeModel.consumeCompletedUpdate() else { return }
-        NSWorkspace.shared.open(dmg)
-    }
 }
 
 // MARK: - Preview

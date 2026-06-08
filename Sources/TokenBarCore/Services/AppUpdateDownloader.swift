@@ -26,15 +26,8 @@ public struct DownloadMetrics: Sendable, Equatable {
     }
 }
 
-/// Lightweight non-Sparkle updater. The chosen design (see refactor notes):
-/// click → URLSession download with progress → save to ~/Downloads → caller
-/// `NSWorkspace.open` the DMG. The user then drags TokenBar.app to
-/// /Applications/ themselves and relaunches. No code-signing dance.
-///
-/// What this intentionally does NOT do:
-/// - SHA256 verification (relies on TLS to github.com)
-/// - in-place replace + relaunch (would need Developer ID + notarization)
-/// - background unattended install
+/// Lightweight non-Sparkle updater. Downloads the DMG, then mounts it,
+/// replaces the running .app in-place, and relaunches.
 public actor AppUpdateDownloader {
     public typealias ProgressHandler = @Sendable (Double) -> Void
 
@@ -65,6 +58,96 @@ public actor AppUpdateDownloader {
         return try await withCheckedThrowingContinuation { continuation in
             delegate.completion = continuation
             session.downloadTask(with: dmgURL).resume()
+        }
+    }
+
+    /// Mount the downloaded DMG, replace the running .app, unmount, and
+    /// relaunch. Call from MainActor — the `exit(0)` at the end terminates
+    /// the current process.
+    public func installAndRelaunch(dmgPath: URL, appBundleURL: URL) async throws {
+        let mountPoint = try await mountDMG(dmgPath)
+        defer { Task { try? await unmountDMG(mountPoint) } }
+
+        let fm = FileManager.default
+        let candidates = try fm.contentsOfDirectory(at: mountPoint, includingPropertiesForKeys: nil)
+        guard let newApp = candidates.first(where: { $0.lastPathComponent.hasSuffix(".app") }) else {
+            throw AppUpdateError.noAppInDMG
+        }
+
+        let destination = appBundleURL
+        let backup = destination.deletingLastPathComponent()
+            .appendingPathComponent(".TokenBar.app.bak", isDirectory: true)
+
+        // Remove any stale backup from a previous attempt.
+        try? fm.removeItem(at: backup)
+
+        // Rename current → backup, copy new → destination.
+        try fm.moveItem(at: destination, to: backup)
+        do {
+            try fm.copyItem(at: newApp, to: destination)
+        } catch {
+            // Restore backup on failure.
+            try? fm.moveItem(at: backup, to: destination)
+            throw AppUpdateError.copyFailed(error.localizedDescription)
+        }
+
+        // Clean up backup and downloaded DMG.
+        try? fm.removeItem(at: backup)
+        try? fm.removeItem(at: dmgPath)
+
+        // Unmount before relaunch.
+        try? await unmountDMG(mountPoint)
+
+        // Relaunch the new app and exit this process.
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-n", destination.path]
+        try process.run()
+        exit(0)
+    }
+
+    private func mountDMG(_ path: URL) async throws -> URL {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+        process.arguments = ["attach", path.path, "-nobrowse", "-noverify", "-noautoopen", "-plist"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw AppUpdateError.mountFailed
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let entities = plist["system-entities"] as? [[String: Any]],
+              let mountPath = entities.compactMap({ $0["mount-point"] as? String }).first else {
+            throw AppUpdateError.mountFailed
+        }
+        return URL(fileURLWithPath: mountPath)
+    }
+
+    private func unmountDMG(_ mountPoint: URL) async throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+        process.arguments = ["detach", mountPoint.path, "-quiet"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+    }
+}
+
+public enum AppUpdateError: LocalizedError {
+    case noAppInDMG
+    case mountFailed
+    case copyFailed(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .noAppInDMG: return "No .app found in DMG"
+        case .mountFailed: return "Failed to mount DMG"
+        case .copyFailed(let msg): return "Failed to copy app: \(msg)"
         }
     }
 }

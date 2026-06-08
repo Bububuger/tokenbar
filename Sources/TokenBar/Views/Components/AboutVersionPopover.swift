@@ -481,15 +481,10 @@ struct AboutVersionPopover: View {
     }
 
     private func beginRestart() {
-        let version = latestVersion
-        runtimeModel.restartTargetVersion = version
-        // Fire the real action: open the downloaded DMG (mounts + reveals in
-        // Finder). The overlay is purely cosmetic theater on top of this.
-        if let dmg = runtimeModel.consumeCompletedUpdate() {
-            NSWorkspace.shared.open(dmg)
-        }
+        runtimeModel.restartTargetVersion = latestVersion
         transient = .restarting
         withAnimation { runtimeModel.isRestartTheaterActive = true }
+        runtimeModel.performInstallAndRelaunch()
     }
 
     private func copyBuild() {

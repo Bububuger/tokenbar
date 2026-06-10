@@ -26,6 +26,7 @@ enum LibraryTab: String, CaseIterable {
     case skills
     case plugins
     case mcp
+    case tools
 }
 
 struct LibrarySkillItem: Identifiable {
@@ -326,35 +327,48 @@ private struct LibraryTabSelector: View {
     let skillDirs: [LibrarySkillDir]
     let plugins: [LibraryPluginItem]
     let mcpDirs: [LibraryMcpDir]
+    let cliTools: [ScannedCLITool]
 
     private var totalSkills: Int { skillDirs.reduce(0) { $0 + $1.items.count } }
     private var totalPlugins: Int { plugins.count }
     private var allMcp: [LibraryMcpItem] { mcpDirs.flatMap(\.items) }
     private var mcpTokens: Double { allMcp.reduce(0) { $0 + $1.tokens } }
+    private var outdatedCount: Int { cliTools.filter(\.isOutdated).count }
 
     var body: some View {
-        HStack(spacing: 8) {
-            tabItem(
-                tab: .skills,
-                icon: "book.closed",
-                label: "Skills",
-                count: totalSkills,
-                meta: "\(skillDirs.count) directories"
-            )
-            tabItem(
-                tab: .plugins,
-                icon: "powerplug",
-                label: "Plugins",
-                count: totalPlugins,
-                meta: "\(totalPlugins) installed"
-            )
-            tabItem(
-                tab: .mcp,
-                icon: "circle.grid.cross",
-                label: "MCP",
-                count: allMcp.count,
-                meta: "\(String(format: "%.1f", mcpTokens))K est. context"
-            )
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                tabItem(
+                    tab: .skills,
+                    icon: "book.closed",
+                    label: "Skills",
+                    count: totalSkills,
+                    meta: "\(skillDirs.count) directories"
+                )
+                tabItem(
+                    tab: .plugins,
+                    icon: "powerplug",
+                    label: "Plugins",
+                    count: totalPlugins,
+                    meta: "\(totalPlugins) installed"
+                )
+            }
+            HStack(spacing: 8) {
+                tabItem(
+                    tab: .mcp,
+                    icon: "circle.grid.cross",
+                    label: "MCP",
+                    count: allMcp.count,
+                    meta: "\(String(format: "%.1f", mcpTokens))K est. context"
+                )
+                tabItem(
+                    tab: .tools,
+                    icon: "terminal",
+                    label: "CLI Tools",
+                    count: cliTools.count,
+                    meta: outdatedCount > 0 ? "\(outdatedCount) outdated" : "on system"
+                )
+            }
         }
     }
 
@@ -1354,6 +1368,197 @@ private struct MCPBody: View {
     .foregroundStyle(TokenBarStyle.input)
 }
 
+// MARK: - CLI Tools tab body
+
+private struct CLIToolsBody: View {
+    let tools: [ScannedCLITool]
+    let onRescan: () -> Void
+
+    @State private var searchText = ""
+    @State private var selectedCategory: CLIToolCategory?
+
+    private var filtered: [ScannedCLITool] {
+        var result = tools
+        if let cat = selectedCategory { result = result.filter { $0.category == cat } }
+        if !searchText.isEmpty {
+            let q = searchText.lowercased()
+            result = result.filter { $0.name.lowercased().contains(q) || ($0.description?.lowercased().contains(q) ?? false) }
+        }
+        return result
+    }
+
+    private var grouped: [(CLIToolCategory, [ScannedCLITool])] {
+        let dict = Dictionary(grouping: filtered, by: \.category)
+        return CLIToolCategory.allCases.compactMap { cat in
+            guard let items = dict[cat], !items.isEmpty else { return nil }
+            return (cat, items)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11))
+                        .foregroundStyle(TokenBarStyle.faint)
+                    TextField("Search CLI tools...", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12.5))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(TokenBarStyle.surface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(TokenBarStyle.line, lineWidth: 1))
+
+                Spacer()
+
+                categoryPills
+
+                ghostButton(icon: "arrow.clockwise", label: "Rescan", action: onRescan)
+            }
+
+            if tools.isEmpty {
+                HStack {
+                    Spacer()
+                    VStack(spacing: 8) {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 28))
+                            .foregroundStyle(TokenBarStyle.faint)
+                        Text("Click Rescan to discover CLI tools")
+                            .font(.system(size: 13))
+                            .foregroundStyle(TokenBarStyle.muted)
+                    }
+                    .padding(.vertical, 40)
+                    Spacer()
+                }
+            } else {
+                let columns = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
+                ForEach(grouped, id: \.0) { category, items in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 6) {
+                            Text(categoryLabel(category))
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .foregroundStyle(TokenBarStyle.foreground)
+                            Text("\(items.count)")
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .foregroundStyle(TokenBarStyle.faint)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(Color.white.opacity(0.06), in: Capsule())
+                        }
+                        .padding(.top, 4)
+
+                        LazyVGrid(columns: columns, spacing: 8) {
+                            ForEach(items) { tool in
+                                CLIToolCard(tool: tool)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var categoryPills: some View {
+        HStack(spacing: 4) {
+            categoryPill(nil, label: "All")
+            categoryPill(.internal, label: "Internal")
+            categoryPill(.community, label: "Community")
+            categoryPill(.custom, label: "Custom")
+        }
+    }
+
+    private func categoryPill(_ cat: CLIToolCategory?, label: String) -> some View {
+        let active = selectedCategory == cat
+        return Button { selectedCategory = cat } label: {
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .foregroundStyle(active ? TokenBarStyle.foreground : TokenBarStyle.faint)
+                .background(active ? Color.white.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func categoryLabel(_ cat: CLIToolCategory) -> String {
+        switch cat {
+        case .internal: return "Internal Tools"
+        case .community: return "Community"
+        case .custom: return "Custom"
+        }
+    }
+}
+
+// MARK: - CLI Tool card
+
+private struct CLIToolCard: View {
+    let tool: ScannedCLITool
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "terminal")
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 28, height: 28)
+                .background(categoryColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .foregroundStyle(categoryColor)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(tool.name)
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .foregroundStyle(TokenBarStyle.foreground)
+                    .lineLimit(1)
+                Text(tool.description ?? tool.path)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(TokenBarStyle.faint)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .trailing, spacing: 3) {
+                if let version = tool.version {
+                    HStack(spacing: 4) {
+                        if tool.isOutdated {
+                            Circle()
+                                .fill(Color.orange)
+                                .frame(width: 6, height: 6)
+                        }
+                        Text("v\(version)")
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .foregroundStyle(tool.isOutdated ? Color.orange : TokenBarStyle.muted)
+                    }
+                }
+                Text(tool.source.rawValue)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(TokenBarStyle.faint)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(Color.white.opacity(0.05), in: Capsule())
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(TokenBarStyle.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(isHovered ? TokenBarStyle.line : TokenBarStyle.line.opacity(0.5), lineWidth: 1)
+        )
+        .offset(y: isHovered ? -1 : 0)
+        .animation(.easeOut(duration: 0.12), value: isHovered)
+        .onHover { isHovered = $0 }
+    }
+
+    private var categoryColor: Color {
+        switch tool.category {
+        case .internal: return Color(red: 0.35, green: 0.75, blue: 1.0)
+        case .community: return TokenBarStyle.input
+        case .custom: return Color(red: 0.85, green: 0.65, blue: 0.35)
+        }
+    }
+}
+
 // MARK: - Library page
 
 struct LibraryView: View {
@@ -1363,6 +1568,7 @@ struct LibraryView: View {
     private var skillDirs: [LibrarySkillDir] { projectSkillDirs(from: runtimeModel.librarySnapshot) }
     private var plugins: [LibraryPluginItem] { projectPlugins(from: runtimeModel.librarySnapshot) }
     private var mcpDirs: [LibraryMcpDir] { projectMcpDirs(from: runtimeModel.librarySnapshot) }
+    private var cliTools: [ScannedCLITool] { runtimeModel.librarySnapshot.cliTools }
 
     var body: some View {
         VStack(alignment: .leading, spacing: TokenBarStyle.sectionSpacing) {
@@ -1375,7 +1581,8 @@ struct LibraryView: View {
                 onSelect: { selectedTab = $0 },
                 skillDirs: skillDirs,
                 plugins: plugins,
-                mcpDirs: mcpDirs
+                mcpDirs: mcpDirs,
+                cliTools: cliTools
             )
             switch selectedTab {
             case .skills:
@@ -1387,6 +1594,14 @@ struct LibraryView: View {
                 PluginsBody(plugins: plugins, onRescan: { runtimeModel.rebuildLibrarySnapshot(trigger: "manual.rescan") })
             case .mcp:
                 MCPBody(mcpDirs: mcpDirs)
+            case .tools:
+                CLIToolsBody(
+                    tools: cliTools,
+                    onRescan: { runtimeModel.scanCLITools() }
+                )
+                .onAppear {
+                    if cliTools.isEmpty { runtimeModel.scanCLITools() }
+                }
             }
         }
     }
@@ -1402,7 +1617,7 @@ struct LibraryView: View {
                         .controlSize(.small)
                 }
             }
-            Text("Skills, prompt templates, plugins, and MCP servers TokenBar can see on disk \u{2014} and what\u{2019}s currently loaded into agent context.")
+            Text("Skills, plugins, MCP servers, and CLI tools TokenBar can see on this machine.")
                 .font(.system(size: 13))
                 .foregroundStyle(TokenBarStyle.muted)
         }

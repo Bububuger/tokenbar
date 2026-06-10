@@ -52,7 +52,7 @@ public final class LibraryWatcher: @unchecked Sendable {
             pathArray as CFArray,
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
             0.5,
-            UInt32(kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagFileEvents)
+            UInt32(kFSEventStreamCreateFlagUseCFTypes)
         ) else { return }
 
         FSEventStreamSetDispatchQueue(stream, queue)
@@ -109,7 +109,7 @@ public final class LibraryWatcher: @unchecked Sendable {
             pathArray as CFArray,
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
             0.5,
-            UInt32(kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagFileEvents)
+            UInt32(kFSEventStreamCreateFlagUseCFTypes)
         ) else { return }
 
         FSEventStreamSetDispatchQueue(stream, queue)
@@ -136,7 +136,7 @@ public final class LibraryWatcher: @unchecked Sendable {
                 // Catches project-root changes (which we don't FSEvent-watch
                 // to avoid handle limits) and any FSEvents the kernel
                 // doesn't fan out (e.g. SMB mounts, sandboxed writers).
-                try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: 300 * 1_000_000_000)
                 guard !Task.isCancelled else { return }
                 await callback()
             }

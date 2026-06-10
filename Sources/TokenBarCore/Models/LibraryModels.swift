@@ -176,10 +176,71 @@ public struct ScannedClaudePlugin: Sendable, Equatable, Identifiable {
     }
 }
 
+// MARK: - CLI Tools
+
+public enum CLIToolSource: String, Codable, Sendable, Hashable {
+    case brew
+    case npm
+    case pip
+    case cargo
+    case go
+    case manual
+}
+
+public enum CLIToolCategory: String, Codable, Sendable, Hashable, CaseIterable {
+    case `internal`
+    case community
+    case custom
+}
+
+public struct ScannedCLITool: Codable, Sendable, Equatable, Identifiable {
+    public var id: String { path }
+    public let name: String
+    public let path: String
+    public let symlinkTarget: String?
+    public var version: String?
+    public var description: String?
+    public let source: CLIToolSource
+    public let category: CLIToolCategory
+    public var isOutdated: Bool
+    public var latestVersion: String?
+    public let sizeBytes: Int64
+    public let scannedAt: Date
+
+    public init(
+        name: String,
+        path: String,
+        symlinkTarget: String?,
+        version: String?,
+        description: String?,
+        source: CLIToolSource,
+        category: CLIToolCategory,
+        isOutdated: Bool = false,
+        latestVersion: String? = nil,
+        sizeBytes: Int64,
+        scannedAt: Date
+    ) {
+        self.name = name
+        self.path = path
+        self.symlinkTarget = symlinkTarget
+        self.version = version
+        self.description = description
+        self.source = source
+        self.category = category
+        self.isOutdated = isOutdated
+        self.latestVersion = latestVersion
+        self.sizeBytes = sizeBytes
+        self.scannedAt = scannedAt
+    }
+}
+
+// MARK: - Library Snapshot
+
 public struct LibrarySnapshot: Sendable, Equatable {
     public let skills: [ScannedSkill]
     public let mcpServers: [ScannedMcpServer]
     public let plugins: [ScannedClaudePlugin]
+    public let cliTools: [ScannedCLITool]
     public let conflicts: [LibraryConflict]
     public let scanStates: [LibraryScope: LibraryScanState]
     public let lastFullScanAt: Date?
@@ -189,6 +250,7 @@ public struct LibrarySnapshot: Sendable, Equatable {
         skills: [ScannedSkill],
         mcpServers: [ScannedMcpServer],
         plugins: [ScannedClaudePlugin],
+        cliTools: [ScannedCLITool] = [],
         conflicts: [LibraryConflict],
         scanStates: [LibraryScope: LibraryScanState],
         lastFullScanAt: Date?,
@@ -197,6 +259,7 @@ public struct LibrarySnapshot: Sendable, Equatable {
         self.skills = skills
         self.mcpServers = mcpServers
         self.plugins = plugins
+        self.cliTools = cliTools
         self.conflicts = conflicts
         self.scanStates = scanStates
         self.lastFullScanAt = lastFullScanAt
@@ -207,6 +270,7 @@ public struct LibrarySnapshot: Sendable, Equatable {
         skills: [],
         mcpServers: [],
         plugins: [],
+        cliTools: [],
         conflicts: [],
         scanStates: [:],
         lastFullScanAt: nil,

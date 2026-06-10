@@ -271,6 +271,7 @@ final class TokenBarRuntimeModel: ObservableObject {
     @Published private(set) var librarySnapshot: LibrarySnapshot = .empty
     private let skillScanner = SkillScanner()
     private let mcpScanner = McpScanner()
+    private let cliToolScanner = CLIToolScanner()
     private var libraryWatcher: LibraryWatcher?
     private var libraryRefreshTask: Task<Void, Never>?
 
@@ -353,6 +354,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         await loadLibraryFromCache()
         startLibraryWatcher()
         rebuildLibrarySnapshot(trigger: "bootstrap")
+        scanCLITools()
         if shouldRunInitialIndexing {
             startInitialIndexing(reason: "cold-start")
             // `indexingState` now drives the "still measuring" affordance;
@@ -1822,7 +1824,7 @@ final class TokenBarRuntimeModel: ObservableObject {
             guard let self else { return }
             await self.restartFileWatcher()
             while self.indexingState.isActive || self.activeRefreshTrigger != nil {
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: .seconds(3))
                 guard !Task.isCancelled else { return }
             }
             await self.refresh(trigger: trigger)
@@ -2735,6 +2737,7 @@ final class TokenBarRuntimeModel: ObservableObject {
                 skills: self.librarySnapshot.skills,
                 mcpServers: self.librarySnapshot.mcpServers,
                 plugins: self.librarySnapshot.plugins,
+                cliTools: self.librarySnapshot.cliTools,
                 conflicts: self.librarySnapshot.conflicts,
                 scanStates: self.librarySnapshot.scanStates,
                 lastFullScanAt: self.librarySnapshot.lastFullScanAt,
@@ -2834,6 +2837,7 @@ final class TokenBarRuntimeModel: ObservableObject {
                 skills: allSkills,
                 mcpServers: allMcp,
                 plugins: plugins,
+                cliTools: self.librarySnapshot.cliTools,
                 conflicts: conflicts,
                 scanStates: scanStates,
                 lastFullScanAt: now,
@@ -2843,6 +2847,26 @@ final class TokenBarRuntimeModel: ObservableObject {
 
             let symlinkTargets = await self.skillScanner.collectSymlinkTargets(from: allSkills)
             self.libraryWatcher?.updateSymlinkTargets(symlinkTargets)
+        }
+    }
+
+    func scanCLITools() {
+        Task { [weak self] in
+            guard let self else { return }
+            let tools = await self.cliToolScanner.scan()
+            await MainActor.run {
+                let snap = self.librarySnapshot
+                self.librarySnapshot = LibrarySnapshot(
+                    skills: snap.skills,
+                    mcpServers: snap.mcpServers,
+                    plugins: snap.plugins,
+                    cliTools: tools,
+                    conflicts: snap.conflicts,
+                    scanStates: snap.scanStates,
+                    lastFullScanAt: snap.lastFullScanAt,
+                    isScanning: snap.isScanning
+                )
+            }
         }
     }
 

@@ -34,7 +34,7 @@ public final class RecursiveFSEventsWatcher: FileWatcher, @unchecked Sendable {
         debounceNanoseconds: UInt64 = 2_000_000_000,
         streamLatency: CFTimeInterval = 0.25,
         missingRootPollNanoseconds: UInt64 = 30_000_000_000,
-        changePollNanoseconds: UInt64 = 1_000_000_000,
+        changePollNanoseconds: UInt64 = 60_000_000_000,
         onChange: @escaping @Sendable () async -> Void
     ) {
         self.paths = paths
@@ -106,8 +106,6 @@ public final class RecursiveFSEventsWatcher: FileWatcher, @unchecked Sendable {
         }
 
         let flags = FSEventStreamCreateFlags(
-            kFSEventStreamCreateFlagFileEvents |
-            kFSEventStreamCreateFlagNoDefer |
             kFSEventStreamCreateFlagUseCFTypes |
             kFSEventStreamCreateFlagWatchRoot
         )

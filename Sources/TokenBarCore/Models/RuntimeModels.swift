@@ -40,7 +40,7 @@ public enum RefreshIntervalOption: String, CaseIterable, Sendable, Hashable {
     public var refreshCadence: TimeInterval? {
         switch self {
         case .auto:
-            5
+            15
         case .oneMinute:
             60
         case .fiveMinutes:

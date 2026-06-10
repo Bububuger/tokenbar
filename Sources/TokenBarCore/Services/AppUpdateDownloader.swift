@@ -91,6 +91,15 @@ public actor AppUpdateDownloader {
             throw AppUpdateError.copyFailed(error.localizedDescription)
         }
 
+        // Strip quarantine so Gatekeeper doesn't block the new binary.
+        let xattr = Process()
+        xattr.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+        xattr.arguments = ["-r", "-d", "com.apple.quarantine", destination.path]
+        xattr.standardOutput = FileHandle.nullDevice
+        xattr.standardError = FileHandle.nullDevice
+        try? xattr.run()
+        xattr.waitUntilExit()
+
         // Clean up backup and downloaded DMG.
         try? fm.removeItem(at: backup)
         try? fm.removeItem(at: dmgPath)

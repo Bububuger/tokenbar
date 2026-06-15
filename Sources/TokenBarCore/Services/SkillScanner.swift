@@ -22,63 +22,43 @@ public actor SkillScanner {
         for item in contents {
             let resourceValues = try item.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
             let isSymlink = resourceValues.isSymbolicLink ?? false
-            let isDirectory: Bool
 
             if isSymlink {
-                let resolved = item.resolvingSymlinksInPath()
+                // Read the link destination via readlink() — does NOT access
+                // the target. Avoids macOS TCC prompts when the target lives
+                // inside ~/Documents, ~/Desktop, etc.
+                guard let targetPath = try? fm.destinationOfSymbolicLink(atPath: item.path) else {
+                    continue
+                }
+                let resolved: URL
+                if targetPath.hasPrefix("/") {
+                    resolved = URL(fileURLWithPath: targetPath, isDirectory: true)
+                } else {
+                    resolved = item.deletingLastPathComponent()
+                        .appendingPathComponent(targetPath, isDirectory: true)
+                }
                 let canonical = resolved.standardizedFileURL.path
                 if visited.contains(canonical) { continue }
                 visited.insert(canonical)
 
-                let targetExists = fm.fileExists(atPath: resolved.path)
-                if !targetExists {
-                    results.append(ScannedSkill(
-                        scope: scope,
-                        scopeRoot: root,
-                        name: item.lastPathComponent,
-                        path: item,
-                        isSymlink: true,
-                        resolvedTarget: resolved,
-                        isBroken: true,
-                        sizeBytes: 0,
-                        estimatedTokens: 0,
-                        description: nil,
-                        allowedTools: nil,
-                        pluginId: pluginId,
-                        modifiedAt: now,
-                        scannedAt: now
-                    ))
-                    continue
-                }
-                var targetIsDir: ObjCBool = false
-                fm.fileExists(atPath: resolved.path, isDirectory: &targetIsDir)
-                isDirectory = targetIsDir.boolValue
-
-                if isDirectory {
-                    let skillMd = resolved.appendingPathComponent("SKILL.md")
-                    guard fm.fileExists(atPath: skillMd.path) else { continue }
-                    let (desc, tools) = parseFrontmatter(at: skillMd)
-                    let size = recursiveSize(at: resolved, fm: fm, visited: &visited)
-                    let mtime = modifiedDate(skillMd: skillMd, dir: resolved, fm: fm)
-                    results.append(ScannedSkill(
-                        scope: scope,
-                        scopeRoot: root,
-                        name: item.lastPathComponent,
-                        path: item,
-                        isSymlink: true,
-                        resolvedTarget: resolved,
-                        isBroken: false,
-                        sizeBytes: size,
-                        estimatedTokens: Int(size / 4),
-                        description: desc,
-                        allowedTools: tools,
-                        pluginId: pluginId,
-                        modifiedAt: mtime,
-                        scannedAt: now
-                    ))
-                }
+                results.append(ScannedSkill(
+                    scope: scope,
+                    scopeRoot: root,
+                    name: item.lastPathComponent,
+                    path: item,
+                    isSymlink: true,
+                    resolvedTarget: resolved,
+                    isBroken: false,
+                    sizeBytes: 0,
+                    estimatedTokens: 0,
+                    description: nil,
+                    allowedTools: nil,
+                    pluginId: pluginId,
+                    modifiedAt: now,
+                    scannedAt: now
+                ))
             } else {
-                isDirectory = resourceValues.isDirectory ?? false
+                let isDirectory = resourceValues.isDirectory ?? false
                 if !isDirectory { continue }
 
                 let canonical = item.standardizedFileURL.path
@@ -140,7 +120,7 @@ public actor SkillScanner {
     }
 
     public func collectSymlinkTargets(from skills: [ScannedSkill]) -> [URL] {
-        skills.compactMap { $0.isSymlink && !$0.isBroken ? $0.resolvedTarget : nil }
+        []
     }
 
     private func parseFrontmatter(at url: URL) -> (description: String?, allowedTools: [String]?) {

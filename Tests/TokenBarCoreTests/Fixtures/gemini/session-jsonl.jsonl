@@ -1,0 +1,10 @@
+{"sessionId":"sess-jsonl-1","projectHash":"abc123","startTime":"2026-06-16T06:28:00.000Z","lastUpdated":"2026-06-16T06:35:00.000Z","kind":"main"}
+{"$set":{"messages":[{"id":"m-user-init","timestamp":"2026-06-16T06:28:01.000Z","type":"user","content":[{"text":"hello"}]}],"lastUpdated":"2026-06-16T06:28:01.000Z"}}
+{"id":"m-gemini-1","timestamp":"2026-06-16T06:28:05.000Z","type":"gemini","content":"Hi there!","thoughts":[{"subject":"Greeting","description":"Responding to greeting","timestamp":"2026-06-16T06:28:04.000Z"}],"tokens":{"input":100,"output":20,"cached":0,"thoughts":15,"tool":0,"total":135},"model":"gemini-3-flash-preview"}
+{"$set":{"lastUpdated":"2026-06-16T06:28:05.000Z"}}
+{"id":"m-user-2","timestamp":"2026-06-16T06:29:00.000Z","type":"user","content":[{"text":"explain code"}]}
+{"$set":{"lastUpdated":"2026-06-16T06:29:00.000Z"}}
+{"id":"m-gemini-2","timestamp":"2026-06-16T06:29:10.000Z","type":"gemini","content":"Here is the explanation...","tokens":{"input":500,"output":200,"cached":50,"total":750},"model":"gemini-2.5-pro"}
+{"$set":{"lastUpdated":"2026-06-16T06:29:10.000Z"}}
+{"id":"m-gemini-3","timestamp":"2026-06-16T06:30:00.000Z","type":"gemini","content":"Tool result","tokens":{"input":600,"output":100,"cached":30,"thoughts":50,"tool":25,"total":805},"model":"gemini-2.5-pro","toolCalls":[{"id":"tc-1","name":"readFile","args":{},"status":"completed","timestamp":"2026-06-16T06:29:55.000Z"}]}
+{"$set":{"lastUpdated":"2026-06-16T06:30:00.000Z"}}

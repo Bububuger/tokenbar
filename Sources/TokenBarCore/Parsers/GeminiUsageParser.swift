@@ -19,6 +19,11 @@ public enum GeminiUsageParser {
         projectResolver: (String) -> (projectName: String, projectPath: String?)
     ) -> ParseResult {
         let sourcePath = fileURL.path
+
+        if fileURL.pathExtension.lowercased() == "jsonl" {
+            return parseJSONL(data: data, fileURL: fileURL, projectResolver: projectResolver)
+        }
+
         guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
             return ParseResult(
                 events: [],
@@ -76,10 +81,7 @@ public enum GeminiUsageParser {
             }
 
             guard let rawInput = intValue(from: tokensObject["input"]),
-                  let rawOutput = intValue(from: tokensObject["output"]),
-                  let rawCache = intValue(from: tokensObject["cached"]),
-                  let rawThoughts = intValue(from: tokensObject["thoughts"]),
-                  let rawTool = intValue(from: tokensObject["tool"]) else {
+                  let rawOutput = intValue(from: tokensObject["output"]) else {
                 warnings.append(
                     UsageSourceWarning(
                         sourceName: "Gemini",
@@ -90,6 +92,10 @@ public enum GeminiUsageParser {
                 )
                 continue
             }
+
+            let rawCache = intValue(from: tokensObject["cached"]) ?? 0
+            let rawThoughts = intValue(from: tokensObject["thoughts"]) ?? 0
+            let rawTool = intValue(from: tokensObject["tool"]) ?? 0
 
             let inputClamp = TokenBarNumberFormatting.clampNonNegative(rawInput)
             let outputClamp = TokenBarNumberFormatting.clampNonNegative(rawOutput)
@@ -121,6 +127,118 @@ public enum GeminiUsageParser {
                 // OpenCode / Hermes convention. `tool` stays folded into
                 // outputTokens (it's the model's tool-call payload size,
                 // not a distinct reasoning dimension).
+                outputTokens: outputClamp.value + toolClamp.value,
+                cacheReadTokens: cacheClamp.value,
+                cacheCreationTokens: 0,
+                reasoningTokens: thoughtsClamp.value,
+                modelName: modelName,
+                sourcePath: sourcePath,
+                parser: .gemini,
+                confidence: 1.0
+            )
+            events.append(event)
+            lastEventId = messageID
+        }
+
+        return ParseResult(events: events, lastEventId: lastEventId, warnings: warnings)
+    }
+
+    private static func parseJSONL(
+        data: Data,
+        fileURL: URL,
+        projectResolver: (String) -> (projectName: String, projectPath: String?)
+    ) -> ParseResult {
+        let sourcePath = fileURL.path
+        let resolvedProject = projectResolver(projectSlug(from: fileURL))
+
+        guard let content = String(data: data, encoding: .utf8) else {
+            return ParseResult(
+                events: [],
+                lastEventId: nil,
+                warnings: [
+                    UsageSourceWarning(
+                        sourceName: "Gemini",
+                        sourcePath: sourcePath,
+                        lineNumber: nil,
+                        message: "failed to decode JSONL as UTF-8"
+                    )
+                ]
+            )
+        }
+
+        var sessionId: String = fileURL.deletingPathExtension().lastPathComponent
+        var events: [UsageEvent] = []
+        var warnings: [UsageSourceWarning] = []
+        var lastEventId: String?
+
+        for line in content.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            guard let lineData = trimmed.data(using: .utf8),
+                  let obj = (try? JSONSerialization.jsonObject(with: lineData)) as? [String: Any] else {
+                continue
+            }
+
+            if let sid = obj["sessionId"] as? String {
+                sessionId = sid
+                continue
+            }
+
+            if obj["$set"] != nil { continue }
+
+            guard let type = obj["type"] as? String, type == "gemini" else {
+                continue
+            }
+            guard let messageID = obj["id"] as? String else {
+                continue
+            }
+            guard let tokensObject = obj["tokens"] as? [String: Any] else {
+                continue
+            }
+
+            guard let rawInput = intValue(from: tokensObject["input"]),
+                  let rawOutput = intValue(from: tokensObject["output"]) else {
+                warnings.append(
+                    UsageSourceWarning(
+                        sourceName: "Gemini",
+                        sourcePath: sourcePath,
+                        lineNumber: nil,
+                        message: "gemini JSONL token fields are incomplete"
+                    )
+                )
+                continue
+            }
+
+            let rawCache = intValue(from: tokensObject["cached"]) ?? 0
+            let rawThoughts = intValue(from: tokensObject["thoughts"]) ?? 0
+            let rawTool = intValue(from: tokensObject["tool"]) ?? 0
+
+            let inputClamp = TokenBarNumberFormatting.clampNonNegative(rawInput)
+            let outputClamp = TokenBarNumberFormatting.clampNonNegative(rawOutput)
+            let cacheClamp = TokenBarNumberFormatting.clampNonNegative(rawCache)
+            let thoughtsClamp = TokenBarNumberFormatting.clampNonNegative(rawThoughts)
+            let toolClamp = TokenBarNumberFormatting.clampNonNegative(rawTool)
+            if inputClamp.wasNegative || outputClamp.wasNegative || cacheClamp.wasNegative || thoughtsClamp.wasNegative || toolClamp.wasNegative {
+                warnings.append(
+                    UsageSourceWarning(
+                        sourceName: "Gemini",
+                        sourcePath: sourcePath,
+                        lineNumber: nil,
+                        message: "negative token count clamped to 0"
+                    )
+                )
+            }
+
+            let modelName = obj["model"] as? String
+            let timestamp = parseTimestamp(obj["timestamp"] as? String) ?? .distantPast
+            let event = UsageEvent(
+                id: "\(sourcePath)#\(messageID)",
+                agent: .geminiCLI,
+                projectPath: resolvedProject.projectPath,
+                projectName: resolvedProject.projectName,
+                sessionId: sessionId,
+                timestamp: timestamp,
+                inputTokens: inputClamp.value,
                 outputTokens: outputClamp.value + toolClamp.value,
                 cacheReadTokens: cacheClamp.value,
                 cacheCreationTokens: 0,

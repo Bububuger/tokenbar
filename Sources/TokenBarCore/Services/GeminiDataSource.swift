@@ -35,7 +35,8 @@ public enum GeminiDataSource {
         var files: [URL] = []
         for case let url as URL in enumerator {
             guard !isDirectoryURL(url) else { continue }
-            guard url.pathExtension.lowercased() == "json" else { continue }
+            let ext = url.pathExtension.lowercased()
+            guard ext == "json" || ext == "jsonl" else { continue }
             guard url.deletingLastPathComponent().lastPathComponent == "chats" else { continue }
             files.append(url)
         }

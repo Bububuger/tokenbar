@@ -20,7 +20,7 @@
 
 cask "tokenbar" do
   version "1.8.9"
-  sha256 "44410a5c8f02b44ad60826e87d6d250bcc6e4cc3a234a954d7b089bc89d9ebcf"
+  sha256 "1fa6aebcdffc1b768d0e9f62ad9a17035e242411b5b9d7724e190c10b4ddb993"
 
   url "https://github.com/Bububuger/tokenbar/releases/download/v#{version}/TokenBar-#{version}.dmg"
   name "TokenBar"

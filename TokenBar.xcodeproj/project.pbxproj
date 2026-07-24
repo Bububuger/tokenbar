@@ -12,6 +12,7 @@
 		04A6B1D8D41488DA5AF4BB3F /* TokenNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95322CB20E0BEB0733741D67 /* TokenNormalizer.swift */; };
 		06C2218B3721A3094561C948 /* UpdateNotificationCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE7D31424C35EC07CBD88A69 /* UpdateNotificationCard.swift */; };
 		07266E8C169D80625B191574 /* DiscoveryCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E0199F0D8EFAC5FAEFCE323 /* DiscoveryCache.swift */; };
+		0D19304353393CC31B880CF1 /* GeminiUsageParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D16CF1F6DA2D0F4877571FDF /* GeminiUsageParserTests.swift */; };
 		0ED0B2EBB5AE33375CC8CF5A /* JSONLWatermarkLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6437D03BB0B04953688295F /* JSONLWatermarkLoader.swift */; };
 		0F390AE3037B06CDA9CD11C2 /* SourceDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 954D7C81CDF8CB341B04BF09 /* SourceDetailView.swift */; };
 		11BD35E76314C84AABA18971 /* Sprint9IncrementalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8350DE0668F07E1A23EFC9F4 /* Sprint9IncrementalTests.swift */; };
@@ -20,6 +21,7 @@
 		13C6A572B337CECA1363DD7B /* WarpUsageParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98C0AAB42EE381A923F00048 /* WarpUsageParserTests.swift */; };
 		19F556FC44FDA1BA8BC35444 /* Aggregation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E15456AA376C9D15A280DE88 /* Aggregation.swift */; };
 		1A79012C6BB812370D346EB8 /* RuntimeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6127B31ADF0D7B1BBA11F078 /* RuntimeModels.swift */; };
+		1B719ABACB12F3C73AA79A70 /* session-jsonl.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = B31D8E7606EBD82DEC311AFB /* session-jsonl.jsonl */; };
 		1BAB6809F771430F25D37392 /* wire.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = D88908673EC4FE13C15B0DEA /* wire.jsonl */; };
 		1DA3BCA03A603789BD427A06 /* Entry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B8FF89F768851A8BFB6A6B4 /* Entry.swift */; };
 		1E02B599A0D851901E27C5CC /* RebuildCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C13449493237EABD59A2B81 /* RebuildCommand.swift */; };
@@ -379,6 +381,7 @@
 		AD741663A590583349753736 /* Support.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support.swift; sourceTree = "<group>"; };
 		AE1C94B1FB9D02515FE1C787 /* MascotStageImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MascotStageImage.swift; sourceTree = "<group>"; };
 		AF1D514BC17CE0145D5691D9 /* PluginExecutableRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginExecutableRunner.swift; sourceTree = "<group>"; };
+		B31D8E7606EBD82DEC311AFB /* session-jsonl.jsonl */ = {isa = PBXFileReference; path = "session-jsonl.jsonl"; sourceTree = "<group>"; };
 		B3F8D6AC7BBB0B67CAC138F5 /* RestartOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestartOverlayView.swift; sourceTree = "<group>"; };
 		B56E23430BC435E83E017F97 /* PluginSqliteReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginSqliteReader.swift; sourceTree = "<group>"; };
 		B6AD6E56855D8563279DFBDE /* GeminiDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiDataSource.swift; sourceTree = "<group>"; };
@@ -397,6 +400,7 @@
 		CE68C5C4D63519C0D1AA1A2F /* TokenBarCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = TokenBarCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		CF53CB1511229F700A81202C /* de */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = de; path = de.lproj/Localizable.strings; sourceTree = "<group>"; };
 		D13104767913D669739F74BD /* PromptTemplatePreviewPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptTemplatePreviewPane.swift; sourceTree = "<group>"; };
+		D16CF1F6DA2D0F4877571FDF /* GeminiUsageParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiUsageParserTests.swift; sourceTree = "<group>"; };
 		D2D63C83D2E27F57E4F8EF28 /* Output.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Output.swift; sourceTree = "<group>"; };
 		D5DC9D8F6E2AB2712DA31A30 /* OpenCodeUsageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeUsageParser.swift; sourceTree = "<group>"; };
 		D68778F6837B8C2E0B210401 /* QoderDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QoderDataSource.swift; sourceTree = "<group>"; };
@@ -750,6 +754,7 @@
 				6C5DF4DFE321B3489A789FE9 /* CodexDataSourceTests.swift */,
 				E75B1288B8D585AEA0B93A43 /* CodexUsageParserTests.swift */,
 				185A44011F9E5B62EDA4C90C /* FixtureBundle.swift */,
+				D16CF1F6DA2D0F4877571FDF /* GeminiUsageParserTests.swift */,
 				F825B75115C033F1C045795F /* IndexRebuilderTests.swift */,
 				07CED31408E5040D3129BBEA /* KimiUsageParserTests.swift */,
 				25971C8196E6FD36EBCE0E50 /* KiroUsageParserTests.swift */,
@@ -841,6 +846,7 @@
 		D15DFA73712FBABC6886E57B /* gemini */ = {
 			isa = PBXGroup;
 			children = (
+				B31D8E7606EBD82DEC311AFB /* session-jsonl.jsonl */,
 				33A8A21792A072AF5A4A1840 /* session-multi-model.json */,
 				78DAF68F567794C4B5B5EC83 /* session-single-model.json */,
 			);
@@ -1090,6 +1096,7 @@
 				E3A0C08D009038D6F9FBA04C /* qoder-local.db in Resources */,
 				76B827F36B225ECD37A89A56 /* session-dedup.jsonl in Resources */,
 				6718F80723BE5628928F184C /* session-fallback.jsonl in Resources */,
+				1B719ABACB12F3C73AA79A70 /* session-jsonl.jsonl in Resources */,
 				58BD12D6D6D6DF687C508314 /* session-malformed.jsonl in Resources */,
 				4D6630877A6864BB59CFA5DD /* session-model-context.jsonl in Resources */,
 				B3892D97A629E40AA8CF0C07 /* session-multi-model.json in Resources */,
@@ -1267,6 +1274,7 @@
 				6C0F32B478656F6BEF315211 /* CodexDataSourceTests.swift in Sources */,
 				F9CBD82BCF1A6914DF05C097 /* CodexUsageParserTests.swift in Sources */,
 				CB8F494F7DED938C2480D7BC /* FixtureBundle.swift in Sources */,
+				0D19304353393CC31B880CF1 /* GeminiUsageParserTests.swift in Sources */,
 				723FFC2D14E02466896C58E0 /* IndexRebuilderTests.swift in Sources */,
 				B3C799038CC50BADE7A40F54 /* KimiUsageParserTests.swift in Sources */,
 				B55CF9086808208030B260AA /* KiroUsageParserTests.swift in Sources */,

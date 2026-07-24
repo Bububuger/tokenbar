@@ -45,9 +45,52 @@ public enum CodexUsageParser {
     /// time distribution while restoring the ground-truth totals.
     fileprivate struct UsageDedupKey: Equatable {
         let input: Int
-        let cache: Int
+        let cacheRead: Int
+        let cacheWrite: Int
         let output: Int
         let reasoning: Int?
+    }
+
+    private struct RawUsage: Equatable {
+        let input: Int
+        let cacheRead: Int
+        let cacheWrite: Int
+        let output: Int
+        let reasoning: Int
+        let total: Int?
+
+        var hasNegativeComponent: Bool {
+            input < 0
+                || cacheRead < 0
+                || cacheWrite < 0
+                || output < 0
+                || reasoning < 0
+                || (total ?? 0) < 0
+        }
+    }
+
+    private struct UsageDedupState {
+        let usage: UsageDedupKey
+        let cumulativeTotal: RawUsage?
+        let lineNumber: Int
+    }
+
+    private struct NormalizedUsage {
+        let input: Int
+        let cacheRead: Int
+        let cacheWrite: Int
+        let output: Int
+        let reasoning: Int?
+
+        var dedupKey: UsageDedupKey {
+            UsageDedupKey(
+                input: input,
+                cacheRead: cacheRead,
+                cacheWrite: cacheWrite,
+                output: output,
+                reasoning: reasoning
+            )
+        }
     }
 
     public static func parse(fileURL: URL) throws -> CodexParseResult {
@@ -77,7 +120,8 @@ public enum CodexUsageParser {
         var events: [UsageEvent] = []
         var prompts: [PromptRecord] = []
         var warnings: [CodexParseWarning] = []
-        var lastEmittedUsage: UsageDedupKey?
+        var lastEmittedUsage: UsageDedupState?
+        var previousTotalUsage: RawUsage?
 
         for line in lines {
             let lineNumber = line.lineNumber
@@ -101,12 +145,15 @@ public enum CodexUsageParser {
                 sessionID = payload?["id"] as? String ?? sessionID
                 projectPath = payload?["cwd"] as? String ?? projectPath
                 modelName = payload?["model"] as? String ?? modelName
+                lastEmittedUsage = nil
+                previousTotalUsage = nil
                 continue
             }
 
             if let type = object["type"] as? String, type == "turn_context" {
                 let payload = object["payload"] as? [String: Any]
                 modelName = payload?["model"] as? String ?? modelName
+                lastEmittedUsage = nil
                 continue
             }
 
@@ -119,6 +166,7 @@ public enum CodexUsageParser {
                 projectPath: projectPath
             ) {
                 prompts.append(prompt)
+                lastEmittedUsage = nil
                 continue
             }
 
@@ -137,41 +185,44 @@ public enum CodexUsageParser {
                 continue
             }
 
-            let usage = (info["last_token_usage"] as? [String: Any]) ?? (info["total_token_usage"] as? [String: Any])
-            guard let usage else {
+            let lastUsage = info["last_token_usage"] as? [String: Any]
+            let totalUsage = info["total_token_usage"] as? [String: Any]
+            guard lastUsage != nil || totalUsage != nil else {
                 warnings.append(CodexParseWarning(sourcePath: sourcePath, lineNumber: lineNumber, message: "token_count record missing usage"))
                 continue
             }
 
-            guard let rawInput = usage["input_tokens"] as? Int,
-                  let rawCache = usage["cached_input_tokens"] as? Int,
-                  let rawOutput = usage["output_tokens"] as? Int else {
+            let parsed = normalizeUsage(
+                lastUsage: lastUsage,
+                totalUsage: totalUsage,
+                previousTotalUsage: &previousTotalUsage
+            )
+            guard let normalized = parsed.usage else {
                 warnings.append(CodexParseWarning(sourcePath: sourcePath, lineNumber: lineNumber, message: "token_count usage fields are incomplete"))
                 continue
             }
-            // CL-P0-029: defensive clamp matches ClaudeUsageParser.
-            let inputClamp = TokenBarNumberFormatting.clampNonNegative(rawInput)
-            let outputClamp = TokenBarNumberFormatting.clampNonNegative(rawOutput)
-            let cacheClamp = TokenBarNumberFormatting.clampNonNegative(rawCache)
-            if inputClamp.wasNegative || outputClamp.wasNegative || cacheClamp.wasNegative {
+            if parsed.hadNegativeValue {
                 warnings.append(CodexParseWarning(sourcePath: sourcePath, lineNumber: lineNumber, message: "negative token count clamped to 0"))
             }
-            let inputTokens = inputClamp.value
-            let outputTokens = outputClamp.value
-            let cacheTokens = cacheClamp.value
-            let reasoningTokens = usage["reasoning_output_tokens"] as? Int
+            guard !parsed.isSynthetic else { continue }
 
             // Codex emits the same `last_token_usage` twice within ~7 lines
             // (initial + render-complete). Skip exact-match repeats to avoid
             // the 1.16-1.19× over-count observed on real rollouts.
-            let dedupKey = UsageDedupKey(
-                input: inputTokens, cache: cacheTokens,
-                output: outputTokens, reasoning: reasoningTokens
-            )
-            if let prior = lastEmittedUsage, prior == dedupKey {
+            let dedupKey = normalized.dedupKey
+            if isDuplicate(
+                usage: dedupKey,
+                cumulativeTotal: parsed.cumulativeTotal,
+                lineNumber: lineNumber,
+                prior: lastEmittedUsage
+            ) {
                 continue
             }
-            lastEmittedUsage = dedupKey
+            lastEmittedUsage = UsageDedupState(
+                usage: dedupKey,
+                cumulativeTotal: parsed.cumulativeTotal,
+                lineNumber: lineNumber
+            )
 
             let timestamp = parseTimestamp(object["timestamp"] as? String) ?? .distantPast
             let normalizedProjectPath = projectPath
@@ -188,11 +239,11 @@ public enum CodexUsageParser {
                     projectName: normalizedProjectName,
                     sessionId: sessionID ?? fileURL.deletingPathExtension().lastPathComponent,
                     timestamp: timestamp,
-                    inputTokens: inputTokens,
-                    outputTokens: outputTokens,
-                    cacheReadTokens: cacheTokens,
-                    cacheCreationTokens: 0,
-                    reasoningTokens: reasoningTokens,
+                    inputTokens: normalized.input,
+                    outputTokens: normalized.output,
+                    cacheReadTokens: normalized.cacheRead,
+                    cacheCreationTokens: normalized.cacheWrite,
+                    reasoningTokens: normalized.reasoning,
                     modelName: modelName,
                     sourcePath: sourcePath,
                     parser: .codex,
@@ -219,7 +270,8 @@ public enum CodexUsageParser {
         var events: [UsageEvent] = []
         var prompts: [PromptRecord] = []
         var warnings: [CodexParseWarning] = []
-        var lastEmittedUsage: UsageDedupKey?
+        var lastEmittedUsage: UsageDedupState?
+        var previousTotalUsage: RawUsage?
         var sliceStartedAt = Date()
         var linesSinceThrottle = 0
 
@@ -245,9 +297,12 @@ public enum CodexUsageParser {
                 sessionID = payload?["id"] as? String ?? sessionID
                 projectPath = payload?["cwd"] as? String ?? projectPath
                 modelName = payload?["model"] as? String ?? modelName
+                lastEmittedUsage = nil
+                previousTotalUsage = nil
             } else if let type = object["type"] as? String, type == "turn_context" {
                 let payload = object["payload"] as? [String: Any]
                 modelName = payload?["model"] as? String ?? modelName
+                lastEmittedUsage = nil
             } else if let prompt = extractUserPrompt(
                 object: object,
                 sourcePath: sourcePath,
@@ -257,6 +312,7 @@ public enum CodexUsageParser {
                 projectPath: projectPath
             ) {
                 prompts.append(prompt)
+                lastEmittedUsage = nil
             } else if let type = object["type"] as? String, type == "event_msg",
                       let payload = object["payload"] as? [String: Any],
                       let payloadType = payload["type"] as? String,
@@ -266,37 +322,44 @@ public enum CodexUsageParser {
                     continue
                 }
 
-                let usage = (info["last_token_usage"] as? [String: Any]) ?? (info["total_token_usage"] as? [String: Any])
-                guard let usage else {
+                let lastUsage = info["last_token_usage"] as? [String: Any]
+                let totalUsage = info["total_token_usage"] as? [String: Any]
+                guard lastUsage != nil || totalUsage != nil else {
                     warnings.append(CodexParseWarning(sourcePath: sourcePath, lineNumber: lineNumber, message: "token_count record missing usage"))
                     continue
                 }
 
-                guard let rawInput = usage["input_tokens"] as? Int,
-                      let rawCache = usage["cached_input_tokens"] as? Int,
-                      let rawOutput = usage["output_tokens"] as? Int else {
+                let parsed = normalizeUsage(
+                    lastUsage: lastUsage,
+                    totalUsage: totalUsage,
+                    previousTotalUsage: &previousTotalUsage
+                )
+                guard let normalized = parsed.usage else {
                     warnings.append(CodexParseWarning(sourcePath: sourcePath, lineNumber: lineNumber, message: "token_count usage fields are incomplete"))
                     continue
                 }
-                let inputClamp = TokenBarNumberFormatting.clampNonNegative(rawInput)
-                let outputClamp = TokenBarNumberFormatting.clampNonNegative(rawOutput)
-                let cacheClamp = TokenBarNumberFormatting.clampNonNegative(rawCache)
-                if inputClamp.wasNegative || outputClamp.wasNegative || cacheClamp.wasNegative {
+                if parsed.hadNegativeValue {
                     warnings.append(CodexParseWarning(sourcePath: sourcePath, lineNumber: lineNumber, message: "negative token count clamped to 0"))
                 }
-                let reasoningTokens = usage["reasoning_output_tokens"] as? Int
+                guard !parsed.isSynthetic else { continue }
 
                 // Dedup back-to-back identical token_count emissions
                 // (Codex emits the same `last_token_usage` twice). See
                 // `UsageDedupKey` docs.
-                let dedupKey = UsageDedupKey(
-                    input: inputClamp.value, cache: cacheClamp.value,
-                    output: outputClamp.value, reasoning: reasoningTokens
-                )
-                if let prior = lastEmittedUsage, prior == dedupKey {
+                let dedupKey = normalized.dedupKey
+                if isDuplicate(
+                    usage: dedupKey,
+                    cumulativeTotal: parsed.cumulativeTotal,
+                    lineNumber: lineNumber,
+                    prior: lastEmittedUsage
+                ) {
                     // skip duplicate; still counts as a throttle line below
                 } else {
-                    lastEmittedUsage = dedupKey
+                    lastEmittedUsage = UsageDedupState(
+                        usage: dedupKey,
+                        cumulativeTotal: parsed.cumulativeTotal,
+                        lineNumber: lineNumber
+                    )
                     let timestamp = parseTimestamp(object["timestamp"] as? String) ?? .distantPast
                     let normalizedProjectPath = projectPath
                     let normalizedProjectName = normalizedProjectPath
@@ -312,11 +375,11 @@ public enum CodexUsageParser {
                             projectName: normalizedProjectName,
                             sessionId: sessionID ?? fileURL.deletingPathExtension().lastPathComponent,
                             timestamp: timestamp,
-                            inputTokens: inputClamp.value,
-                            outputTokens: outputClamp.value,
-                            cacheReadTokens: cacheClamp.value,
-                            cacheCreationTokens: 0,
-                            reasoningTokens: reasoningTokens,
+                            inputTokens: normalized.input,
+                            outputTokens: normalized.output,
+                            cacheReadTokens: normalized.cacheRead,
+                            cacheCreationTokens: normalized.cacheWrite,
+                            reasoningTokens: normalized.reasoning,
                             modelName: modelName,
                             sourcePath: sourcePath,
                             parser: .codex,
@@ -342,6 +405,155 @@ public enum CodexUsageParser {
         }
 
         return CodexParseResult(events: events, prompts: prompts, warnings: warnings)
+    }
+
+    private static func normalizeUsage(
+        lastUsage: [String: Any]?,
+        totalUsage: [String: Any]?,
+        previousTotalUsage: inout RawUsage?
+    ) -> (usage: NormalizedUsage?, cumulativeTotal: RawUsage?, hadNegativeValue: Bool, isSynthetic: Bool) {
+        let parsedTotal = totalUsage.flatMap(parseRawUsage)
+        defer {
+            if let parsedTotal {
+                previousTotalUsage = parsedTotal
+            }
+        }
+
+        let raw: RawUsage
+        if let lastUsage {
+            guard let parsedLast = parseRawUsage(lastUsage) else {
+                return (nil, parsedTotal, false, false)
+            }
+            raw = parsedLast
+        } else if let parsedTotal {
+            if let previous = previousTotalUsage, !didReset(current: parsedTotal, previous: previous) {
+                raw = RawUsage(
+                    input: max(parsedTotal.input - previous.input, 0),
+                    cacheRead: max(parsedTotal.cacheRead - previous.cacheRead, 0),
+                    cacheWrite: max(parsedTotal.cacheWrite - previous.cacheWrite, 0),
+                    output: max(parsedTotal.output - previous.output, 0),
+                    reasoning: max(parsedTotal.reasoning - previous.reasoning, 0),
+                    total: parsedTotal.total.flatMap { current in
+                        previous.total.map { max(current - $0, 0) }
+                    }
+                )
+            } else {
+                raw = parsedTotal
+            }
+        } else {
+            return (nil, parsedTotal, false, false)
+        }
+
+        let inputClamp = TokenBarNumberFormatting.clampNonNegative(raw.input)
+        let readClamp = TokenBarNumberFormatting.clampNonNegative(raw.cacheRead)
+        let writeClamp = TokenBarNumberFormatting.clampNonNegative(raw.cacheWrite)
+        let outputClamp = TokenBarNumberFormatting.clampNonNegative(raw.output)
+        let reasoningClamp = TokenBarNumberFormatting.clampNonNegative(raw.reasoning)
+        let hadNegativeValue = inputClamp.wasNegative
+            || readClamp.wasNegative
+            || writeClamp.wasNegative
+            || outputClamp.wasNegative
+            || reasoningClamp.wasNegative
+
+        let rawInput = inputClamp.value
+        // Codex reports cache read/write as input classifications. Constrain
+        // malformed classifications to the reported input so normalization is
+        // both mutually exclusive and safe from Int subtraction overflow.
+        let cacheRead = min(readClamp.value, rawInput)
+        let inputAfterRead = rawInput - cacheRead
+        let cacheWrite = min(writeClamp.value, inputAfterRead)
+        let rawOutput = outputClamp.value
+        let reasoning = reasoningClamp.value
+        let isSynthetic = rawInput == 0
+            && cacheRead == 0
+            && cacheWrite == 0
+            && rawOutput == 0
+            && (raw.total ?? 0) > 0
+        let output = reportedTotalIncludesSeparateReasoning(
+            total: raw.total,
+            input: rawInput,
+            output: rawOutput,
+            reasoning: reasoning
+        ) ? rawOutput + reasoning : rawOutput
+
+        return (
+            NormalizedUsage(
+                input: inputAfterRead - cacheWrite,
+                cacheRead: cacheRead,
+                cacheWrite: cacheWrite,
+                output: output,
+                reasoning: reasoning,
+            ),
+            parsedTotal,
+            hadNegativeValue,
+            isSynthetic
+        )
+    }
+
+    private static func isDuplicate(
+        usage: UsageDedupKey,
+        cumulativeTotal: RawUsage?,
+        lineNumber: Int,
+        prior: UsageDedupState?
+    ) -> Bool {
+        guard let prior, prior.usage == usage else { return false }
+        if let cumulativeTotal, let priorTotal = prior.cumulativeTotal {
+            return cumulativeTotal == priorTotal
+        }
+        guard cumulativeTotal == nil, prior.cumulativeTotal == nil else {
+            return false
+        }
+        // Legacy records may omit total_token_usage. Limit the fallback
+        // heuristic to the observed duplicate-render window so a later,
+        // legitimately identical completion is not dropped.
+        return lineNumber > prior.lineNumber && lineNumber - prior.lineNumber <= 12
+    }
+
+    private static func parseRawUsage(_ usage: [String: Any]) -> RawUsage? {
+        guard let input = usage["input_tokens"] as? Int,
+              let cacheRead = usage["cached_input_tokens"] as? Int,
+              let output = usage["output_tokens"] as? Int else {
+            return nil
+        }
+        return RawUsage(
+            input: input,
+            cacheRead: cacheRead,
+            cacheWrite: usage["cache_write_input_tokens"] as? Int ?? 0,
+            output: output,
+            reasoning: usage["reasoning_output_tokens"] as? Int ?? 0,
+            total: usage["total_tokens"] as? Int
+        )
+    }
+
+    private static func didReset(current: RawUsage, previous: RawUsage) -> Bool {
+        // Subtracting a negative cumulative counter from a large positive
+        // counter can overflow Int. A negative counter is malformed anyway,
+        // so treat that boundary as a reset and let the normal clamp path
+        // sanitize the current record.
+        if current.hasNegativeComponent || previous.hasNegativeComponent {
+            return true
+        }
+        if let currentTotal = current.total, let previousTotal = previous.total {
+            return currentTotal < previousTotal
+        }
+        return current.input < previous.input
+            || current.cacheRead < previous.cacheRead
+            || current.cacheWrite < previous.cacheWrite
+            || current.output < previous.output
+            || current.reasoning < previous.reasoning
+    }
+
+    private static func reportedTotalIncludesSeparateReasoning(
+        total: Int?,
+        input: Int,
+        output: Int,
+        reasoning: Int
+    ) -> Bool {
+        guard reasoning > 0, let total else { return false }
+        let (inputAndOutput, overflowed) = input.addingReportingOverflow(output)
+        guard !overflowed else { return false }
+        let (legacyTotal, reasoningOverflowed) = inputAndOutput.addingReportingOverflow(reasoning)
+        return !reasoningOverflowed && total == legacyTotal
     }
 
     public static func sessionContext(fileURL: URL) -> (sessionID: String?, projectPath: String?) {

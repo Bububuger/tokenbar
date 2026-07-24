@@ -4,7 +4,7 @@ import TokenBarCore
 
 /// Model drill-in (design §03c · model-detail.jsx). Scopes everything to a
 /// single model: KPIs, range bars, a Project Share donut + a Token Breakdown
-/// card (input/output/cache split + cache-hit badge), a Pricing card, and
+/// card (uncached input/output/cache read/cache write split), a Pricing card, and
 /// recent sessions tagged with the source. All numbers come from real indexed
 /// events for the model.
 struct ModelDetailView: View {
@@ -102,9 +102,9 @@ struct ModelDetailView: View {
     private var kpiRow: some View {
         HStack(spacing: TokenBarStyle.sectionSpacing) {
             TokenBarKPI(title: "Total", value: tokenbarTokens(metrics.rangeSummary.totalTokens), meta: tokenbarRangeShortLabel(selectedRange), color: TokenBarStyle.muted)
-            TokenBarKPI(title: "Input", value: tokenbarTokens(metrics.rangeSummary.inputTokens), meta: "model input", color: TokenBarStyle.input)
+            TokenBarKPI(title: "Input", value: tokenbarTokens(metrics.rangeSummary.totalInputTokens), meta: "total model input", color: TokenBarStyle.input)
             TokenBarKPI(title: "Output", value: tokenbarTokens(metrics.rangeSummary.outputTokens), meta: "model output", color: TokenBarStyle.output)
-            TokenBarKPI(title: "Cache", value: tokenbarTokens(metrics.rangeSummary.cacheTokens), meta: "model cache", color: TokenBarStyle.cache)
+            TokenBarKPI(title: "Cache read", value: tokenbarTokens(metrics.rangeSummary.cacheReadTokens), meta: "\(tokenbarPercent(metrics.rangeSummary.cacheReadRate)) input cached", color: TokenBarStyle.cache)
         }
     }
 
@@ -145,16 +145,15 @@ struct ModelDetailView: View {
 
 // MARK: - Token Breakdown card (design §03c)
 
-/// Input / Output / Cache split for the model, with a stacked bar and a
-/// cache-hit-rate pill. Mirrors the `TokenBreakdownCard` in model-detail.jsx.
+/// Mutually exclusive uncached input / output / cache read / cache write split.
 struct TokenBreakdownCard: View {
     let summary: UsageSummary
 
     private var total: Int { max(summary.totalTokens, 1) }
     private var inPct: Double { Double(summary.inputTokens) / Double(total) }
     private var outPct: Double { Double(summary.outputTokens) / Double(total) }
-    private var cachePct: Double { Double(summary.cacheTokens) / Double(total) }
-    private var cacheRatio: Double { summary.totalTokens > 0 ? Double(summary.cacheTokens) / Double(summary.totalTokens) : 0 }
+    private var cacheReadPct: Double { Double(summary.cacheReadTokens) / Double(total) }
+    private var cacheWritePct: Double { Double(summary.cacheCreationTokens) / Double(total) }
 
     var body: some View {
         TokenBarCard {
@@ -162,15 +161,17 @@ struct TokenBreakdownCard: View {
                 Text("Token Breakdown")
                     .font(.system(size: 16, weight: .semibold, design: .rounded))
                 HStack(alignment: .top, spacing: 12) {
-                    breakdownColumn("Input", value: summary.inputTokens, pct: inPct, color: TokenBarStyle.input)
+                    breakdownColumn("Uncached input", value: summary.inputTokens, pct: inPct, color: TokenBarStyle.input)
                     breakdownColumn("Output", value: summary.outputTokens, pct: outPct, color: TokenBarStyle.output)
-                    breakdownColumn("Cache", value: summary.cacheTokens, pct: cachePct, color: TokenBarStyle.cache)
+                    breakdownColumn("Cache read", value: summary.cacheReadTokens, pct: cacheReadPct, color: TokenBarStyle.cache)
+                    breakdownColumn("Cache write", value: summary.cacheCreationTokens, pct: cacheWritePct, color: TokenBarStyle.cache.opacity(0.55))
                 }
                 GeometryReader { geo in
                     HStack(spacing: 0) {
                         Rectangle().fill(TokenBarStyle.input).frame(width: geo.size.width * inPct)
                         Rectangle().fill(TokenBarStyle.output).frame(width: geo.size.width * outPct)
-                        Rectangle().fill(TokenBarStyle.cache).frame(width: geo.size.width * cachePct)
+                        Rectangle().fill(TokenBarStyle.cache).frame(width: geo.size.width * cacheReadPct)
+                        Rectangle().fill(TokenBarStyle.cache.opacity(0.55)).frame(width: geo.size.width * cacheWritePct)
                         Rectangle().fill(TokenBarStyle.line)
                     }
                 }
@@ -178,7 +179,7 @@ struct TokenBreakdownCard: View {
                 .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
                 HStack {
                     Spacer()
-                    Text("\(Int((cacheRatio * 100).rounded()))% cache hit")
+                    Text("\(tokenbarPercent(summary.cacheReadRate)) input served from cache")
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundStyle(TokenBarStyle.cache)
                         .padding(.horizontal, 10)

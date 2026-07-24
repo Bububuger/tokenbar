@@ -310,7 +310,7 @@ struct DiagnosticsView: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Token Data Audit")
                                 .font(.system(size: 16, weight: .semibold, design: .rounded))
-                            Text("Indexed raw totals by configured source. Cache share is calculated from stored usage_events.")
+                            Text("Input includes uncached, cache read, and cache write tokens. Read rate is cache read divided by total input.")
                                 .font(.caption2)
                                 .foregroundStyle(TokenBarStyle.muted)
                         }
@@ -328,20 +328,22 @@ struct DiagnosticsView: View {
                             auditHead("Source", align: .leading)
                             auditHead("Input")
                             auditHead("Output")
-                            auditHead("Cache")
-                            auditHead("Cache %")
+                            auditHead("Cache read")
+                            auditHead("Cache write")
+                            auditHead("Read %")
                         }
-                        Divider().gridCellColumns(5).overlay(TokenBarStyle.line)
+                        Divider().gridCellColumns(6).overlay(TokenBarStyle.line)
                         ForEach(dataAuditRows) { row in
                             GridRow {
                                 auditCell(row.name, align: .leading)
                                 auditCell(row.input)
                                 auditCell(row.output, color: TokenBarStyle.output)
-                                auditCell(row.cache, color: TokenBarStyle.cache)
-                                auditCell(row.cacheShare, color: row.cacheShareValue < 0.10 ? TokenBarStyle.warn : TokenBarStyle.muted)
+                                auditCell(row.cacheRead, color: TokenBarStyle.cache)
+                                auditCell(row.cacheWrite, color: TokenBarStyle.cache.opacity(0.65))
+                                auditCell(row.cacheReadRate, color: row.cacheReadRateValue < 0.10 ? TokenBarStyle.warn : TokenBarStyle.muted)
                             }
                             .padding(.vertical, 8)
-                            Divider().gridCellColumns(5).overlay(TokenBarStyle.line.opacity(0.55))
+                            Divider().gridCellColumns(6).overlay(TokenBarStyle.line.opacity(0.55))
                         }
                     }
                 }
@@ -421,7 +423,7 @@ struct DiagnosticsView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Token Data Audit")
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        Text("Indexed raw totals by configured source. Cache share is calculated from stored usage_events.")
+                        Text("Input includes uncached, cache read, and cache write tokens. Read rate is cache read divided by total input.")
                             .font(.caption2)
                             .foregroundStyle(TokenBarStyle.muted)
                     }
@@ -439,20 +441,22 @@ struct DiagnosticsView: View {
                         auditHead("Source", align: .leading)
                         auditHead("Input")
                         auditHead("Output")
-                        auditHead("Cache")
-                        auditHead("Cache %")
+                        auditHead("Cache read")
+                        auditHead("Cache write")
+                        auditHead("Read %")
                     }
-                    Divider().gridCellColumns(5).overlay(TokenBarStyle.line)
+                    Divider().gridCellColumns(6).overlay(TokenBarStyle.line)
                     ForEach(dataAuditRows) { row in
                         GridRow {
                             auditCell(row.name, align: .leading)
                             auditCell(row.input)
                             auditCell(row.output, color: TokenBarStyle.output)
-                            auditCell(row.cache, color: TokenBarStyle.cache)
-                            auditCell(row.cacheShare, color: row.cacheShareValue < 0.10 ? TokenBarStyle.warn : TokenBarStyle.muted)
+                            auditCell(row.cacheRead, color: TokenBarStyle.cache)
+                            auditCell(row.cacheWrite, color: TokenBarStyle.cache.opacity(0.65))
+                            auditCell(row.cacheReadRate, color: row.cacheReadRateValue < 0.10 ? TokenBarStyle.warn : TokenBarStyle.muted)
                         }
                         .padding(.vertical, 8)
-                        Divider().gridCellColumns(5).overlay(TokenBarStyle.line.opacity(0.55))
+                        Divider().gridCellColumns(6).overlay(TokenBarStyle.line.opacity(0.55))
                     }
                 }
             }
@@ -1102,17 +1106,15 @@ private struct DataAuditRow: Identifiable, Sendable, Hashable {
     let name: String
     let summary: UsageSummary
 
-    var input: String { tokenbarCompactTokens(summary.inputTokens) }
+    var input: String { tokenbarCompactTokens(summary.totalInputTokens) }
     var output: String { tokenbarCompactTokens(summary.outputTokens) }
-    var cache: String { tokenbarCompactTokens(summary.cacheTokens) }
+    var cacheRead: String { tokenbarCompactTokens(summary.cacheReadTokens) }
+    var cacheWrite: String { tokenbarCompactTokens(summary.cacheCreationTokens) }
 
-    var cacheShareValue: Double {
-        guard summary.totalTokens > 0 else { return 0 }
-        return Double(summary.cacheTokens) / Double(summary.totalTokens)
-    }
+    var cacheReadRateValue: Double { summary.cacheReadRate }
 
-    var cacheShare: String {
-        String(format: "%.2f%%", cacheShareValue * 100)
+    var cacheReadRate: String {
+        String(format: "%.2f%%", cacheReadRateValue * 100)
     }
 }
 

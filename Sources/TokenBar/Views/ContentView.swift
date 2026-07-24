@@ -1071,7 +1071,7 @@ private struct OverviewPage: View {
     @Binding var rangeMetrics: TokenBarOverviewRangeMetrics
     @Binding var isRangeLoading: Bool
     @AppStorage("tokenbar.pricingOverrides") private var pricingOverridesJSON = "{}"
-    /// CL-P0-012: which KPI (Total / Input / Output / Cache) is currently
+    /// CL-P0-012: which KPI is currently
     /// expanded into a detail drawer. `nil` = collapsed.
     @State private var expandedKPI: String?
 
@@ -1212,9 +1212,9 @@ private struct OverviewPage: View {
     private var kpiRow: some View {
         HStack(spacing: TokenBarStyle.sectionSpacing) {
             kpiCard(title: "Total", value: runtimeModel.snapshot.today.totalTokens, meta: "today", color: TokenBarStyle.muted)
-            kpiCard(title: "Input", value: runtimeModel.snapshot.today.inputTokens, meta: inputShare, color: TokenBarStyle.input)
+            kpiCard(title: "Input", value: runtimeModel.snapshot.today.totalInputTokens, meta: inputShare, color: TokenBarStyle.input)
             kpiCard(title: "Output", value: runtimeModel.snapshot.today.outputTokens, meta: outputShare, color: TokenBarStyle.output)
-            kpiCard(title: "Cache", value: runtimeModel.snapshot.today.cacheTokens, meta: cacheShare, color: TokenBarStyle.cache)
+            kpiCard(title: "Cache read", value: runtimeModel.snapshot.today.cacheReadTokens, meta: cacheReadRate, color: TokenBarStyle.cache)
         }
     }
 
@@ -1239,9 +1239,9 @@ private struct OverviewPage: View {
 
     private func kpiToday(_ title: String) -> Int {
         switch title {
-        case "Input":  return runtimeModel.snapshot.today.inputTokens
-        case "Output": return runtimeModel.snapshot.today.outputTokens
-        case "Cache":  return runtimeModel.snapshot.today.cacheTokens
+        case "Input":      return runtimeModel.snapshot.today.totalInputTokens
+        case "Output":     return runtimeModel.snapshot.today.outputTokens
+        case "Cache read": return runtimeModel.snapshot.today.cacheReadTokens
         default:       return runtimeModel.snapshot.today.totalTokens
         }
     }
@@ -1250,9 +1250,9 @@ private struct OverviewPage: View {
         guard runtimeModel.snapshot.last30Days.count >= 2 else { return 0 }
         let yesterday = runtimeModel.snapshot.last30Days[runtimeModel.snapshot.last30Days.count - 2]
         switch title {
-        case "Input":  return yesterday.summary.inputTokens
-        case "Output": return yesterday.summary.outputTokens
-        case "Cache":  return yesterday.summary.cacheTokens
+        case "Input":      return yesterday.summary.totalInputTokens
+        case "Output":     return yesterday.summary.outputTokens
+        case "Cache read": return yesterday.summary.cacheReadTokens
         default:       return yesterday.summary.totalTokens
         }
     }
@@ -1262,9 +1262,9 @@ private struct OverviewPage: View {
         guard !window.isEmpty else { return 0 }
         let total: Int
         switch title {
-        case "Input":  total = window.reduce(0) { $0 + $1.summary.inputTokens }
-        case "Output": total = window.reduce(0) { $0 + $1.summary.outputTokens }
-        case "Cache":  total = window.reduce(0) { $0 + $1.summary.cacheTokens }
+        case "Input":      total = window.reduce(0) { $0 + $1.summary.totalInputTokens }
+        case "Output":     total = window.reduce(0) { $0 + $1.summary.outputTokens }
+        case "Cache read": total = window.reduce(0) { $0 + $1.summary.cacheReadTokens }
         default:       total = window.reduce(0) { $0 + $1.summary.totalTokens }
         }
         return total / window.count
@@ -1304,9 +1304,9 @@ private struct OverviewPage: View {
         tokenbarRangeTitle(selectedRange)
     }
 
-    private var inputShare: String { shareText(runtimeModel.snapshot.today.inputTokens, total: runtimeModel.snapshot.today.totalTokens) }
+    private var inputShare: String { shareText(runtimeModel.snapshot.today.totalInputTokens, total: runtimeModel.snapshot.today.totalTokens) }
     private var outputShare: String { shareText(runtimeModel.snapshot.today.outputTokens, total: runtimeModel.snapshot.today.totalTokens) }
-    private var cacheShare: String { shareText(runtimeModel.snapshot.today.cacheTokens, total: runtimeModel.snapshot.today.totalTokens) }
+    private var cacheReadRate: String { tokenbarPercent(runtimeModel.snapshot.today.cacheReadRate) }
 
     private func shareText(_ value: Int, total: Int) -> String {
         guard total > 0 else { return "0%" }

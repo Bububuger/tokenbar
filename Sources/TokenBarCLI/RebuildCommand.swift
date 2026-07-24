@@ -106,9 +106,13 @@ enum RebuildCommand {
             print("    - \(source.name) \(source.rootPath) — \(source.discoveredFileCount) files (\(readable))")
         }
         print("  Events: \(output.eventCount) | Prompts: \(output.promptCount)")
-        print("  Input tokens: \(output.inputTokens)")
-        print("  Output tokens: \(output.outputTokens)")
-        print("  Cache tokens: \(output.cacheTokens)")
+        let breakdown = tokenBreakdownText(
+            uncachedInputTokens: output.uncachedInputTokens,
+            outputTokens: output.outputTokens,
+            cacheReadTokens: output.cacheReadTokens,
+            cacheCreationTokens: output.cacheCreationTokens
+        )
+        print("  Tokens: \(breakdown)")
         print("  Total tokens: \(output.totalTokens)")
         print("  Checkpoint added: events \(output.checkpointEventsAdded ?? 0), prompts \(output.checkpointPromptsAdded ?? 0)")
         print("  Warnings: \(output.warningCount)")
@@ -152,6 +156,8 @@ struct RebuildOutput: Encodable {
     let eventCount: Int
     let promptCount: Int
     let inputTokens: Int
+    let uncachedInputTokens: Int
+    let totalInputTokens: Int
     let outputTokens: Int
     let cacheReadTokens: Int
     let cacheCreationTokens: Int
@@ -194,6 +200,8 @@ struct RebuildOutput: Encodable {
         self.eventCount = eventCount
         self.promptCount = promptCount
         self.inputTokens = inputTokens
+        self.uncachedInputTokens = inputTokens
+        self.totalInputTokens = inputTokens + cacheReadTokens + cacheCreationTokens
         self.outputTokens = outputTokens
         self.cacheReadTokens = cacheReadTokens
         self.cacheCreationTokens = cacheCreationTokens

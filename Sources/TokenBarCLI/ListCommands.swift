@@ -12,6 +12,8 @@ enum ProjectsCommand {
         let eventCount: Int
         let promptCount: Int
         let inputTokens: Int
+        let uncachedInputTokens: Int
+        let totalInputTokens: Int
         let outputTokens: Int
         let cacheReadTokens: Int
         let cacheCreationTokens: Int
@@ -72,6 +74,8 @@ enum ProjectsCommand {
                 eventCount: accumulator.eventCount,
                 promptCount: promptByProject[name] ?? 0,
                 inputTokens: accumulator.inputTokens,
+                uncachedInputTokens: accumulator.inputTokens,
+                totalInputTokens: accumulator.inputTokens + accumulator.cacheReadTokens + accumulator.cacheCreationTokens,
                 outputTokens: accumulator.outputTokens,
                 cacheReadTokens: accumulator.cacheReadTokens,
                 cacheCreationTokens: accumulator.cacheCreationTokens,
@@ -108,7 +112,13 @@ enum ProjectsCommand {
             printWindowSummary(options: options, databasePath: databaseURL.path)
             print("  Count: \(limited.count) (of \(total))")
             for row in limited {
-                print("  - \(row.name) total=\(row.totalTokens) (in=\(row.inputTokens) out=\(row.outputTokens) cache=\(row.cacheTokens)) events=\(row.eventCount) prompts=\(row.promptCount)")
+                let breakdown = tokenBreakdownText(
+                    uncachedInputTokens: row.uncachedInputTokens,
+                    outputTokens: row.outputTokens,
+                    cacheReadTokens: row.cacheReadTokens,
+                    cacheCreationTokens: row.cacheCreationTokens
+                )
+                print("  - \(row.name) total=\(row.totalTokens) (\(breakdown)) events=\(row.eventCount) prompts=\(row.promptCount)")
                 print("      agents: \(row.distinctAgents.joined(separator: ", "))")
                 if !row.distinctModels.isEmpty {
                     print("      models: \(row.distinctModels.joined(separator: ", "))")
@@ -206,6 +216,8 @@ enum SessionsCommand {
         let eventCount: Int
         let promptCount: Int
         let inputTokens: Int
+        let uncachedInputTokens: Int
+        let totalInputTokens: Int
         let outputTokens: Int
         let cacheReadTokens: Int
         let cacheCreationTokens: Int
@@ -310,6 +322,8 @@ enum SessionsCommand {
                 eventCount: bucket.eventCount,
                 promptCount: promptCounts[key] ?? 0,
                 inputTokens: bucket.inputTokens,
+                uncachedInputTokens: bucket.inputTokens,
+                totalInputTokens: bucket.inputTokens + bucket.cacheReadTokens + bucket.cacheCreationTokens,
                 outputTokens: bucket.outputTokens,
                 cacheReadTokens: bucket.cacheReadTokens,
                 cacheCreationTokens: bucket.cacheCreationTokens,
@@ -344,7 +358,13 @@ enum SessionsCommand {
             print("  Count: \(limited.count) (of \(total))")
             for row in limited {
                 let span = (row.firstSeen ?? "?") + ".." + (row.lastSeen ?? "?")
-                print("  \(row.sessionId) [\(row.agentDisplayName)] project=\(row.projectName) model=\(row.modelName) total=\(row.totalTokens) events=\(row.eventCount) prompts=\(row.promptCount) span=\(span)")
+                let breakdown = tokenBreakdownText(
+                    uncachedInputTokens: row.uncachedInputTokens,
+                    outputTokens: row.outputTokens,
+                    cacheReadTokens: row.cacheReadTokens,
+                    cacheCreationTokens: row.cacheCreationTokens
+                )
+                print("  \(row.sessionId) [\(row.agentDisplayName)] project=\(row.projectName) model=\(row.modelName) total=\(row.totalTokens) \(breakdown) events=\(row.eventCount) prompts=\(row.promptCount) span=\(span)")
             }
         }
     }
@@ -391,6 +411,8 @@ enum ModelsCommand {
         let distinctAgents: [String]
         let eventCount: Int
         let inputTokens: Int
+        let uncachedInputTokens: Int
+        let totalInputTokens: Int
         let outputTokens: Int
         let cacheReadTokens: Int
         let cacheCreationTokens: Int
@@ -457,6 +479,8 @@ enum ModelsCommand {
                 distinctAgents: Array(bucket.agents).sorted(),
                 eventCount: bucket.eventCount,
                 inputTokens: bucket.inputTokens,
+                uncachedInputTokens: bucket.inputTokens,
+                totalInputTokens: bucket.inputTokens + bucket.cacheReadTokens + bucket.cacheCreationTokens,
                 outputTokens: bucket.outputTokens,
                 cacheReadTokens: bucket.cacheReadTokens,
                 cacheCreationTokens: bucket.cacheCreationTokens,
@@ -492,7 +516,13 @@ enum ModelsCommand {
             printWindowSummary(options: options, databasePath: databaseURL.path)
             print("  Count: \(limited.count) (of \(total))")
             for row in limited {
-                print("  - \(row.name) total=\(row.totalTokens) events=\(row.eventCount) cost~$\(String(format: "%.4f", row.estimatedCostUSD)) (\(row.costSource)) agents=\(row.distinctAgents.joined(separator: ","))")
+                let breakdown = tokenBreakdownText(
+                    uncachedInputTokens: row.uncachedInputTokens,
+                    outputTokens: row.outputTokens,
+                    cacheReadTokens: row.cacheReadTokens,
+                    cacheCreationTokens: row.cacheCreationTokens
+                )
+                print("  - \(row.name) total=\(row.totalTokens) \(breakdown) events=\(row.eventCount) cost~$\(String(format: "%.4f", row.estimatedCostUSD)) (\(row.costSource)) agents=\(row.distinctAgents.joined(separator: ","))")
             }
         }
     }
@@ -537,6 +567,8 @@ enum AgentsCommand {
         let eventCount: Int
         let promptCount: Int
         let inputTokens: Int
+        let uncachedInputTokens: Int
+        let totalInputTokens: Int
         let outputTokens: Int
         let cacheReadTokens: Int
         let cacheCreationTokens: Int
@@ -610,6 +642,8 @@ enum AgentsCommand {
                 eventCount: bucket.eventCount,
                 promptCount: promptCounts[agent] ?? 0,
                 inputTokens: bucket.inputTokens,
+                uncachedInputTokens: bucket.inputTokens,
+                totalInputTokens: bucket.inputTokens + bucket.cacheReadTokens + bucket.cacheCreationTokens,
                 outputTokens: bucket.outputTokens,
                 cacheReadTokens: bucket.cacheReadTokens,
                 cacheCreationTokens: bucket.cacheCreationTokens,
@@ -645,7 +679,13 @@ enum AgentsCommand {
             printWindowSummary(options: options, databasePath: databaseURL.path)
             print("  Count: \(limited.count) (of \(total))")
             for row in limited {
-                print("  - \(row.displayName) [\(row.kind)] total=\(row.totalTokens) events=\(row.eventCount) prompts=\(row.promptCount) projects=\(row.distinctProjects.count) models=\(row.distinctModels.count)")
+                let breakdown = tokenBreakdownText(
+                    uncachedInputTokens: row.uncachedInputTokens,
+                    outputTokens: row.outputTokens,
+                    cacheReadTokens: row.cacheReadTokens,
+                    cacheCreationTokens: row.cacheCreationTokens
+                )
+                print("  - \(row.displayName) [\(row.kind)] total=\(row.totalTokens) \(breakdown) events=\(row.eventCount) prompts=\(row.promptCount) projects=\(row.distinctProjects.count) models=\(row.distinctModels.count)")
             }
         }
     }

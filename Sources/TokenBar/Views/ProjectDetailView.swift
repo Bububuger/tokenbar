@@ -192,9 +192,9 @@ struct ProjectDetailView: View {
     private var kpiRow: some View {
         HStack(spacing: TokenBarStyle.sectionSpacing) {
             TokenBarKPI(title: "Total", value: tokenbarTokens(projectRangeSummary.totalTokens), meta: tokenbarRangeShortLabel(selectedRange), color: TokenBarStyle.muted)
-            TokenBarKPI(title: "Input", value: tokenbarTokens(projectRangeSummary.inputTokens), meta: "project input", color: TokenBarStyle.input)
+            TokenBarKPI(title: "Input", value: tokenbarTokens(projectRangeSummary.totalInputTokens), meta: "total project input", color: TokenBarStyle.input)
             TokenBarKPI(title: "Output", value: tokenbarTokens(projectRangeSummary.outputTokens), meta: "project output", color: TokenBarStyle.output)
-            TokenBarKPI(title: "Cache", value: tokenbarTokens(projectRangeSummary.cacheTokens), meta: "project cache", color: TokenBarStyle.cache)
+            TokenBarKPI(title: "Cache read", value: tokenbarTokens(projectRangeSummary.cacheReadTokens), meta: "\(tokenbarPercent(projectRangeSummary.cacheReadRate)) input cached", color: TokenBarStyle.cache)
         }
     }
 
@@ -211,9 +211,9 @@ struct ProjectDetailView: View {
                 .frame(width: 116, alignment: .leading)
 
                 todayMetric("Total", value: projectTodaySummary.totalTokens, color: TokenBarStyle.foreground)
-                todayMetric("Input", value: projectTodaySummary.inputTokens, color: TokenBarStyle.input)
+                todayMetric("Input", value: projectTodaySummary.totalInputTokens, color: TokenBarStyle.input)
                 todayMetric("Output", value: projectTodaySummary.outputTokens, color: TokenBarStyle.output)
-                todayMetric("Cache", value: projectTodaySummary.cacheTokens, color: TokenBarStyle.cache)
+                todayMetric("Cache read", value: projectTodaySummary.cacheReadTokens, color: TokenBarStyle.cache)
 
                 Spacer(minLength: 12)
 
@@ -441,12 +441,13 @@ struct ProjectDetailView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .buttonStyle(.plain)
-                            // CL-P1-016: drawer with input/output/cache split.
+                            // CL-P1-016: drawer with total input/output and explicit cache buckets.
                             if expandedSession == session.sessionId {
                                 HStack(spacing: 18) {
-                                    sessionStat("Input", value: session.summary.inputTokens, color: TokenBarStyle.input)
+                                    sessionStat("Input", value: session.summary.totalInputTokens, color: TokenBarStyle.input)
                                     sessionStat("Output", value: session.summary.outputTokens, color: TokenBarStyle.output)
-                                    sessionStat("Cache", value: session.summary.cacheTokens, color: TokenBarStyle.cache)
+                                    sessionStat("Cache read", value: session.summary.cacheReadTokens, color: TokenBarStyle.cache)
+                                    sessionStat("Cache write", value: session.summary.cacheCreationTokens, color: TokenBarStyle.cache.opacity(0.65))
                                     Spacer()
                                     Text(session.sessionId)
                                         .font(.system(size: 10, design: .monospaced))

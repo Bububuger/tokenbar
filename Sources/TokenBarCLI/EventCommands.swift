@@ -17,6 +17,8 @@ enum EventsCommand {
         let sessionId: String
         let modelName: String
         let inputTokens: Int
+        let uncachedInputTokens: Int
+        let totalInputTokens: Int
         let outputTokens: Int
         let cacheReadTokens: Int
         let cacheCreationTokens: Int
@@ -39,6 +41,8 @@ enum EventsCommand {
                 sessionId: event.sessionId,
                 modelName: modelNameOrFallback(event),
                 inputTokens: event.inputTokens,
+                uncachedInputTokens: event.inputTokens,
+                totalInputTokens: event.inputTokens + event.cacheReadTokens + event.cacheCreationTokens,
                 outputTokens: event.outputTokens,
                 cacheReadTokens: event.cacheReadTokens,
                 cacheCreationTokens: event.cacheCreationTokens,
@@ -111,7 +115,13 @@ enum EventsCommand {
             printWindowSummary(options: options, databasePath: databaseURL.path)
             print("  Count: \(rows.count) (of \(total))")
             for row in rows {
-                print("  \(row.timestamp) [\(row.agentDisplayName)] \(row.projectName) \(row.modelName) total=\(row.totalTokens) (in=\(row.inputTokens) out=\(row.outputTokens) cache=\(row.cacheTokens))")
+                let breakdown = tokenBreakdownText(
+                    uncachedInputTokens: row.uncachedInputTokens,
+                    outputTokens: row.outputTokens,
+                    cacheReadTokens: row.cacheReadTokens,
+                    cacheCreationTokens: row.cacheCreationTokens
+                )
+                print("  \(row.timestamp) [\(row.agentDisplayName)] \(row.projectName) \(row.modelName) total=\(row.totalTokens) (\(breakdown))")
                 print("      session=\(row.sessionId)  id=\(row.id)")
             }
         }
@@ -129,7 +139,8 @@ enum EventsCommand {
                 a = Double(lhs.inputTokens + lhs.outputTokens + lhs.cacheTokens)
                 b = Double(rhs.inputTokens + rhs.outputTokens + rhs.cacheTokens)
             case "input":
-                a = Double(lhs.inputTokens); b = Double(rhs.inputTokens)
+                a = Double(lhs.inputTokens + lhs.cacheReadTokens + lhs.cacheCreationTokens)
+                b = Double(rhs.inputTokens + rhs.cacheReadTokens + rhs.cacheCreationTokens)
             case "output":
                 a = Double(lhs.outputTokens); b = Double(rhs.outputTokens)
             case "cache":

@@ -389,6 +389,13 @@ public final class UsageDatabase: @unchecked Sendable {
                 try db.execute(sql: "ALTER TABLE custom_sources RENAME COLUMN engine TO plugin;")
             }
         }
+        migrator.registerMigration("v19_normalize_codex_cached_input") { db in
+            try db.execute(sql: """
+            UPDATE usage_events
+            SET input_tokens = MAX(input_tokens - cache_read_tokens - cache_creation_tokens, 0)
+            WHERE agent = 'codex'
+            """)
+        }
         return migrator
     }
 }

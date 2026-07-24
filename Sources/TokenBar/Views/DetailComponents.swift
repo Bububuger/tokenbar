@@ -160,7 +160,7 @@ struct ShareDonutCard: View {
 
 /// Recent-sessions card used by Source / Model pages. Each row shows the
 /// timestamp, project, the secondary tag (model or source), and tokens, with
-/// an expandable in/out/cache drawer.
+/// an expandable total-input/output/cache-read/cache-write drawer.
 struct SourceModelSessionsCard: View {
     let sessions: [DetailSessionSummary]
     @Binding var expandedSession: String?
@@ -215,9 +215,10 @@ struct SourceModelSessionsCard: View {
                             .buttonStyle(.plain)
                             if expandedSession == session.sessionId {
                                 HStack(spacing: 18) {
-                                    sessionStat("Input", value: session.summary.inputTokens, color: TokenBarStyle.input)
+                                    sessionStat("Input", value: session.summary.totalInputTokens, color: TokenBarStyle.input)
                                     sessionStat("Output", value: session.summary.outputTokens, color: TokenBarStyle.output)
-                                    sessionStat("Cache", value: session.summary.cacheTokens, color: TokenBarStyle.cache)
+                                    sessionStat("Cache read", value: session.summary.cacheReadTokens, color: TokenBarStyle.cache)
+                                    sessionStat("Cache write", value: session.summary.cacheCreationTokens, color: TokenBarStyle.cache.opacity(0.65))
                                     Spacer()
                                     Text(session.sessionId)
                                         .font(.system(size: 10, design: .monospaced))

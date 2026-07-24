@@ -17,6 +17,8 @@ enum SummaryCommand {
 
     struct Totals: Encodable {
         let inputTokens: Int
+        let uncachedInputTokens: Int
+        let totalInputTokens: Int
         let outputTokens: Int
         let cacheReadTokens: Int
         let cacheCreationTokens: Int
@@ -63,6 +65,10 @@ enum SummaryCommand {
 
         let totals = Totals(
             inputTokens: events.reduce(0) { $0 + $1.inputTokens },
+            uncachedInputTokens: events.reduce(0) { $0 + $1.inputTokens },
+            totalInputTokens: events.reduce(0) {
+                $0 + $1.inputTokens + $1.cacheReadTokens + $1.cacheCreationTokens
+            },
             outputTokens: events.reduce(0) { $0 + $1.outputTokens },
             cacheReadTokens: events.reduce(0) { $0 + $1.cacheReadTokens },
             cacheCreationTokens: events.reduce(0) { $0 + $1.cacheCreationTokens },
@@ -103,7 +109,13 @@ enum SummaryCommand {
             let groupByText = options.groupBy.isEmpty ? "(none)" : options.groupBy.map(\.rawValue).joined(separator: ",")
             let costText = String(format: "%.4f", totals.estimatedCostUSD)
             print("  Group-by: \(groupByText)")
-            print("  Totals: total=\(totals.totalTokens) (in=\(totals.inputTokens) out=\(totals.outputTokens) cache=\(totals.cacheTokens)) events=\(totals.eventCount) prompts=\(totals.promptCount) cost~$\(costText)")
+            let totalsBreakdown = tokenBreakdownText(
+                uncachedInputTokens: totals.uncachedInputTokens,
+                outputTokens: totals.outputTokens,
+                cacheReadTokens: totals.cacheReadTokens,
+                cacheCreationTokens: totals.cacheCreationTokens
+            )
+            print("  Totals: total=\(totals.totalTokens) (\(totalsBreakdown)) events=\(totals.eventCount) prompts=\(totals.promptCount) cost~$\(costText)")
             print("  Rows: \(limited.count) (of \(total))")
             for row in limited {
                 let keyText = options.groupBy.map { dim -> String in
@@ -113,7 +125,13 @@ enum SummaryCommand {
                     }
                     return "\(key)=?"
                 }.joined(separator: " ")
-                print("  \(keyText) total=\(row.totalTokens) in=\(row.inputTokens) out=\(row.outputTokens) cache=\(row.cacheTokens) events=\(row.eventCount) prompts=\(row.promptCount)")
+                let breakdown = tokenBreakdownText(
+                    uncachedInputTokens: row.uncachedInputTokens,
+                    outputTokens: row.outputTokens,
+                    cacheReadTokens: row.cacheReadTokens,
+                    cacheCreationTokens: row.cacheCreationTokens
+                )
+                print("  \(keyText) total=\(row.totalTokens) \(breakdown) events=\(row.eventCount) prompts=\(row.promptCount)")
             }
         }
     }
@@ -193,7 +211,13 @@ enum TimelineCommand {
             print("  Group-by: \(options.groupBy.isEmpty ? "(none)" : options.groupBy.map(\.rawValue).joined(separator: ","))")
             print("  Buckets: \(buckets.count)")
             for bucket in buckets {
-                print("  - \(bucket.label) total=\(bucket.totalTokens) events=\(bucket.eventCount) prompts=\(bucket.promptCount)")
+                let bucketBreakdown = tokenBreakdownText(
+                    uncachedInputTokens: bucket.uncachedInputTokens,
+                    outputTokens: bucket.outputTokens,
+                    cacheReadTokens: bucket.cacheReadTokens,
+                    cacheCreationTokens: bucket.cacheCreationTokens
+                )
+                print("  - \(bucket.label) total=\(bucket.totalTokens) \(bucketBreakdown) events=\(bucket.eventCount) prompts=\(bucket.promptCount)")
                 for row in bucket.rows where !options.groupBy.isEmpty {
                     let keyText = options.groupBy.map { dim -> String in
                         let key = dim.rawValue
@@ -202,7 +226,13 @@ enum TimelineCommand {
                         }
                         return "\(key)=?"
                     }.joined(separator: " ")
-                    print("      \(keyText) total=\(row.totalTokens) events=\(row.eventCount) prompts=\(row.promptCount)")
+                    let rowBreakdown = tokenBreakdownText(
+                        uncachedInputTokens: row.uncachedInputTokens,
+                        outputTokens: row.outputTokens,
+                        cacheReadTokens: row.cacheReadTokens,
+                        cacheCreationTokens: row.cacheCreationTokens
+                    )
+                    print("      \(keyText) total=\(row.totalTokens) \(rowBreakdown) events=\(row.eventCount) prompts=\(row.promptCount)")
                 }
             }
         }

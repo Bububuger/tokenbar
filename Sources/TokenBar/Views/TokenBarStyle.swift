@@ -290,10 +290,7 @@ struct TokenBarModelBreakdown: Identifiable, Hashable, Sendable {
         "\(agentName) · \(tokenbarPercent(percentage)) of tokens"
     }
 
-    var cacheRatio: Double {
-        guard summary.totalTokens > 0 else { return 0 }
-        return Double(summary.cacheTokens) / Double(summary.totalTokens)
-    }
+    var cacheReadRate: Double { summary.cacheReadRate }
 }
 
 func tokenbarTokens(_ value: Int) -> String {
@@ -1893,7 +1890,8 @@ struct TokenBarKPIDetailDrawer: View {
 private enum TokenBarBarPart: Equatable {
     case input
     case output
-    case cache
+    case cacheRead
+    case cacheWrite
 }
 
 struct InputOutputCacheBar: View {
@@ -1909,7 +1907,7 @@ struct InputOutputCacheBar: View {
             } else {
                 GeometryReader { proxy in
                     let total = summary.totalTokens
-                    HStack(spacing: 1) {
+                    HStack(spacing: 0) {
                         Rectangle()
                             .fill(TokenBarStyle.input)
                             .frame(width: proxy.size.width * CGFloat(summary.inputTokens) / CGFloat(total))
@@ -1922,8 +1920,14 @@ struct InputOutputCacheBar: View {
                             .onHover { hoveredPart = $0 ? .output : (hoveredPart == .output ? nil : hoveredPart) }
                         Rectangle()
                             .fill(TokenBarStyle.cache)
+                            .frame(width: proxy.size.width * CGFloat(summary.cacheReadTokens) / CGFloat(total))
                             .contentShape(Rectangle())
-                            .onHover { hoveredPart = $0 ? .cache : (hoveredPart == .cache ? nil : hoveredPart) }
+                            .onHover { hoveredPart = $0 ? .cacheRead : (hoveredPart == .cacheRead ? nil : hoveredPart) }
+                        Rectangle()
+                            .fill(TokenBarStyle.cache.opacity(0.55))
+                            .frame(width: proxy.size.width * CGFloat(summary.cacheCreationTokens) / CGFloat(total))
+                            .contentShape(Rectangle())
+                            .onHover { hoveredPart = $0 ? .cacheWrite : (hoveredPart == .cacheWrite ? nil : hoveredPart) }
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: height / 2, style: .continuous))
@@ -1943,11 +1947,13 @@ struct InputOutputCacheBar: View {
     private func segmentTooltip(_ part: TokenBarBarPart) -> String {
         switch part {
         case .input:
-            return "In \(tokenbarCompactTokens(summary.inputTokens))"
+            return "Uncached \(tokenbarCompactTokens(summary.inputTokens))"
         case .output:
             return "Out \(tokenbarCompactTokens(summary.outputTokens))"
-        case .cache:
-            return "Cache \(tokenbarCompactTokens(summary.cacheTokens))"
+        case .cacheRead:
+            return "Read \(tokenbarCompactTokens(summary.cacheReadTokens))"
+        case .cacheWrite:
+            return "Write \(tokenbarCompactTokens(summary.cacheCreationTokens))"
         }
     }
 }
@@ -2400,9 +2406,9 @@ private struct RangeSummaryInline: View {
     var body: some View {
         HStack(spacing: 8) {
             metric("Total", tokenbarCompactTokens(summary.totalTokens), TokenBarStyle.foreground)
-            metric("In", tokenbarCompactTokens(summary.inputTokens), TokenBarStyle.input)
+            metric("In", tokenbarCompactTokens(summary.totalInputTokens), TokenBarStyle.input)
             metric("Out", tokenbarCompactTokens(summary.outputTokens), TokenBarStyle.output)
-            metric("Cache", tokenbarCompactTokens(summary.cacheTokens), TokenBarStyle.cache)
+            metric("Read", tokenbarCompactTokens(summary.cacheReadTokens), TokenBarStyle.cache)
             metric("Prompt", tokenbarCompactTokens(promptCount), TokenBarStyle.lime)
         }
         .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
@@ -2542,8 +2548,8 @@ struct ModelBreakdownTable: View {
     private var tableHeader: some View {
         HStack(spacing: 14) {
             Text("Model").frame(width: 230, alignment: .leading)
-            Text("Input · Output · Cache").frame(maxWidth: .infinity, alignment: .leading)
-            Text("Cache %").frame(width: 72, alignment: .trailing)
+            Text("Uncached · Output · Read · Write").frame(maxWidth: .infinity, alignment: .leading)
+            Text("Read %").frame(width: 72, alignment: .trailing)
             Text("Tokens").frame(width: 92, alignment: .trailing)
             Text("Cost").frame(width: 82, alignment: .trailing)
         }
@@ -2579,10 +2585,11 @@ private struct ModelBreakdownRow: View {
             VStack(alignment: .leading, spacing: 6) {
                 InputOutputCacheBar(summary: row.summary, height: 8)
                     .frame(maxWidth: .infinity)
-                HStack(spacing: 14) {
-                    Text("in \(tokenbarCompactTokens(row.summary.inputTokens))")
+                HStack(spacing: 10) {
+                    Text("uncached \(tokenbarCompactTokens(row.summary.inputTokens))")
                     Text("out \(tokenbarCompactTokens(row.summary.outputTokens))")
-                    Text("cache \(tokenbarCompactTokens(row.summary.cacheTokens))")
+                    Text("read \(tokenbarCompactTokens(row.summary.cacheReadTokens))")
+                    Text("write \(tokenbarCompactTokens(row.summary.cacheCreationTokens))")
                     Spacer(minLength: 0)
                 }
                 .font(.system(size: 10.5, design: .monospaced))
@@ -2592,14 +2599,14 @@ private struct ModelBreakdownRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(tokenbarPercent(row.cacheRatio))
+            Text(tokenbarPercent(row.cacheReadRate))
                 .font(.caption)
                 .foregroundStyle(TokenBarStyle.cache)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 2)
                 .background(TokenBarStyle.cache.opacity(0.10), in: Capsule())
                 .frame(width: 72, alignment: .trailing)
-                .help("Cache \(row.summary.cacheTokens.formatted()) of \(row.summary.totalTokens.formatted()) tokens")
+                .help("\(row.summary.cacheReadTokens.formatted()) of \(row.summary.totalInputTokens.formatted()) input tokens served from cache")
 
             Text(tokenbarCompactTokens(row.summary.totalTokens))
                 .font(.system(size: 12.5, design: .monospaced))

@@ -1281,9 +1281,10 @@ struct Sprint8StorageTests {
         #expect(event.parser == .codex)
         #expect(event.projectName == "tokenbar")
         #expect(event.sessionId == "codex-custom-session")
-        #expect(event.inputTokens == 110)
+        #expect(event.inputTokens == 90)
         #expect(event.outputTokens == 7)
-        #expect(event.cacheTokens == 20)
+        #expect(event.cacheReadTokens == 20)
+        #expect(event.cacheCreationTokens == 0)
         #expect(event.reasoningTokens == 3)
     }
 

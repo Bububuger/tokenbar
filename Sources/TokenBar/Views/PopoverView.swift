@@ -10,7 +10,7 @@ struct PopoverView: View {
     // CL-P0-004: Popover Hero status pill mirrors menubar pause flag.
     @AppStorage("tokenbar.menuBarPaused") private var isPaused = false
     @AppStorage("tokenbar.pricingOverrides") private var pricingOverridesJSON = "{}"
-    // CL-P0-013: which PopKPI ("In" / "Out" / "Cache") is expanded inline.
+    // CL-P0-013: which PopKPI is expanded inline.
     @State private var expandedPopKPI: String?
 
     private enum PopoverTab: String, CaseIterable, Identifiable {
@@ -177,9 +177,9 @@ struct PopoverView: View {
                     .foregroundStyle(.secondary)
             }
             HStack(spacing: 6) {
-                popKpiCard("In", value: popover.today.inputTokens, pct: popover.inputShare, color: TokenBarStyle.input)
-                popKpiCard("Out", value: popover.today.outputTokens, pct: popover.outputShare, color: TokenBarStyle.output)
-                popKpiCard("Cache", value: popover.today.cacheTokens, pct: popover.cacheShare, color: TokenBarStyle.cache)
+                popKpiCard("Input", value: popover.today.totalInputTokens, pct: popover.inputShare, color: TokenBarStyle.input)
+                popKpiCard("Output", value: popover.today.outputTokens, pct: popover.outputShare, color: TokenBarStyle.output)
+                popKpiCard("Cache read", value: popover.today.cacheReadTokens, pct: popover.cacheReadRate, color: TokenBarStyle.cache)
             }
             // CL-P0-013: clicking a PopKPI expands a mini detail row showing
             // today / yesterday / 7d-avg below the bar — collapses on second
@@ -217,9 +217,9 @@ struct PopoverView: View {
 
     private func popKpiToday(_ title: String) -> Int {
         switch title {
-        case "In":    return runtimeModel.snapshot.today.inputTokens
-        case "Out":   return runtimeModel.snapshot.today.outputTokens
-        case "Cache": return runtimeModel.snapshot.today.cacheTokens
+        case "Input":      return runtimeModel.snapshot.today.totalInputTokens
+        case "Output":     return runtimeModel.snapshot.today.outputTokens
+        case "Cache read": return runtimeModel.snapshot.today.cacheReadTokens
         default:      return runtimeModel.snapshot.today.totalTokens
         }
     }
@@ -227,9 +227,9 @@ struct PopoverView: View {
         guard runtimeModel.snapshot.last30Days.count >= 2 else { return 0 }
         let y = runtimeModel.snapshot.last30Days[runtimeModel.snapshot.last30Days.count - 2]
         switch title {
-        case "In":    return y.summary.inputTokens
-        case "Out":   return y.summary.outputTokens
-        case "Cache": return y.summary.cacheTokens
+        case "Input":      return y.summary.totalInputTokens
+        case "Output":     return y.summary.outputTokens
+        case "Cache read": return y.summary.cacheReadTokens
         default:      return y.summary.totalTokens
         }
     }
@@ -238,9 +238,9 @@ struct PopoverView: View {
         guard !window.isEmpty else { return 0 }
         let sum: Int
         switch title {
-        case "In":    sum = window.reduce(0) { $0 + $1.summary.inputTokens }
-        case "Out":   sum = window.reduce(0) { $0 + $1.summary.outputTokens }
-        case "Cache": sum = window.reduce(0) { $0 + $1.summary.cacheTokens }
+        case "Input":      sum = window.reduce(0) { $0 + $1.summary.totalInputTokens }
+        case "Output":     sum = window.reduce(0) { $0 + $1.summary.outputTokens }
+        case "Cache read": sum = window.reduce(0) { $0 + $1.summary.cacheReadTokens }
         default:      sum = window.reduce(0) { $0 + $1.summary.totalTokens }
         }
         return sum / window.count

@@ -20,6 +20,10 @@ struct CommandRegistryTests {
         let descriptor = CommandRegistry.descriptor(named: "events")
         #expect(descriptor != nil)
         #expect(descriptor?.sortFields.contains("timestamp") == true)
+        #expect(descriptor?.rowFields.contains("inputTokens") == true)
+        #expect(descriptor?.rowFields.contains("uncachedInputTokens") == true)
+        #expect(descriptor?.rowFields.contains("totalInputTokens") == true)
+        #expect(descriptor?.extras.contains(CommandRegistry.tokenFieldSemantics) == true)
     }
 
     @Test

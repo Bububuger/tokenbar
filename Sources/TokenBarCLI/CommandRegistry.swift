@@ -15,6 +15,8 @@ struct CommandDescriptor: Encodable {
 }
 
 enum CommandRegistry {
+    static let tokenFieldSemantics = "Token fields: inputTokens is retained for compatibility and means uncached input; uncachedInputTokens is its explicit alias; totalInputTokens = uncachedInputTokens + cacheReadTokens + cacheCreationTokens; totalTokens = totalInputTokens + outputTokens."
+
     static let commonFilters = [
         "--db <path>",
         "--days N (default 30, 0 = all-time)",
@@ -40,10 +42,11 @@ enum CommandRegistry {
             rowFields: [
                 "id", "timestamp", "agent", "agentDisplayName",
                 "projectName", "projectPath", "sessionId", "modelName",
-                "inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens", "totalTokens",
+                "inputTokens", "uncachedInputTokens", "totalInputTokens",
+                "outputTokens", "cacheReadTokens", "cacheCreationTokens", "totalTokens",
                 "reasoningTokens", "sourcePath", "parser",
             ],
-            extras: [],
+            extras: [tokenFieldSemantics],
             defaultLimit: 100
         ),
         CommandDescriptor(
@@ -71,10 +74,11 @@ enum CommandRegistry {
             sortFields: ["tokens", "name", "lastSeen", "eventCount"],
             rowFields: [
                 "name", "eventCount", "promptCount",
-                "inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens", "totalTokens",
+                "inputTokens", "uncachedInputTokens", "totalInputTokens",
+                "outputTokens", "cacheReadTokens", "cacheCreationTokens", "totalTokens",
                 "firstSeen", "lastSeen", "distinctAgents", "distinctModels",
             ],
-            extras: [],
+            extras: [tokenFieldSemantics],
             defaultLimit: 100
         ),
         CommandDescriptor(
@@ -86,9 +90,10 @@ enum CommandRegistry {
                 "sessionId", "projectName", "agent", "agentDisplayName",
                 "modelName", "firstSeen", "lastSeen",
                 "eventCount", "promptCount",
-                "inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens", "totalTokens",
+                "inputTokens", "uncachedInputTokens", "totalInputTokens",
+                "outputTokens", "cacheReadTokens", "cacheCreationTokens", "totalTokens",
             ],
-            extras: [],
+            extras: [tokenFieldSemantics],
             defaultLimit: 100
         ),
         CommandDescriptor(
@@ -98,10 +103,11 @@ enum CommandRegistry {
             sortFields: ["tokens", "name", "eventCount", "cost"],
             rowFields: [
                 "name", "distinctAgents", "eventCount",
-                "inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens", "totalTokens",
+                "inputTokens", "uncachedInputTokens", "totalInputTokens",
+                "outputTokens", "cacheReadTokens", "cacheCreationTokens", "totalTokens",
                 "estimatedCostUSD", "costSource",
             ],
-            extras: [],
+            extras: [tokenFieldSemantics],
             defaultLimit: 100
         ),
         CommandDescriptor(
@@ -117,10 +123,11 @@ enum CommandRegistry {
             sortFields: ["tokens", "name", "eventCount"],
             rowFields: [
                 "kind", "displayName", "eventCount", "promptCount",
-                "inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens", "totalTokens",
+                "inputTokens", "uncachedInputTokens", "totalInputTokens",
+                "outputTokens", "cacheReadTokens", "cacheCreationTokens", "totalTokens",
                 "distinctProjects", "distinctModels",
             ],
-            extras: [],
+            extras: [tokenFieldSemantics],
             defaultLimit: 50
         ),
         CommandDescriptor(
@@ -132,10 +139,11 @@ enum CommandRegistry {
             sortFields: ["tokens", "input", "output", "cache", "count", "cost"],
             rowFields: [
                 "groupBy", "rows",
-                "(per-row) inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, totalTokens, eventCount, promptCount, estimatedCostUSD, costSource",
+                "(totals/per-row) inputTokens, uncachedInputTokens, totalInputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, totalTokens, eventCount, promptCount, estimatedCostUSD, costSource",
             ],
             extras: [
                 "--group-by accepts a comma-separated list. Empty = single global row.",
+                tokenFieldSemantics,
             ],
             defaultLimit: 100
         ),
@@ -149,9 +157,9 @@ enum CommandRegistry {
             sortFields: [],
             rowFields: [
                 "bucket", "groupBy", "buckets",
-                "(per-bucket) bucketStart, label, rows[], inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, totalTokens, eventCount, promptCount",
+                "(per-bucket/per-row) bucketStart, label, rows[], inputTokens, uncachedInputTokens, totalInputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, totalTokens, eventCount, promptCount",
             ],
-            extras: [],
+            extras: [tokenFieldSemantics],
             defaultLimit: 0
         ),
         CommandDescriptor(
@@ -243,8 +251,14 @@ enum CommandRegistry {
                 "--cpu-percent N (1-100)", "--json",
             ],
             sortFields: [],
-            rowFields: [],
-            extras: ["This is the only write command. Equivalent to the app's Reparse all."],
+            rowFields: [
+                "inputTokens", "uncachedInputTokens", "totalInputTokens",
+                "outputTokens", "cacheReadTokens", "cacheCreationTokens", "totalTokens",
+            ],
+            extras: [
+                "This is the only write command. Equivalent to the app's Reparse all.",
+                tokenFieldSemantics,
+            ],
             defaultLimit: nil
         ),
         CommandDescriptor(

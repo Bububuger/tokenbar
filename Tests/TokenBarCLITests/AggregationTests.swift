@@ -28,6 +28,7 @@ struct AggregationTests {
         input: Int,
         output: Int,
         cache: Int,
+        cacheCreation: Int = 0,
         date: Date,
         session: String = "s1"
     ) -> UsageEvent {
@@ -41,7 +42,7 @@ struct AggregationTests {
             inputTokens: input,
             outputTokens: output,
             cacheReadTokens: cache,
-            cacheCreationTokens: 0,
+            cacheCreationTokens: cacheCreation,
             reasoningTokens: nil,
             modelName: model,
             sourcePath: "/tmp/\(project)/source",
@@ -65,6 +66,66 @@ struct AggregationTests {
         #expect(row.totalTokens == 510)
         #expect(row.eventCount == 2)
         #expect(row.keys.isEmpty)
+    }
+
+    @Test
+    func inputFieldsKeepCompatibilityAndExposeOfficialTotalInput() throws {
+        let event = makeEvent(
+            id: "codex",
+            agent: .codex,
+            project: "tokenbar",
+            model: "gpt-5",
+            input: 30,
+            output: 10,
+            cache: 40,
+            cacheCreation: 30,
+            date: Self.dayA
+        )
+
+        let row = try #require(
+            Aggregation.aggregate(events: [event], prompts: [], groupBy: [], calendar: Self.calendar).first
+        )
+        #expect(row.inputTokens == 30)
+        #expect(row.uncachedInputTokens == 30)
+        #expect(row.totalInputTokens == 100)
+        #expect(row.cacheReadTokens == 40)
+        #expect(row.cacheCreationTokens == 30)
+        #expect(row.outputTokens == 10)
+        #expect(row.totalTokens == 110)
+
+        let data = try JSONEncoder().encode(row)
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(json["inputTokens"] as? Int == 30)
+        #expect(json["uncachedInputTokens"] as? Int == 30)
+        #expect(json["totalInputTokens"] as? Int == 100)
+
+        let bucket = try #require(
+            Aggregation.aggregateTimeline(
+                events: [event],
+                prompts: [],
+                bucket: .day,
+                groupBy: [],
+                calendar: Self.calendar
+            ).first
+        )
+        #expect(bucket.inputTokens == 30)
+        #expect(bucket.uncachedInputTokens == 30)
+        #expect(bucket.totalInputTokens == 100)
+        #expect(bucket.totalTokens == 110)
+
+        let eventRow = EventsCommand.Row.from(event)
+        #expect(eventRow.inputTokens == 30)
+        #expect(eventRow.uncachedInputTokens == 30)
+        #expect(eventRow.totalInputTokens == 100)
+        #expect(eventRow.totalTokens == 110)
+        #expect(
+            tokenBreakdownText(
+                uncachedInputTokens: 30,
+                outputTokens: 10,
+                cacheReadTokens: 40,
+                cacheCreationTokens: 30
+            ) == "input=100 uncached=30 read=40 write=30 output=10"
+        )
     }
 
     @Test

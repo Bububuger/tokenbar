@@ -227,6 +227,15 @@ public struct UsageSummary: Sendable, Hashable {
 
     public var cacheTokens: Int { cacheReadTokens + cacheCreationTokens }
 
+    public var totalInputTokens: Int {
+        inputTokens + cacheReadTokens + cacheCreationTokens
+    }
+
+    public var cacheReadRate: Double {
+        guard totalInputTokens > 0 else { return 0 }
+        return Double(cacheReadTokens) / Double(totalInputTokens)
+    }
+
     public var totalTokens: Int {
         inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens
     }

@@ -61,6 +61,7 @@ struct TokenBucket {
     var eventCount = 0
 
     var cacheTokens: Int { cacheReadTokens + cacheCreationTokens }
+    var totalInputTokens: Int { inputTokens + cacheReadTokens + cacheCreationTokens }
     var totalTokens: Int { inputTokens + outputTokens + cacheTokens }
 
     mutating func add(_ event: UsageEvent) {
@@ -70,6 +71,16 @@ struct TokenBucket {
         cacheCreationTokens += event.cacheCreationTokens
         eventCount += 1
     }
+}
+
+func tokenBreakdownText(
+    uncachedInputTokens: Int,
+    outputTokens: Int,
+    cacheReadTokens: Int,
+    cacheCreationTokens: Int
+) -> String {
+    let totalInputTokens = uncachedInputTokens + cacheReadTokens + cacheCreationTokens
+    return "input=\(totalInputTokens) uncached=\(uncachedInputTokens) read=\(cacheReadTokens) write=\(cacheCreationTokens) output=\(outputTokens)"
 }
 
 enum CostEstimator {
@@ -103,6 +114,8 @@ enum Aggregation {
         let costSource: String
 
         var cacheTokens: Int { cacheReadTokens + cacheCreationTokens }
+        var uncachedInputTokens: Int { inputTokens }
+        var totalInputTokens: Int { inputTokens + cacheReadTokens + cacheCreationTokens }
 
         func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: DynamicCodingKey.self)
@@ -110,6 +123,8 @@ enum Aggregation {
                 try value.encode(into: &container, key: key)
             }
             try container.encode(inputTokens, forKey: DynamicCodingKey("inputTokens"))
+            try container.encode(uncachedInputTokens, forKey: DynamicCodingKey("uncachedInputTokens"))
+            try container.encode(totalInputTokens, forKey: DynamicCodingKey("totalInputTokens"))
             try container.encode(outputTokens, forKey: DynamicCodingKey("outputTokens"))
             try container.encode(cacheReadTokens, forKey: DynamicCodingKey("cacheReadTokens"))
             try container.encode(cacheCreationTokens, forKey: DynamicCodingKey("cacheCreationTokens"))
@@ -207,6 +222,8 @@ enum Aggregation {
         let label: String
         let rows: [GroupRow]
         let inputTokens: Int
+        let uncachedInputTokens: Int
+        let totalInputTokens: Int
         let outputTokens: Int
         let cacheReadTokens: Int
         let cacheCreationTokens: Int
@@ -256,6 +273,8 @@ enum Aggregation {
                 label: key.label,
                 rows: rows,
                 inputTokens: bucket.inputTokens,
+                uncachedInputTokens: bucket.inputTokens,
+                totalInputTokens: bucket.totalInputTokens,
                 outputTokens: bucket.outputTokens,
                 cacheReadTokens: bucket.cacheReadTokens,
                 cacheCreationTokens: bucket.cacheCreationTokens,
@@ -468,7 +487,7 @@ enum CLISort {
         case "tokens", "total":
             return (Double(lhs.totalTokens), Double(rhs.totalTokens))
         case "input":
-            return (Double(lhs.inputTokens), Double(rhs.inputTokens))
+            return (Double(lhs.totalInputTokens), Double(rhs.totalInputTokens))
         case "output":
             return (Double(lhs.outputTokens), Double(rhs.outputTokens))
         case "cache":

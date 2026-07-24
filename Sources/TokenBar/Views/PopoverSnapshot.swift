@@ -15,7 +15,7 @@ struct TokenBarPopoverSnapshot: Sendable, Hashable {
     let yesterdayDeltaText: String
     let inputShare: String
     let outputShare: String
-    let cacheShare: String
+    let cacheReadRate: String
     let hourly: HourlyUsageSnapshot
     let hourlyActivityText: String
     let projectRows: [TokenBarPopoverRankingRow]
@@ -146,14 +146,13 @@ struct TokenBarPopoverSnapshot: Sendable, Hashable {
             let agentName = topName(model.agentTokens, fallback: "Local")
             let totalTokens = modelTotals.values.reduce(0) { $0 + $1.totalTokens }
             let percentage = totalTokens > 0 ? Double(summary.totalTokens) / Double(totalTokens) : 0
-            let cacheRatio = summary.totalTokens > 0 ? Double(summary.cacheTokens) / Double(summary.totalTokens) : 0
             return TokenBarPopoverRankingRow(
                 kind: .model,
                 name: name,
                 subtitle: "\(agentName) · \(tokenbarPercent(percentage)) of tokens",
                 summary: summary,
                 cost: model.cost,
-                badge: "\(tokenbarPercent(cacheRatio)) cache",
+                badge: "\(tokenbarPercent(summary.cacheReadRate)) cache read",
                 agentName: agentName
             )
         }
@@ -177,9 +176,9 @@ struct TokenBarPopoverSnapshot: Sendable, Hashable {
             last30Cost: last30Cost,
             todaySessionCount: todaySessionIDs.count,
             yesterdayDeltaText: yesterdayDeltaText(todayTokens: snapshot.today.totalTokens, yesterdayTokens: yesterdayTotal),
-            inputShare: shareText(snapshot.today.inputTokens, total: snapshot.today.totalTokens),
+            inputShare: shareText(snapshot.today.totalInputTokens, total: snapshot.today.totalTokens),
             outputShare: shareText(snapshot.today.outputTokens, total: snapshot.today.totalTokens),
-            cacheShare: shareText(snapshot.today.cacheTokens, total: snapshot.today.totalTokens),
+            cacheReadRate: tokenbarPercent(snapshot.today.cacheReadRate),
             hourly: hourly,
             hourlyActivityText: hourlyActivityText,
             projectRows: Array(projectRows),

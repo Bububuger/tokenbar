@@ -1,0 +1,50 @@
+name: Publish TokenBar v1.8.10
+
+on:
+  push:
+    branches:
+      - codex/release-upload-1.8.10
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: macos-26-intel
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install xcodegen
+        run: |
+          if ! brew list xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+
+      - name: Build release DMG
+        run: |
+          mkdir -p "$RUNNER_TEMP/tokenbar-release"
+          TMPDIR="$RUNNER_TEMP/tokenbar-release" script/release.sh 1.8.10
+
+      - name: Print build errors
+        if: failure()
+        run: |
+          grep -nE "error:|fatal error|signal [0-9]+" \
+            "$RUNNER_TEMP/tokenbar-release/tokenbar-release-build.log" | tail -100 || true
+
+      - name: Verify release DMG
+        run: |
+          shasum -a 256 dist/TokenBar-1.8.10.dmg
+          hdiutil verify dist/TokenBar-1.8.10.dmg
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v1.8.10 >/dev/null 2>&1; then
+            gh release upload v1.8.10 dist/TokenBar-1.8.10.dmg --clobber
+          else
+            gh release create v1.8.10 dist/TokenBar-1.8.10.dmg \
+              --verify-tag \
+              --title "TokenBar v1.8.10" \
+              --notes "Fix Codex archived-session history indexing while preserving stable event identities across active-to-archive moves."
+          fi

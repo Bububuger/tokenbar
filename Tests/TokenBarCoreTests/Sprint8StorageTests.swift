@@ -113,6 +113,79 @@ struct Sprint8StorageTests {
     }
 
     @Test
+    func duplicateCodexIDsUpdateEventAndPromptSourcePathWithoutAddingRows() throws {
+        let databaseURL = temporaryDatabaseURL()
+        let repository = try UsageRepository(databaseURL: databaseURL)
+        let activePath = "/tmp/sessions/2026/04/27/rollout-shared.jsonl"
+        let archivePath = "/tmp/codex-history/rollout-shared.jsonl"
+        let now = fixedDate()
+
+        let activeEvent = dbEvent(
+            id: "\(activePath)#3",
+            agent: .codex,
+            projectName: "tokenbar",
+            sessionId: "stable-session",
+            timestamp: now,
+            inputTokens: 10,
+            outputTokens: 2,
+            cacheTokens: 0,
+            sourcePath: activePath
+        )
+        let archiveEvent = dbEvent(
+            id: activeEvent.id,
+            agent: .codex,
+            projectName: "tokenbar",
+            sessionId: "stable-session",
+            timestamp: now,
+            inputTokens: 10,
+            outputTokens: 2,
+            cacheTokens: 0,
+            sourcePath: archivePath
+        )
+        let activePrompt = prompt(id: "\(activePath)#prompt#2#hash", sourcePath: activePath)
+        let archivePrompt = prompt(id: activePrompt.id, sourcePath: archivePath)
+
+        let first = try repository.insertCheckpoint(
+            trigger: "active",
+            startedAt: now,
+            endedAt: now,
+            events: [activeEvent],
+            prompts: [activePrompt],
+            nextWatermarks: [],
+            warnings: [],
+            error: nil
+        )
+        let second = try repository.insertCheckpoint(
+            trigger: "archive",
+            startedAt: now,
+            endedAt: now,
+            events: [archiveEvent],
+            prompts: [archivePrompt],
+            nextWatermarks: [],
+            warnings: [],
+            error: nil
+        )
+
+        #expect(first.eventsAdded == 1)
+        #expect(first.promptsAdded == 1)
+        #expect(second.eventsAdded == 0)
+        #expect(second.promptsAdded == 0)
+
+        let queue = try DatabaseQueue(path: databaseURL.path)
+        let paths = try queue.read { db in
+            let eventPath = try String.fetchOne(db, sql: "SELECT source_path FROM usage_events WHERE id = ?", arguments: [activeEvent.id])
+            let promptPath = try String.fetchOne(db, sql: "SELECT source_path FROM prompts WHERE id = ?", arguments: [activePrompt.id])
+            let eventCount = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM usage_events WHERE id = ?", arguments: [activeEvent.id])
+            let promptCount = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM prompts WHERE id = ?", arguments: [activePrompt.id])
+            return (eventPath, promptPath, eventCount, promptCount)
+        }
+        #expect(paths.0 == archivePath)
+        #expect(paths.1 == archivePath)
+        #expect(paths.2 == 1)
+        #expect(paths.3 == 1)
+    }
+
+    @Test
     func resetAllDataClearsIndexConfigurationAndSavedPrompts() throws {
         let dbURL = temporaryDatabaseURL()
         let repository = try UsageRepository(databaseURL: dbURL)
@@ -1583,7 +1656,7 @@ struct Sprint8StorageTests {
         )
     }
 
-    private func prompt(id: String, timestamp: Date? = nil) -> PromptRecord {
+    private func prompt(id: String, timestamp: Date? = nil, sourcePath: String = "/tmp/source.jsonl") -> PromptRecord {
         PromptRecord(
             id: id,
             eventId: nil,
@@ -1593,7 +1666,7 @@ struct Sprint8StorageTests {
             timestamp: timestamp ?? fixedDate(),
             content: "hello",
             contentHash: "hash",
-            sourcePath: "/tmp/source.jsonl"
+            sourcePath: sourcePath
         )
     }
 
@@ -1606,7 +1679,8 @@ struct Sprint8StorageTests {
         inputTokens: Int,
         outputTokens: Int,
         cacheTokens: Int,
-        modelName: String? = nil
+        modelName: String? = nil,
+        sourcePath: String = "/tmp/source.jsonl"
     ) -> UsageEvent {
         let parser: ParserKind
         switch agent {
@@ -1632,7 +1706,7 @@ struct Sprint8StorageTests {
             cacheCreationTokens: 0,
             reasoningTokens: nil,
             modelName: modelName,
-            sourcePath: "/tmp/source.jsonl",
+            sourcePath: sourcePath,
             parser: parser,
             confidence: 1.0
         )

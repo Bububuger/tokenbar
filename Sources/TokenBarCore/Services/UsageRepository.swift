@@ -1109,11 +1109,22 @@ public struct UsageRepository: Sendable {
         // Avoids a pre-INSERT existence probe per row (was 240k extra queries
         // during cold-start indexing of ~120k events).
         let inserted = db.changesCount > 0
-        if !inserted, event.modelName != nil {
-            try db.execute(
-                sql: "UPDATE usage_events SET model_name = COALESCE(model_name, ?) WHERE id = ?",
-                arguments: [event.modelName, event.id]
-            )
+        if !inserted {
+            if event.agent == .codex {
+                try db.execute(
+                    sql: """
+                    UPDATE usage_events
+                    SET model_name = COALESCE(model_name, ?), source_path = ?
+                    WHERE id = ?
+                    """,
+                    arguments: [event.modelName, event.sourcePath, event.id]
+                )
+            } else if event.modelName != nil {
+                try db.execute(
+                    sql: "UPDATE usage_events SET model_name = COALESCE(model_name, ?) WHERE id = ?",
+                    arguments: [event.modelName, event.id]
+                )
+            }
         }
         return inserted ? 1 : 0
     }
@@ -1137,7 +1148,14 @@ public struct UsageRepository: Sendable {
                 prompt.sourcePath,
             ]
         )
-        return db.changesCount > 0 ? 1 : 0
+        let inserted = db.changesCount > 0
+        if !inserted, prompt.agent == .codex {
+            try db.execute(
+                sql: "UPDATE prompts SET source_path = ? WHERE id = ?",
+                arguments: [prompt.sourcePath, prompt.id]
+            )
+        }
+        return inserted ? 1 : 0
     }
 
     private func upsertWatermark(_ watermark: SourceWatermark, db: Database) throws {

@@ -59,6 +59,144 @@ struct CodexUsageParserTests {
         #expect(result.warnings.count == 2)
     }
 
+    @Test
+    func ordinaryActiveRolloutKeepsPathBasedEventAndPromptIDs() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root
+            .appendingPathComponent("2026/04/27", isDirectory: true)
+            .appendingPathComponent("rollout-2026-04-27T12-00-00-compat.jsonl")
+        try writeRollout(to: file)
+
+        let result = try CodexUsageParser.parse(fileURL: file)
+
+        #expect(result.events.count == 1)
+        #expect(result.events[0].id == "\(file.path)#3")
+        #expect(result.events[0].sourcePath == file.path)
+        #expect(result.prompts.count == 1)
+        #expect(result.prompts[0].id.hasPrefix("\(file.path)#prompt#2#"))
+        #expect(result.prompts[0].sourcePath == file.path)
+    }
+
+    @Test
+    func activeAndArchiveCopiesShareStableIDsButKeepPhysicalSourcePaths() throws {
+        let parent = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let basename = "rollout-2026-04-27T12-00-00-stable.jsonl"
+        let active = parent
+            .appendingPathComponent("sessions/2026/04/27", isDirectory: true)
+            .appendingPathComponent(basename)
+        let archived = parent
+            .appendingPathComponent("archived_sessions", isDirectory: true)
+            .appendingPathComponent(basename)
+        try writeRollout(to: active)
+        try writeRollout(to: archived)
+
+        let activeResult = try CodexUsageParser.parse(fileURL: active)
+        let archiveResult = try CodexUsageParser.parse(fileURL: archived)
+
+        #expect(activeResult.events.count == 1)
+        #expect(archiveResult.events.count == 1)
+        #expect(activeResult.events[0].id == archiveResult.events[0].id)
+        #expect(activeResult.events[0].sourcePath == active.path)
+        #expect(archiveResult.events[0].sourcePath == archived.path)
+        #expect(activeResult.prompts.count == 1)
+        #expect(archiveResult.prompts.count == 1)
+        #expect(activeResult.prompts[0].id == archiveResult.prompts[0].id)
+        #expect(activeResult.prompts[0].sourcePath == active.path)
+        #expect(archiveResult.prompts[0].sourcePath == archived.path)
+    }
+
+    @Test
+    func eventSourceDoesNotDoubleCountAnActiveRolloutPresentInArchive() async throws {
+        let parent = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let activeRoot = parent.appendingPathComponent("sessions", isDirectory: true)
+        let archiveRoot = parent.appendingPathComponent("archived_sessions", isDirectory: true)
+        let calendar = Calendar(identifier: .gregorian)
+        let referenceDate = calendar.date(from: DateComponents(year: 2026, month: 4, day: 27, hour: 12))!
+        let basename = "rollout-2026-04-27T12-00-00-total.jsonl"
+        let active = activeRoot.appendingPathComponent("2026/04/27", isDirectory: true).appendingPathComponent(basename)
+        let archived = archiveRoot.appendingPathComponent(basename)
+        try writeRollout(to: active)
+        try writeRollout(to: archived)
+
+        let source = CodexUsageEventSource(
+            rootPath: activeRoot.path,
+            archiveRootPath: archiveRoot.path,
+            daysBack: 1
+        )
+        let loaded = try await source.loadEvents(
+            since: [:],
+            referenceDate: referenceDate,
+            calendar: calendar
+        )
+
+        #expect(loaded.events.count == 1)
+        #expect(loaded.events.reduce(0) { $0 + $1.inputTokens + $1.outputTokens } == 12)
+        #expect(loaded.prompts.count == 1)
+    }
+
+    @Test
+    func eventSourceHandlesArchiveRootWithArbitraryDirectoryName() async throws {
+        let parent = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let activeRoot = parent.appendingPathComponent("sessions", isDirectory: true)
+        let archiveRoot = parent.appendingPathComponent("codex-history", isDirectory: true)
+        let calendar = Calendar(identifier: .gregorian)
+        let referenceDate = calendar.date(from: DateComponents(year: 2026, month: 4, day: 27, hour: 12))!
+        let basename = "rollout-2026-04-27T12-00-00-arbitrary.jsonl"
+        let active = activeRoot.appendingPathComponent("2026/04/27", isDirectory: true).appendingPathComponent(basename)
+        let archived = archiveRoot.appendingPathComponent(basename)
+        try writeRollout(to: active)
+        try writeRollout(to: archived)
+
+        let activeResult = try CodexUsageParser.parse(fileURL: active, canonicalActiveRootPath: activeRoot.path)
+        let archiveResult = try CodexUsageParser.parse(fileURL: archived, canonicalActiveRootPath: activeRoot.path)
+        try FileManager.default.removeItem(at: active)
+        let source = CodexUsageEventSource(
+            rootPath: activeRoot.path,
+            archiveRootPath: archiveRoot.path,
+            daysBack: 1
+        )
+        let loaded = try await source.loadEvents(since: [:], referenceDate: referenceDate, calendar: calendar)
+
+        #expect(activeResult.events[0].id == archiveResult.events[0].id)
+        #expect(activeResult.prompts[0].id == archiveResult.prompts[0].id)
+        #expect(loaded.events.count == 1)
+        #expect(loaded.prompts.count == 1)
+        #expect(loaded.events[0].id == activeResult.events[0].id)
+        #expect(loaded.prompts[0].id == activeResult.prompts[0].id)
+        #expect(URL(fileURLWithPath: loaded.events[0].sourcePath).standardizedFileURL.path == archived.standardizedFileURL.path)
+        #expect(URL(fileURLWithPath: loaded.prompts[0].sourcePath).standardizedFileURL.path == archived.standardizedFileURL.path)
+    }
+
+    @Test
+    func eventSourceWithArchiveAsRootUsesSiblingSessionsForStableIDs() async throws {
+        let parent = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let archiveRoot = parent.appendingPathComponent("archived_sessions", isDirectory: true)
+        let calendar = Calendar(identifier: .gregorian)
+        let referenceDate = calendar.date(from: DateComponents(year: 2026, month: 4, day: 27, hour: 12))!
+        let basename = "rollout-2026-04-27T12-00-00-archive-root.jsonl"
+        let archived = archiveRoot.appendingPathComponent(basename)
+        try writeRollout(to: archived)
+
+        let source = CodexUsageEventSource(rootPath: archiveRoot.path, daysBack: 1)
+        let loaded = try await source.loadEvents(since: [:], referenceDate: referenceDate, calendar: calendar)
+        let expectedActivePath = parent
+            .appendingPathComponent("sessions/2026/04/27", isDirectory: true)
+            .appendingPathComponent(basename)
+            .path
+
+        #expect(loaded.events.count == 1)
+        #expect(loaded.events[0].id == "\(expectedActivePath)#3")
+        #expect(URL(fileURLWithPath: loaded.events[0].sourcePath).standardizedFileURL.path == archived.standardizedFileURL.path)
+        #expect(loaded.prompts.count == 1)
+        #expect(loaded.prompts[0].id.hasPrefix("\(expectedActivePath)#prompt#2#"))
+        #expect(URL(fileURLWithPath: loaded.prompts[0].sourcePath).standardizedFileURL.path == archived.standardizedFileURL.path)
+    }
+
     /// Regression: Codex emits the same `last_token_usage` payload twice
     /// per turn (initial + render-complete). Parser must collapse them so
     /// totals match reality — real rollouts showed a 1.16-1.19x over-count
@@ -272,6 +410,26 @@ struct CodexUsageParserTests {
             throw FixtureError.missing(name)
         }
         return url
+    }
+
+    private func temporaryDirectory() throws -> URL {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        return try FileManager.default.url(
+            for: .itemReplacementDirectory,
+            in: .userDomainMask,
+            appropriateFor: root,
+            create: true
+        )
+    }
+
+    private func writeRollout(to file: URL) throws {
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let lines = [
+            #"{"timestamp":"2026-04-27T12:00:00Z","type":"session_meta","payload":{"id":"stable-session","cwd":"/tmp/tokenbar"}}"#,
+            #"{"timestamp":"2026-04-27T12:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"same prompt"}]}}"#,
+            #"{"timestamp":"2026-04-27T12:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":2,"reasoning_output_tokens":0,"total_tokens":12}}}}"#,
+        ]
+        try (lines.joined(separator: "\n") + "\n").write(to: file, atomically: true, encoding: .utf8)
     }
 
     private func parseJSONLines(_ json: [String]) -> CodexParseResult {

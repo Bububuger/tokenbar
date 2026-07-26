@@ -93,7 +93,10 @@ public enum CodexUsageParser {
         }
     }
 
-    public static func parse(fileURL: URL) throws -> CodexParseResult {
+    public static func parse(
+        fileURL: URL,
+        canonicalActiveRootPath: String? = nil
+    ) throws -> CodexParseResult {
         let text = try String(contentsOf: fileURL, encoding: .utf8)
         let lines = text.split(whereSeparator: \.isNewline).enumerated().map {
             JSONLLineRecord(
@@ -103,16 +106,25 @@ public enum CodexUsageParser {
                 endOffset: 0
             )
         }
-        return parse(lines: lines, fileURL: fileURL)
+        return parse(
+            lines: lines,
+            fileURL: fileURL,
+            canonicalActiveRootPath: canonicalActiveRootPath
+        )
     }
 
     public static func parse(
         lines: [JSONLLineRecord],
         fileURL: URL,
         initialSessionID: String? = nil,
-        initialProjectPath: String? = nil
+        initialProjectPath: String? = nil,
+        canonicalActiveRootPath: String? = nil
     ) -> CodexParseResult {
         let sourcePath = fileURL.path
+        let identityPath = stableIdentityPath(
+            for: fileURL,
+            canonicalActiveRootPath: canonicalActiveRootPath
+        )
 
         var sessionID: String? = initialSessionID
         var projectPath: String? = initialProjectPath
@@ -160,6 +172,7 @@ public enum CodexUsageParser {
             if let prompt = extractUserPrompt(
                 object: object,
                 sourcePath: sourcePath,
+                identityPath: identityPath,
                 lineNumber: lineNumber,
                 fileURL: fileURL,
                 sessionID: sessionID,
@@ -233,7 +246,7 @@ public enum CodexUsageParser {
 
             events.append(
                 UsageEvent(
-                    id: "\(sourcePath)#\(lineNumber)",
+                    id: "\(identityPath)#\(lineNumber)",
                     agent: .codex,
                     projectPath: normalizedProjectPath,
                     projectName: normalizedProjectName,
@@ -260,9 +273,14 @@ public enum CodexUsageParser {
         fileURL: URL,
         initialSessionID: String? = nil,
         initialProjectPath: String? = nil,
+        canonicalActiveRootPath: String? = nil,
         resourceThrottle: IndexingResourceThrottle?
     ) async -> CodexParseResult {
         let sourcePath = fileURL.path
+        let identityPath = stableIdentityPath(
+            for: fileURL,
+            canonicalActiveRootPath: canonicalActiveRootPath
+        )
 
         var sessionID: String? = initialSessionID
         var projectPath: String? = initialProjectPath
@@ -306,6 +324,7 @@ public enum CodexUsageParser {
             } else if let prompt = extractUserPrompt(
                 object: object,
                 sourcePath: sourcePath,
+                identityPath: identityPath,
                 lineNumber: lineNumber,
                 fileURL: fileURL,
                 sessionID: sessionID,
@@ -369,7 +388,7 @@ public enum CodexUsageParser {
 
                     events.append(
                         UsageEvent(
-                            id: "\(sourcePath)#\(lineNumber)",
+                            id: "\(identityPath)#\(lineNumber)",
                             agent: .codex,
                             projectPath: normalizedProjectPath,
                             projectName: normalizedProjectName,
@@ -585,6 +604,7 @@ public enum CodexUsageParser {
     private static func extractUserPrompt(
         object: [String: Any],
         sourcePath: String,
+        identityPath: String,
         lineNumber: Int,
         fileURL: URL,
         sessionID: String?,
@@ -618,7 +638,7 @@ public enum CodexUsageParser {
         let contentHash = PromptExtraction.hash(content)
 
         return PromptRecord(
-            id: "\(sourcePath)#prompt#\(lineNumber)#\(contentHash)",
+            id: "\(identityPath)#prompt#\(lineNumber)#\(contentHash)",
             eventId: nil,
             agent: .codex,
             projectName: normalizedProjectName,
@@ -628,6 +648,45 @@ public enum CodexUsageParser {
             contentHash: contentHash,
             sourcePath: sourcePath
         )
+    }
+
+    private static func stableIdentityPath(
+        for fileURL: URL,
+        canonicalActiveRootPath: String?
+    ) -> String {
+        let archiveURL = fileURL.deletingLastPathComponent()
+        guard canonicalActiveRootPath != nil || archiveURL.lastPathComponent == "archived_sessions" else {
+            return fileURL.path
+        }
+
+        let filename = fileURL.lastPathComponent
+        let dateStart = filename.index(filename.startIndex, offsetBy: "rollout-".count, limitedBy: filename.endIndex)
+        guard filename.hasPrefix("rollout-"),
+              let dateStart,
+              let dateEnd = filename.index(dateStart, offsetBy: 10, limitedBy: filename.endIndex) else {
+            return fileURL.path
+        }
+        let parts = filename[dateStart..<dateEnd].split(separator: "-")
+        guard parts.count == 3,
+              parts[0].count == 4,
+              parts[1].count == 2,
+              parts[2].count == 2,
+              parts.allSatisfy({ $0.allSatisfy(\.isNumber) }) else {
+            return fileURL.path
+        }
+
+        let activeRootURL = canonicalActiveRootPath.map {
+            URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL
+        } ?? archiveURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("sessions", isDirectory: true)
+
+        return activeRootURL
+            .appendingPathComponent(String(parts[0]), isDirectory: true)
+            .appendingPathComponent(String(parts[1]), isDirectory: true)
+            .appendingPathComponent(String(parts[2]), isDirectory: true)
+            .appendingPathComponent(filename)
+            .path
     }
 
     static func parseTimestamp(_ value: String?) -> Date? {

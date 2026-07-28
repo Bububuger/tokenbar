@@ -47,3 +47,4 @@ jobs:
               --verify-tag \
               --title "TokenBar v1.8.11" \
               --notes "Correct Codex token accounting and archived history; remove the ambiguous cache-hit percentage; add opt-in Cursor account token/cost sync with directory attribution and coverage; support current Kimi Code usage including context compaction; and keep same-named project directories isolated."
+          fi

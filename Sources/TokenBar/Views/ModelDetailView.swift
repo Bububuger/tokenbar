@@ -21,6 +21,7 @@ struct ModelDetailView: View {
     @State private var metrics = ModelDetailRangeMetrics.empty
     @State private var isRangeLoading = false
     @State private var expandedSession: String?
+    @AppStorage("tokenbar.customRange.revision") private var customRangeRevision = 0
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -56,6 +57,10 @@ struct ModelDetailView: View {
             await rebuildMetrics()
         }
         .onChange(of: selectedRange) { _, _ in
+            withAnimation(.easeOut(duration: 0.12)) { isRangeLoading = true }
+        }
+        .onChange(of: customRangeRevision) { _, _ in
+            guard selectedRange == "Custom" else { return }
             withAnimation(.easeOut(duration: 0.12)) { isRangeLoading = true }
         }
     }
@@ -121,13 +126,21 @@ struct ModelDetailView: View {
     }
 
     private var metricsTaskID: String {
-        "\(modelName)|\(selectedRange)|\(events.count)|\(events.last?.id ?? "none")"
+        "\(modelName)|\(rangeRequestIdentity)|\(events.count)|\(events.last?.id ?? "none")"
+    }
+
+    private var rangeRequestIdentity: String {
+        tokenbarRangeRequestIdentity(
+            selection: selectedRange,
+            customRangeRevision: customRangeRevision
+        )
     }
 
     @MainActor
     private func rebuildMetrics() async {
         let modelName = modelName
         let selection = selectedRange
+        let requestIdentity = rangeRequestIdentity
         let events = events
         guard !events.isEmpty else {
             metrics = .empty
@@ -137,7 +150,7 @@ struct ModelDetailView: View {
         let computed = await Task.detached(priority: .userInitiated) {
             ModelDetailRangeMetrics.make(modelName: modelName, events: events, selection: selection)
         }.value
-        guard !Task.isCancelled, self.selectedRange == selection else { return }
+        guard !Task.isCancelled, requestIdentity == rangeRequestIdentity else { return }
         metrics = computed
         withAnimation(.easeOut(duration: 0.14)) { isRangeLoading = false }
     }

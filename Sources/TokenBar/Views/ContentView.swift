@@ -19,6 +19,7 @@ struct ContentView: View {
     @State private var routeTransitionTo = "none"
     @State private var routeTransitionSequence = 0
     @AppStorage("tokenbar.pricingOverrides") private var pricingOverridesJSON = "{}"
+    @AppStorage("tokenbar.customRange.revision") private var customRangeRevision = 0
 
     var body: some View {
         HStack(spacing: 0) {
@@ -169,6 +170,17 @@ struct ContentView: View {
             beginRouteTransition(from: oldValue, to: newValue)
             recordRouteRender(newValue, previous: oldValue, reason: "change")
         }
+        .onChange(of: customRangeRevision) { oldValue, newValue in
+            guard selectedRange == "Custom" else { return }
+            withAnimation(.easeOut(duration: 0.12)) {
+                isOverviewRangeUpdating = true
+            }
+            TokenBarTelemetry.event(
+                "overview.custom_range.reapply",
+                metadata: "from_revision=\(oldValue) to_revision=\(newValue) events=\(runtimeModel.eventCount)",
+                success: true
+            )
+        }
     }
 
     private var warningCount: Int {
@@ -190,11 +202,18 @@ struct ContentView: View {
     }
 
     private var sidebarProjectsTaskID: String {
-        "\(selectedRange)|\(runtimeModel.eventSignature)"
+        "\(rangeRequestIdentity)|\(runtimeModel.eventSignature)"
     }
 
     private var overviewRangeMetricsTaskID: String {
-        "\(selectedRange)|\(runtimeModel.eventSignature)"
+        "\(rangeRequestIdentity)|\(runtimeModel.eventSignature)"
+    }
+
+    private var rangeRequestIdentity: String {
+        tokenbarRangeRequestIdentity(
+            selection: selectedRange,
+            customRangeRevision: customRangeRevision
+        )
     }
 
     private var projectPageTaskID: String {
@@ -203,7 +222,7 @@ struct ContentView: View {
         }
         return [
             project.identity,
-            selectedRange,
+            rangeRequestIdentity,
             runtimeModel.eventSignature,
             pricingOverridesJSON,
         ].joined(separator: "|")
@@ -223,6 +242,7 @@ struct ContentView: View {
     @MainActor
     private func rebuildSidebarProjects(reason: String) async {
         let selection = selectedRange
+        let requestIdentity = rangeRequestIdentity
         let started = Date()
         isSidebarProjectsLoading = true
         TokenBarTelemetry.event(
@@ -244,7 +264,7 @@ struct ContentView: View {
                 )
             }.value
         }
-        guard selection == selectedRange else { return }
+        guard requestIdentity == rangeRequestIdentity else { return }
         sidebarProjectsCache = rows
         hasSidebarProjectsLoaded = true
         isSidebarProjectsLoading = false
@@ -261,7 +281,7 @@ struct ContentView: View {
                 tokenbarModelBreakdownsAsBreakdowns(events: events)
             )
         }.value
-        guard selection == selectedRange else { return }
+        guard requestIdentity == rangeRequestIdentity else { return }
         sidebarSourcesCache = sources
         sidebarModelsCache = models
         TokenBarTelemetry.timing(
@@ -274,6 +294,7 @@ struct ContentView: View {
     @MainActor
     private func rebuildOverviewRangeMetrics(reason: String) async {
         let selection = selectedRange
+        let requestIdentity = rangeRequestIdentity
         let started = Date()
         TokenBarTelemetry.event(
             "main.overview.range.compute.begin",
@@ -293,7 +314,7 @@ struct ContentView: View {
                 TokenBarOverviewRangeMetrics.make(events: events, selection: selection)
             }.value
         }
-        guard !Task.isCancelled, selection == selectedRange else { return }
+        guard !Task.isCancelled, requestIdentity == rangeRequestIdentity else { return }
         overviewRangeMetrics = metrics
         TokenBarTelemetry.timing(
             "main.overview.range.compute",
@@ -312,11 +333,12 @@ struct ContentView: View {
         }
 
         let selection = selectedRange
+        let requestIdentity = rangeRequestIdentity
         let pricingOverrides = pricingOverridesJSON
         let eventSignature = runtimeModel.eventSignature
         if projectPageData?.isCurrent(
             project: project,
-            selection: selection,
+            requestIdentity: requestIdentity,
             eventSignature: eventSignature,
             pricingOverridesJSON: pricingOverrides
         ) == true {
@@ -338,6 +360,7 @@ struct ContentView: View {
             ProjectPageData.make(
                 project: project,
                 selection: selection,
+                requestIdentity: requestIdentity,
                 events: projectEvents,
                 eventSignature: eventSignature,
                 pricingOverridesJSON: pricingOverrides
@@ -346,7 +369,7 @@ struct ContentView: View {
         guard !Task.isCancelled,
               case .project(let currentProject) = runtimeModel.mainRoute,
               currentProject == project,
-              selectedRange == selection,
+              rangeRequestIdentity == requestIdentity,
               runtimeModel.eventSignature == eventSignature,
               pricingOverridesJSON == pricingOverrides else {
             return
@@ -414,12 +437,17 @@ struct ContentView: View {
                runtimeModel.selectedProjectPath == project.projectPath {
                 let pageData = projectPageData?.isCurrent(
                     project: project,
-                    selection: selectedRange,
+                    requestIdentity: rangeRequestIdentity,
                     eventSignature: runtimeModel.eventSignature,
                     pricingOverridesJSON: pricingOverridesJSON
                 ) == true
                     ? projectPageData
-                    : ProjectPageData.placeholder(project: project, selection: selectedRange, detail: detail)
+                    : ProjectPageData.placeholder(
+                        project: project,
+                        selection: selectedRange,
+                        requestIdentity: rangeRequestIdentity,
+                        detail: detail
+                    )
                 ProjectDetailView(
                     detail: detail,
                     projectPath: pageData?.projectPath,
@@ -651,6 +679,7 @@ private struct ProjectPageData: Sendable {
     let projectName: String
     let projectPath: String?
     let selection: String
+    let requestIdentity: String
     let eventSignature: String
     let pricingOverridesJSON: String
     let allTimeSummary: UsageSummary
@@ -668,13 +697,13 @@ private struct ProjectPageData: Sendable {
 
     func isCurrent(
         project: TokenBarProjectRoute,
-        selection: String,
+        requestIdentity: String,
         eventSignature: String,
         pricingOverridesJSON: String
     ) -> Bool {
         self.projectName == project.name
             && self.projectPath == project.projectPath
-            && self.selection == selection
+            && self.requestIdentity == requestIdentity
             && self.eventSignature == eventSignature
             && self.pricingOverridesJSON == pricingOverridesJSON
     }
@@ -682,12 +711,14 @@ private struct ProjectPageData: Sendable {
     static func placeholder(
         project: TokenBarProjectRoute,
         selection: String,
+        requestIdentity: String,
         detail: ProjectDetailSnapshot
     ) -> ProjectPageData {
         ProjectPageData(
             projectName: project.name,
             projectPath: project.projectPath,
             selection: selection,
+            requestIdentity: requestIdentity,
             eventSignature: "placeholder",
             pricingOverridesJSON: "",
             allTimeSummary: detail.summary,
@@ -704,6 +735,7 @@ private struct ProjectPageData: Sendable {
     static func make(
         project: TokenBarProjectRoute,
         selection: String,
+        requestIdentity: String,
         events: [UsageEvent],
         eventSignature: String,
         pricingOverridesJSON: String
@@ -736,6 +768,7 @@ private struct ProjectPageData: Sendable {
             projectName: project.name,
             projectPath: project.projectPath,
             selection: selection,
+            requestIdentity: requestIdentity,
             eventSignature: eventSignature,
             pricingOverridesJSON: pricingOverridesJSON,
             allTimeSummary: allTimeSummary,

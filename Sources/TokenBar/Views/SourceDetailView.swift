@@ -21,6 +21,7 @@ struct SourceDetailView: View {
     @State private var metrics = SourceDetailRangeMetrics.empty
     @State private var isRangeLoading = false
     @State private var expandedSession: String?
+    @AppStorage("tokenbar.customRange.revision") private var customRangeRevision = 0
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -60,6 +61,10 @@ struct SourceDetailView: View {
             await rebuildMetrics()
         }
         .onChange(of: selectedRange) { _, _ in
+            withAnimation(.easeOut(duration: 0.12)) { isRangeLoading = true }
+        }
+        .onChange(of: customRangeRevision) { _, _ in
+            guard selectedRange == "Custom" else { return }
             withAnimation(.easeOut(duration: 0.12)) { isRangeLoading = true }
         }
     }
@@ -125,13 +130,21 @@ struct SourceDetailView: View {
     }
 
     private var metricsTaskID: String {
-        "\(sourceName)|\(selectedRange)|\(events.count)|\(events.last?.id ?? "none")"
+        "\(sourceName)|\(rangeRequestIdentity)|\(events.count)|\(events.last?.id ?? "none")"
+    }
+
+    private var rangeRequestIdentity: String {
+        tokenbarRangeRequestIdentity(
+            selection: selectedRange,
+            customRangeRevision: customRangeRevision
+        )
     }
 
     @MainActor
     private func rebuildMetrics() async {
         let sourceName = sourceName
         let selection = selectedRange
+        let requestIdentity = rangeRequestIdentity
         let events = events
         guard !events.isEmpty else {
             metrics = .empty
@@ -141,7 +154,7 @@ struct SourceDetailView: View {
         let computed = await Task.detached(priority: .userInitiated) {
             SourceDetailRangeMetrics.make(sourceName: sourceName, events: events, selection: selection)
         }.value
-        guard !Task.isCancelled, self.selectedRange == selection else { return }
+        guard !Task.isCancelled, requestIdentity == rangeRequestIdentity else { return }
         metrics = computed
         withAnimation(.easeOut(duration: 0.14)) { isRangeLoading = false }
     }

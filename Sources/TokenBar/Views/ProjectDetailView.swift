@@ -30,6 +30,7 @@ struct ProjectDetailView: View {
     @State private var hasPromptHistoryLoaded = false
     @State private var isPromptHistoryLoading = false
     @AppStorage("tokenbar.pricingOverrides") private var pricingOverridesJSON = "{}"
+    @AppStorage("tokenbar.customRange.revision") private var customRangeRevision = 0
     // CL-P1-016: which session row is expanded into the detail drawer.
     @State private var expandedSession: String?
     @State private var saveAsTemplateTarget: SavedPromptEditorTarget?
@@ -136,6 +137,17 @@ struct ProjectDetailView: View {
             TokenBarTelemetry.event(
                 "project.detail.range.select",
                 metadata: "project=\(detail.projectName) from=\(oldValue) to=\(newValue) events=\(projectEvents.count)",
+                success: true
+            )
+        }
+        .onChange(of: customRangeRevision) { oldValue, newValue in
+            guard selectedRange == "Custom" else { return }
+            withAnimation(.easeOut(duration: 0.12)) {
+                isRangeLoading = true
+            }
+            TokenBarTelemetry.event(
+                "project.detail.custom_range.reapply",
+                metadata: "project=\(detail.projectName) from_revision=\(oldValue) to_revision=\(newValue) events=\(projectEvents.count)",
                 success: true
             )
         }
@@ -252,7 +264,14 @@ struct ProjectDetailView: View {
     }
 
     private var projectMetricsTaskID: String {
-        "\(detail.projectName)|\(selectedRange)|\(events.count)|\(events.last?.id ?? "none")|\(runtimeModel.promptSignature)|\(pricingOverridesJSON)"
+        "\(detail.projectName)|\(rangeRequestIdentity)|\(events.count)|\(events.last?.id ?? "none")|\(runtimeModel.promptSignature)|\(pricingOverridesJSON)"
+    }
+
+    private var rangeRequestIdentity: String {
+        tokenbarRangeRequestIdentity(
+            selection: selectedRange,
+            customRangeRevision: customRangeRevision
+        )
     }
 
     private var projectRangeSummary: UsageSummary {
@@ -295,6 +314,7 @@ struct ProjectDetailView: View {
     private func rebuildProjectMetrics(reason: String) async {
         let projectName = detail.projectName
         let selectedRange = selectedRange
+        let requestIdentity = rangeRequestIdentity
         let events = events
         let started = Date()
         guard !events.isEmpty else {
@@ -319,7 +339,7 @@ struct ProjectDetailView: View {
                 selection: selectedRange
             )
         }.value
-        guard !Task.isCancelled, self.selectedRange == selectedRange else { return }
+        guard !Task.isCancelled, requestIdentity == rangeRequestIdentity else { return }
         projectMetrics = metrics
         let countsByDay: [Date: Int]
         let calendar = Calendar(identifier: .gregorian)
@@ -336,14 +356,14 @@ struct ProjectDetailView: View {
         } else {
             countsByDay = [:]
         }
-        guard !Task.isCancelled, self.selectedRange == selectedRange else { return }
+        guard !Task.isCancelled, requestIdentity == rangeRequestIdentity else { return }
         promptCountsByDay = countsByDay
         TokenBarTelemetry.timing(
             "project.detail.metrics.compute",
             startedAt: started,
             metadata: "project=\(projectName) range=\(selectedRange) days=\(metrics.days.count) prompt_days=\(countsByDay.count) sessions=\(metrics.recentSessions.count) models=\(metrics.modelRows.count) tokens=\(metrics.rangeSummary.totalTokens)"
         )
-        if self.selectedRange == selectedRange {
+        if requestIdentity == rangeRequestIdentity {
             withAnimation(.easeOut(duration: 0.14)) {
                 isRangeLoading = false
             }

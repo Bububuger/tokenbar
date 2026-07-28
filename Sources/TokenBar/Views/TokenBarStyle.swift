@@ -422,6 +422,10 @@ func tokenbarRangeShortLabel(_ selection: String) -> String {
     }
 }
 
+func tokenbarRangeRequestIdentity(selection: String, customRangeRevision: Int) -> String {
+    selection == "Custom" ? "\(selection)|\(customRangeRevision)" : selection
+}
+
 func tokenbarRangeWindow(
     selection: String,
     events: [UsageEvent],
@@ -2343,16 +2347,21 @@ struct DateRangeControl: View {
     let options: [String] = ["7d", "30d", "90d", "1y", "All", "Custom"]
     @Binding var selection: String
     @State private var showCustomMenu = false
+    @State private var draftFrom = ""
+    @State private var draftTo = ""
     // CL-P1-011: persist the user's last custom window so reopening the menu
     // shows the previously chosen dates.
     @AppStorage("tokenbar.customRange.from") private var customFrom = "2026-04-15"
     @AppStorage("tokenbar.customRange.to") private var customTo = "2026-05-14"
+    @AppStorage("tokenbar.customRange.revision") private var customRangeRevision = 0
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(options, id: \.self) { option in
                 Button(option) {
                     if option == "Custom" {
+                        draftFrom = customFrom
+                        draftTo = customTo
                         showCustomMenu = true
                     } else {
                         selection = option
@@ -2388,14 +2397,17 @@ struct DateRangeControl: View {
                     .foregroundStyle(TokenBarStyle.muted)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
-                    customField("From", text: $customFrom)
-                    customField("To", text: $customTo)
+                    customField("From", text: $draftFrom)
+                    customField("To", text: $draftTo)
                 }
                 HStack {
                     Spacer()
                     Button("Cancel") { showCustomMenu = false }
                         .controlSize(.small)
                     Button("Apply") {
+                        customFrom = draftFrom
+                        customTo = draftTo
+                        customRangeRevision += 1
                         selection = "Custom"
                         showCustomMenu = false
                     }
@@ -2414,8 +2426,8 @@ struct DateRangeControl: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        guard let f = formatter.date(from: customFrom),
-              let t = formatter.date(from: customTo) else { return false }
+        guard let f = formatter.date(from: draftFrom),
+              let t = formatter.date(from: draftTo) else { return false }
         return f <= t
     }
 

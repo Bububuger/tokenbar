@@ -179,7 +179,7 @@ struct PopoverView: View {
             HStack(spacing: 6) {
                 popKpiCard("Input", value: popover.today.totalInputTokens, pct: popover.inputShare, color: TokenBarStyle.input)
                 popKpiCard("Output", value: popover.today.outputTokens, pct: popover.outputShare, color: TokenBarStyle.output)
-                popKpiCard("Cache read", value: popover.today.cacheReadTokens, pct: popover.cacheReadRate, color: TokenBarStyle.cache)
+                popKpiCard("Cache read", value: popover.today.cacheReadTokens, pct: "tokens", color: TokenBarStyle.cache)
             }
             // CL-P0-013: clicking a PopKPI expands a mini detail row showing
             // today / yesterday / 7d-avg below the bar — collapses on second

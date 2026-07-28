@@ -15,7 +15,7 @@
 "tb.export_json" = "Export JSON…";
 "tb.reset_all" = "Reset All…";
 "tb.onboarding_title" = "Welcome — point TokenBar at your first source";
-"tb.onboarding_subtitle" = "TokenBar reads usage events from local data sources only. Nothing leaves this Mac. Add a source to begin indexing.";
+"tb.onboarding_subtitle" = "TokenBar is local-first. Remote access runs only for sources you explicitly enable. Add a source to begin indexing.";
 "tb.day_changed" = "Day changed — refreshing…";
 "tb.paused" = "PAUSED";
 "tb.live" = "live";

@@ -108,7 +108,7 @@ struct SourceDetailView: View {
             TokenBarKPI(title: "Total", value: tokenbarTokens(metrics.rangeSummary.totalTokens), meta: tokenbarRangeShortLabel(selectedRange), color: TokenBarStyle.muted)
             TokenBarKPI(title: "Input", value: tokenbarTokens(metrics.rangeSummary.totalInputTokens), meta: "total source input", color: TokenBarStyle.input)
             TokenBarKPI(title: "Output", value: tokenbarTokens(metrics.rangeSummary.outputTokens), meta: "source output", color: TokenBarStyle.output)
-            TokenBarKPI(title: "Cache read", value: tokenbarTokens(metrics.rangeSummary.cacheReadTokens), meta: "\(tokenbarPercent(metrics.rangeSummary.cacheReadRate)) input cached", color: TokenBarStyle.cache)
+            TokenBarKPI(title: "Cache read", value: tokenbarTokens(metrics.rangeSummary.cacheReadTokens), meta: "cached input tokens", color: TokenBarStyle.cache)
         }
     }
 

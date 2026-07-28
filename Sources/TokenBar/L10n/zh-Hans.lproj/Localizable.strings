@@ -15,7 +15,7 @@
 "tb.export_json" = "导出 JSON…";
 "tb.reset_all" = "完全重置…";
 "tb.onboarding_title" = "欢迎 — 为 TokenBar 指定第一个数据源";
-"tb.onboarding_subtitle" = "TokenBar 只读取本地数据源，不上传任何数据。添加一个数据源开始索引。";
+"tb.onboarding_subtitle" = "TokenBar 默认只读取本地数据源；远端访问仅在你显式开启后运行。添加一个数据源开始索引。";
 "tb.day_changed" = "日期切换 — 正在刷新…";
 "tb.paused" = "已暂停";
 "tb.live" = "实时";

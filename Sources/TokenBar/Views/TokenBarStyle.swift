@@ -194,6 +194,12 @@ enum TokenBarStyle {
                 dark: NSColor(red: 0.45, green: 0.88, blue: 0.82, alpha: 1),
                 light: NSColor(red: 0.18, green: 0.58, blue: 0.54, alpha: 1)
             )
+        case "Cursor":
+            return adaptiveColor(
+                "TokenBarCursor",
+                dark: NSColor(red: 0.72, green: 0.78, blue: 0.98, alpha: 1),
+                light: NSColor(red: 0.34, green: 0.42, blue: 0.78, alpha: 1)
+            )
         default:
             return muted
         }
@@ -290,7 +296,6 @@ struct TokenBarModelBreakdown: Identifiable, Hashable, Sendable {
         "\(agentName) · \(tokenbarPercent(percentage)) of tokens"
     }
 
-    var cacheReadRate: Double { summary.cacheReadRate }
 }
 
 func tokenbarTokens(_ value: Int) -> String {
@@ -544,13 +549,25 @@ func tokenbarBreakdownsFromEvents(
     let grouped: [String: [UsageEvent]]
     switch kind {
     case .project:
-        grouped = Dictionary(grouping: events, by: \.projectName)
+        grouped = Dictionary(grouping: events, by: tokenbarProjectIdentity)
     case .agent:
         grouped = Dictionary(grouping: events) { $0.agent.displayName }
     }
 
     let sorted = grouped
-        .map { UsageBreakdown(name: $0.key, summary: tokenbarSummary($0.value)) }
+        .map { identity, groupedEvents in
+            switch kind {
+            case .project:
+                let first = groupedEvents.first
+                return UsageBreakdown(
+                    name: first?.projectName ?? identity,
+                    projectPath: first?.projectPath,
+                    summary: tokenbarSummary(groupedEvents)
+                )
+            case .agent:
+                return UsageBreakdown(name: identity, summary: tokenbarSummary(groupedEvents))
+            }
+        }
         .filter { $0.summary.totalTokens > 0 }
         .sorted { lhs, rhs in
             if lhs.summary.totalTokens == rhs.summary.totalTokens {
@@ -562,6 +579,13 @@ func tokenbarBreakdownsFromEvents(
         return sorted
     }
     return Array(sorted.prefix(topCount))
+}
+
+private func tokenbarProjectIdentity(_ event: UsageEvent) -> String {
+    if let path = event.projectPath, !path.isEmpty {
+        return path
+    }
+    return event.projectName
 }
 
 /// All-time model rankings as `UsageBreakdown` rows for the sidebar Models
@@ -732,7 +756,7 @@ struct TokenBarOverviewRangeMetrics: Sendable, Hashable {
                 kind: .agent
             ),
             modelRows: tokenbarModelBreakdowns(events: rangeEvents, days: nil),
-            projectCount: Set(rangeEvents.map(\.projectName)).count,
+            projectCount: Set(rangeEvents.map(tokenbarProjectIdentity)).count,
             agentCount: Set(rangeEvents.map { $0.agent.displayName }).count,
             availabilityNote: tokenbarRangeAvailabilityNote(
                 selection: selection,
@@ -765,6 +789,8 @@ struct TokenBarOverviewRangeMetrics: Sendable, Hashable {
 
         let pricing = TokenBarPricingLookup()
         var projectSummaries: [String: UsageSummary] = [:]
+        var projectDisplayNames: [String: String] = [:]
+        var projectPaths: [String: String] = [:]
         var projectCosts: [String: Double] = [:]
         var projectAgentTokens: [String: [String: Int]] = [:]
         var agentSummaries: [String: UsageSummary] = [:]
@@ -774,19 +800,28 @@ struct TokenBarOverviewRangeMetrics: Sendable, Hashable {
 
         for row in aggregate.rows {
             let projectName = row.projectName
+            let projectIdentity = row.projectPath?.isEmpty == false ? row.projectPath! : projectName
             let agentName = row.agent.displayName
             let modelName = row.modelName?.isEmpty == false ? row.modelName! : agentName
             let tokens = row.summary.totalTokens
-            let cost = tokenbarEstimatedCost(
-                summary: row.summary,
-                modelName: row.modelName,
-                agent: row.agent,
-                pricing: pricing
+            let cost = row.actualCostUSD ?? (
+                row.agent == .cursor
+                    ? 0
+                    : tokenbarEstimatedCost(
+                        summary: row.summary,
+                        modelName: row.modelName,
+                        agent: row.agent,
+                        pricing: pricing
+                    )
             )
 
-            projectSummaries[projectName] = tokenbarAdd(projectSummaries[projectName], row.summary)
-            projectCosts[projectName, default: 0] += cost
-            projectAgentTokens[projectName, default: [:]][agentName, default: 0] += tokens
+            projectDisplayNames[projectIdentity] = projectName
+            if let projectPath = row.projectPath, !projectPath.isEmpty {
+                projectPaths[projectIdentity] = projectPath
+            }
+            projectSummaries[projectIdentity] = tokenbarAdd(projectSummaries[projectIdentity], row.summary)
+            projectCosts[projectIdentity, default: 0] += cost
+            projectAgentTokens[projectIdentity, default: [:]][agentName, default: 0] += tokens
 
             agentSummaries[agentName] = tokenbarAdd(agentSummaries[agentName], row.summary)
             agentCosts[agentName, default: 0] += cost
@@ -802,7 +837,20 @@ struct TokenBarOverviewRangeMetrics: Sendable, Hashable {
             modelTotals[modelName] = model
         }
 
-        let projectBreakdowns = sortedBreakdowns(projectSummaries)
+        let projectBreakdowns = projectSummaries.map { identity, summary in
+            UsageBreakdown(
+                name: projectDisplayNames[identity] ?? identity,
+                projectPath: projectPaths[identity],
+                summary: summary
+            )
+        }
+        .filter { $0.summary.totalTokens > 0 }
+        .sorted { lhs, rhs in
+            if lhs.summary.totalTokens == rhs.summary.totalTokens {
+                return lhs.id.localizedCaseInsensitiveCompare(rhs.id) == .orderedAscending
+            }
+            return lhs.summary.totalTokens > rhs.summary.totalTokens
+        }
         let agentBreakdowns = sortedBreakdowns(agentSummaries)
         let totalModelTokens = modelTotals.values.reduce(0) { $0 + $1.summary.totalTokens }
         let modelRows = modelTotals.compactMap { name, model -> TokenBarModelBreakdown? in
@@ -882,12 +930,14 @@ private func rankingRows(
 ) -> [TokenBarRankingRow] {
     breakdowns.compactMap { row -> TokenBarRankingRow? in
         guard row.summary.totalTokens > 0 else { return nil }
+        let identity = row.projectPath ?? row.name
         return TokenBarRankingRow(
+            identity: identity,
             name: row.name,
             summary: row.summary,
             totalTokens: row.summary.totalTokens,
-            subtitle: rankedNames(subtitles[row.name], fallback: fallback),
-            cost: costs[row.name] ?? 0
+            subtitle: rankedNames(subtitles[identity], fallback: fallback),
+            cost: costs[identity] ?? 0
         )
     }
 }
@@ -1008,6 +1058,16 @@ struct TokenBarPricingLookup {
     }
 
     func estimatedCost(for event: UsageEvent) -> Double {
+        if let actualCostUSD = event.actualCostUSD {
+            return actualCostUSD
+        }
+        // Cursor Dashboard is authoritative for Cursor list-price cost.
+        // Missing cost is unavailable, not a license to silently substitute a
+        // generic model estimate.
+        if event.agent == .cursor {
+            return 0
+        }
+
         let modelName = event.modelName?.isEmpty == false ? event.modelName! : event.agent.displayName
         if let pricing = values(for: modelName),
            let inputRate = Double(pricing.input),
@@ -1232,13 +1292,30 @@ enum TokenBarRankingKind: Sendable {
 /// gaps that previously rendered as the hard-coded "local indexed usage"
 /// string with no cost column.
 struct TokenBarRankingRow: Identifiable, Hashable, Sendable {
+    let identity: String
     let name: String
     let summary: UsageSummary
     let totalTokens: Int
     let subtitle: String
     let cost: Double
 
-    var id: String { name }
+    var id: String { identity }
+
+    init(
+        identity: String? = nil,
+        name: String,
+        summary: UsageSummary,
+        totalTokens: Int,
+        subtitle: String,
+        cost: Double
+    ) {
+        self.identity = identity ?? name
+        self.name = name
+        self.summary = summary
+        self.totalTokens = totalTokens
+        self.subtitle = subtitle
+        self.cost = cost
+    }
 }
 
 /// Build display-ready ranking rows for projects or agents.
@@ -1278,7 +1355,7 @@ func tokenbarRankingRowsForFilteredEvents(
     let eventsByName = Dictionary(grouping: events) { event in
         switch kind {
         case .project:
-            event.projectName
+            tokenbarProjectIdentity(event)
         case .agent:
             event.agent.displayName
         }
@@ -1286,8 +1363,10 @@ func tokenbarRankingRowsForFilteredEvents(
 
     return rows.compactMap { row -> TokenBarRankingRow? in
         guard row.summary.totalTokens > 0 else { return nil }
-        let rowEvents = eventsByName[row.name] ?? []
+        let identity = row.projectPath ?? row.name
+        let rowEvents = eventsByName[identity] ?? []
         return TokenBarRankingRow(
+            identity: identity,
             name: row.name,
             summary: row.summary,
             totalTokens: row.summary.totalTokens,
@@ -2549,7 +2628,6 @@ struct ModelBreakdownTable: View {
         HStack(spacing: 14) {
             Text("Model").frame(width: 230, alignment: .leading)
             Text("Uncached · Output · Read · Write").frame(maxWidth: .infinity, alignment: .leading)
-            Text("Read %").frame(width: 72, alignment: .trailing)
             Text("Tokens").frame(width: 92, alignment: .trailing)
             Text("Cost").frame(width: 82, alignment: .trailing)
         }
@@ -2598,15 +2676,6 @@ private struct ModelBreakdownRow: View {
                 .minimumScaleFactor(0.78)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text(tokenbarPercent(row.cacheReadRate))
-                .font(.caption)
-                .foregroundStyle(TokenBarStyle.cache)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 2)
-                .background(TokenBarStyle.cache.opacity(0.10), in: Capsule())
-                .frame(width: 72, alignment: .trailing)
-                .help("\(row.summary.cacheReadTokens.formatted()) of \(row.summary.totalInputTokens.formatted()) input tokens served from cache")
 
             Text(tokenbarCompactTokens(row.summary.totalTokens))
                 .font(.system(size: 12.5, design: .monospaced))

@@ -111,8 +111,51 @@ struct TokenBarOverviewRangeData: Sendable, Hashable {
     let window: TokenBarRangeWindow
 }
 
+enum CursorDashboardSyncPhase: Sendable, Hashable {
+    case idle
+    case syncing
+    case succeeded
+    case failed
+}
+
+struct CursorDashboardStatus: Sendable, Hashable {
+    var isEnabled: Bool
+    var phase: CursorDashboardSyncPhase
+    var lastSuccessAt: Date?
+    var totalEvents: Int
+    var tokenEvents: Int
+    var attributedTokenEvents: Int
+    var costEvents: Int
+    var message: String?
+
+    var tokenCoverage: Double? {
+        totalEvents > 0 ? Double(tokenEvents) / Double(totalEvents) : nil
+    }
+
+    var attributionCoverage: Double? {
+        tokenEvents > 0 ? Double(attributedTokenEvents) / Double(tokenEvents) : nil
+    }
+
+    var costCoverage: Double? {
+        tokenEvents > 0 ? Double(costEvents) / Double(tokenEvents) : nil
+    }
+
+    static let disabled = CursorDashboardStatus(
+        isEnabled: false,
+        phase: .idle,
+        lastSuccessAt: nil,
+        totalEvents: 0,
+        tokenEvents: 0,
+        attributedTokenEvents: 0,
+        costEvents: 0,
+        message: nil
+    )
+}
+
 @MainActor
 final class TokenBarRuntimeModel: ObservableObject {
+    private static let cursorDashboardEnabledKey = "tokenbar.cursorDashboard.enabled"
+
     @Published private(set) var snapshot: UsageSnapshot
     @Published private(set) var diagnostics: DiagnosticsSnapshot
     @Published private(set) var prompts: [PromptRecord]
@@ -133,6 +176,7 @@ final class TokenBarRuntimeModel: ObservableObject {
     @Published private(set) var popoverSnapshot: TokenBarPopoverSnapshot
     @Published private(set) var indexingState: TokenBarIndexingState = .idle
     @Published private(set) var isBootstrapping = true
+    @Published private(set) var cursorDashboardStatus: CursorDashboardStatus
 
     /// Stable "we have not finished the first measurement yet" signal. Flips
     /// at most once per app lifetime (bootstrap completion or initial-index
@@ -211,6 +255,11 @@ final class TokenBarRuntimeModel: ObservableObject {
 
     private let settingsStore: SettingsStore
     private let usageStore: UsageStore
+    private let cursorRepository: UsageRepository?
+    private let cursorCredentialStore: CursorCredentialStore
+    private let cursorDefaults: UserDefaults
+    private var cursorDashboardSyncTask: Task<CursorDashboardSyncResult, Error>?
+    private var cursorDashboardSyncGeneration = 0
     var store: UsageStore { usageStore }
     private let builtInSources: [any InspectableUsageEventSource]
     private var fileWatcher: RecursiveFSEventsWatcher?
@@ -278,10 +327,16 @@ final class TokenBarRuntimeModel: ObservableObject {
     init(
         settingsStore: SettingsStore,
         usageStore: UsageStore,
-        sources: [any InspectableUsageEventSource]
+        sources: [any InspectableUsageEventSource],
+        cursorRepository: UsageRepository? = nil,
+        cursorCredentialStore: CursorCredentialStore = CursorCredentialStore(),
+        cursorDefaults: UserDefaults = .standard
     ) {
         self.settingsStore = settingsStore
         self.usageStore = usageStore
+        self.cursorRepository = cursorRepository
+        self.cursorCredentialStore = cursorCredentialStore
+        self.cursorDefaults = cursorDefaults
         self.builtInSources = sources
         self.snapshot = UsageAggregator.makeSnapshot(from: [])
         self.customSources = []
@@ -305,6 +360,16 @@ final class TokenBarRuntimeModel: ObservableObject {
         self.popoverSnapshot = .empty
         self.indexingState = .idle
         self.isBootstrapping = true
+        self.cursorDashboardStatus = CursorDashboardStatus(
+            isEnabled: cursorDefaults.bool(forKey: Self.cursorDashboardEnabledKey),
+            phase: .idle,
+            lastSuccessAt: nil,
+            totalEvents: 0,
+            tokenEvents: 0,
+            attributedTokenEvents: 0,
+            costEvents: 0,
+            message: nil
+        )
         self.diagnostics = DiagnosticsSnapshot(
             dataSourceStatuses: [],
             lastIndexedAt: nil,
@@ -313,6 +378,7 @@ final class TokenBarRuntimeModel: ObservableObject {
             refreshState: .idle,
             rebuildError: nil
         )
+        loadCursorDashboardMetadata()
 
         Task { [weak self] in
             await self?.bootstrapIfNeeded()
@@ -834,6 +900,15 @@ final class TokenBarRuntimeModel: ObservableObject {
             "runtime.refresh.stage.checkpoint_engine_run",
             startedAt: stageStarted,
             metadata: throttleMetadata
+        )
+        stageStarted = Date()
+        if cursorDashboardStatus.isEnabled {
+            await syncCursorDashboard(fullResync: cursorDashboardStatus.lastSuccessAt == nil)
+        }
+        TokenBarTelemetry.timing(
+            "runtime.refresh.stage.cursor_dashboard",
+            startedAt: stageStarted,
+            metadata: "trigger=\(trigger) enabled=\(cursorDashboardStatus.isEnabled)"
         )
         stageStarted = Date()
         await applyRetention(referenceDate: now)
@@ -1643,9 +1718,13 @@ final class TokenBarRuntimeModel: ObservableObject {
             let modelName = event.modelName ?? event.agent.displayName
             let tokenCount = event.inputTokens + event.outputTokens + event.cacheTokens
             let current = totalsByModel[modelName] ?? (tokens: 0, cost: 0)
+            let eventCost = event.actualCostUSD
+                ?? (event.agent == .cursor
+                    ? 0
+                    : Double(tokenCount) * event.agent.defaultCostPerMillionTokens / 1_000_000)
             totalsByModel[modelName] = (
                 tokens: current.tokens + tokenCount,
-                cost: current.cost + Double(tokenCount) * event.agent.defaultCostPerMillionTokens / 1_000_000
+                cost: current.cost + eventCost
             )
         }
         let totalTokens = totalsByModel.values.reduce(0) { $0 + $1.tokens }
@@ -1878,8 +1957,190 @@ final class TokenBarRuntimeModel: ObservableObject {
         }
     }
 
+    func enableCursorDashboard(cookieHeader: String) async {
+        do {
+            try cursorCredentialStore.save(cookieHeader)
+            cursorDefaults.set(true, forKey: Self.cursorDashboardEnabledKey)
+            cursorDashboardStatus.isEnabled = true
+            cursorDashboardStatus.message = nil
+            let needsFullSync = cursorDashboardStatus.lastSuccessAt == nil
+            await syncCursorDashboard(fullResync: needsFullSync)
+            await publishCurrentStoreState(refreshState: refreshState)
+        } catch {
+            cursorDefaults.set(false, forKey: Self.cursorDashboardEnabledKey)
+            cursorDashboardStatus.isEnabled = false
+            cursorDashboardStatus.phase = .failed
+            cursorDashboardStatus.message = "Credential could not be stored in Keychain."
+        }
+    }
+
+    func disableCursorDashboard() {
+        cancelCursorDashboardSync()
+        cursorDefaults.set(false, forKey: Self.cursorDashboardEnabledKey)
+        cursorDashboardStatus.isEnabled = false
+        cursorDashboardStatus.phase = .idle
+        cursorDashboardStatus.message = "Remote sync is disabled. The last local snapshot is retained."
+    }
+
+    func forgetCursorDashboardCredential() {
+        cancelCursorDashboardSync()
+        cursorDefaults.set(false, forKey: Self.cursorDashboardEnabledKey)
+        cursorDashboardStatus.isEnabled = false
+        cursorDashboardStatus.phase = .idle
+        do {
+            try cursorCredentialStore.delete()
+            cursorDashboardStatus.message = "Credential removed. The last local snapshot is retained."
+        } catch {
+            cursorDashboardStatus.phase = .failed
+            cursorDashboardStatus.message = "Credential could not be removed from Keychain."
+        }
+    }
+
+    func fullResyncCursorDashboard() async {
+        guard cursorDashboardStatus.isEnabled else { return }
+        await syncCursorDashboard(fullResync: true)
+        await publishCurrentStoreState(refreshState: refreshState)
+    }
+
+    private func cancelCursorDashboardSync() {
+        cursorDashboardSyncGeneration += 1
+        cursorDashboardSyncTask?.cancel()
+        cursorDashboardSyncTask = nil
+    }
+
+    private func loadCursorDashboardMetadata() {
+        guard let metadata = try? cursorRepository?.cursorRemoteSnapshotMetadata() else {
+            return
+        }
+        cursorDashboardStatus.lastSuccessAt = metadata.lastSuccessAt
+        cursorDashboardStatus.totalEvents = metadata.lastWindowTotalEvents
+        cursorDashboardStatus.tokenEvents = metadata.lastWindowTokenEvents
+        cursorDashboardStatus.attributedTokenEvents = metadata.lastWindowAttributedEvents
+        cursorDashboardStatus.costEvents = metadata.lastWindowCostEvents
+        if metadata.lastError != nil {
+            cursorDashboardStatus.phase = .failed
+            cursorDashboardStatus.message = "The previous sync failed. The last successful snapshot was kept."
+        } else if metadata.lastSuccessAt != nil {
+            cursorDashboardStatus.phase = .succeeded
+        }
+    }
+
+    private func syncCursorDashboard(fullResync: Bool) async {
+        guard cursorDashboardStatus.isEnabled,
+              cursorDashboardSyncTask == nil,
+              let cursorRepository else {
+            return
+        }
+
+        let cookie: String
+        do {
+            guard let storedCookie = try cursorCredentialStore.load() else {
+                cursorDashboardStatus.phase = .failed
+                cursorDashboardStatus.message = "Credential is missing. Paste it again to re-enable sync."
+                return
+            }
+            cookie = storedCookie
+        } catch {
+            cursorDashboardStatus.phase = .failed
+            cursorDashboardStatus.message = "Credential could not be read from Keychain."
+            return
+        }
+
+        cursorDashboardStatus.phase = .syncing
+        cursorDashboardStatus.message = fullResync ? "Fetching full account history…" : "Refreshing the latest 35 days…"
+        let now = Date()
+        let startDate = fullResync
+            ? nil
+            : Calendar(identifier: .gregorian).date(byAdding: .day, value: -35, to: now)
+        let service = CursorDashboardUsageSyncService(repository: cursorRepository)
+        cursorDashboardSyncGeneration += 1
+        let generation = cursorDashboardSyncGeneration
+        let syncTask = Task {
+            try await service.sync(
+                cookie: cookie,
+                startDate: startDate,
+                // Freeze the query window for both full and rolling syncs so
+                // newly arriving usage cannot reshuffle offset-based pages
+                // while this collection run is in progress.
+                endDate: now
+            )
+        }
+        cursorDashboardSyncTask = syncTask
+
+        do {
+            let result = try await syncTask.value
+            guard generation == cursorDashboardSyncGeneration,
+                  cursorDashboardStatus.isEnabled else {
+                return
+            }
+            cursorDashboardSyncTask = nil
+            cursorDashboardStatus.phase = .succeeded
+            cursorDashboardStatus.lastSuccessAt = Date()
+            cursorDashboardStatus.totalEvents = result.totalEvents
+            cursorDashboardStatus.tokenEvents = result.tokenEvents
+            cursorDashboardStatus.attributedTokenEvents = result.attributedEvents
+            cursorDashboardStatus.costEvents = result.costEvents
+            cursorDashboardStatus.message = fullResync
+                ? "Full account snapshot saved locally."
+                : "Latest 35-day window refreshed."
+            // Refresh from persisted metadata so the UI reflects the same
+            // last-success timestamp and counters as the atomic snapshot.
+            loadCursorDashboardMetadata()
+            TokenBarTelemetry.event(
+                "cursor_dashboard.sync",
+                metadata: "full=\(fullResync) events=\(result.totalEvents) token_events=\(result.tokenEvents)",
+                success: true,
+                elapsed: Date().timeIntervalSince(now)
+            )
+        } catch {
+            guard generation == cursorDashboardSyncGeneration,
+                  cursorDashboardStatus.isEnabled else {
+                return
+            }
+            cursorDashboardSyncTask = nil
+            loadCursorDashboardMetadata()
+            cursorDashboardStatus.phase = .failed
+            cursorDashboardStatus.message = cursorDashboardFailureMessage(error)
+            TokenBarTelemetry.event(
+                "cursor_dashboard.sync",
+                metadata: "full=\(fullResync)",
+                success: false,
+                elapsed: Date().timeIntervalSince(now)
+            )
+        }
+    }
+
+    private func cursorDashboardFailureMessage(_ error: Error) -> String {
+        if let cursorError = error as? CursorDashboardUsageError {
+            switch cursorError {
+            case .invalidCookie, .httpStatus(401), .httpStatus(403):
+                return "Cursor rejected the credential. The previous snapshot was kept."
+            case .httpStatus:
+                return "Cursor Dashboard is temporarily unavailable. The previous snapshot was kept."
+            case .invalidResponse, .invalidSchema:
+                return "Cursor's private interface changed or returned unexpected data. The previous snapshot was kept."
+            case .inconsistentTotalCount, .incompletePagination, .ambiguousBoundaryOverlap,
+                 .unstableSnapshot, .pageLimitExceeded:
+                return "Cursor pagination was incomplete. The previous snapshot was kept."
+            }
+        }
+        if error is URLError {
+            return "Network sync failed. The previous snapshot was kept."
+        }
+        return "Cursor sync failed. The previous snapshot was kept."
+    }
+
     func resetAllTokenBarData() async {
         let started = Date()
+        cancelCursorDashboardSync()
+        var credentialRemovalFailed = false
+        do {
+            try cursorCredentialStore.delete()
+        } catch {
+            credentialRemovalFailed = true
+        }
+        cursorDefaults.removeObject(forKey: Self.cursorDashboardEnabledKey)
+        cursorDashboardStatus = .disabled
         do {
             try await usageStore.resetAllData()
             try savedPromptCommandSync.removeAll()
@@ -1901,9 +2162,13 @@ final class TokenBarRuntimeModel: ObservableObject {
                 referenceDate: referenceDate,
                 refreshState: .idle
             )
+            if credentialRemovalFailed {
+                cursorDashboardStatus.phase = .failed
+                cursorDashboardStatus.message = "Local data was reset, but the Cursor credential could not be removed from Keychain."
+            }
             TokenBarTelemetry.event(
                 "settings.reset_all",
-                success: true,
+                success: !credentialRemovalFailed,
                 elapsed: Date().timeIntervalSince(started)
             )
         } catch {
@@ -2907,7 +3172,9 @@ final class TokenBarRuntimeModel: ObservableObject {
 
     static func live() -> TokenBarRuntimeModel {
         let settingsStore = SettingsStore()
-        let usageStore = (try? UsageStore(databaseURL: UsageDatabase.defaultDatabaseURL())) ?? UsageStore()
+        let databaseURL = UsageDatabase.defaultDatabaseURL()
+        let usageStore = (try? UsageStore(databaseURL: databaseURL)) ?? UsageStore()
+        let cursorRepository = try? UsageRepository(databaseURL: databaseURL)
         let useSampleData = ProcessInfo.processInfo.environment["TOKENBAR_USE_SAMPLE_DATA"] == "1"
         let sources: [any InspectableUsageEventSource] = useSampleData
             ? [SampleUsageEventSource()]
@@ -2915,7 +3182,8 @@ final class TokenBarRuntimeModel: ObservableObject {
         return TokenBarRuntimeModel(
             settingsStore: settingsStore,
             usageStore: usageStore,
-            sources: sources
+            sources: sources,
+            cursorRepository: cursorRepository
         )
     }
 }

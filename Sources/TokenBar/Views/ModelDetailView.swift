@@ -104,7 +104,7 @@ struct ModelDetailView: View {
             TokenBarKPI(title: "Total", value: tokenbarTokens(metrics.rangeSummary.totalTokens), meta: tokenbarRangeShortLabel(selectedRange), color: TokenBarStyle.muted)
             TokenBarKPI(title: "Input", value: tokenbarTokens(metrics.rangeSummary.totalInputTokens), meta: "total model input", color: TokenBarStyle.input)
             TokenBarKPI(title: "Output", value: tokenbarTokens(metrics.rangeSummary.outputTokens), meta: "model output", color: TokenBarStyle.output)
-            TokenBarKPI(title: "Cache read", value: tokenbarTokens(metrics.rangeSummary.cacheReadTokens), meta: "\(tokenbarPercent(metrics.rangeSummary.cacheReadRate)) input cached", color: TokenBarStyle.cache)
+            TokenBarKPI(title: "Cache read", value: tokenbarTokens(metrics.rangeSummary.cacheReadTokens), meta: "cached input tokens", color: TokenBarStyle.cache)
         }
     }
 
@@ -163,8 +163,8 @@ struct TokenBreakdownCard: View {
                 HStack(alignment: .top, spacing: 12) {
                     breakdownColumn("Uncached input", value: summary.inputTokens, pct: inPct, color: TokenBarStyle.input)
                     breakdownColumn("Output", value: summary.outputTokens, pct: outPct, color: TokenBarStyle.output)
-                    breakdownColumn("Cache read", value: summary.cacheReadTokens, pct: cacheReadPct, color: TokenBarStyle.cache)
-                    breakdownColumn("Cache write", value: summary.cacheCreationTokens, pct: cacheWritePct, color: TokenBarStyle.cache.opacity(0.55))
+                    breakdownColumn("Cache read", value: summary.cacheReadTokens, pct: nil, color: TokenBarStyle.cache)
+                    breakdownColumn("Cache write", value: summary.cacheCreationTokens, pct: nil, color: TokenBarStyle.cache.opacity(0.55))
                 }
                 GeometryReader { geo in
                     HStack(spacing: 0) {
@@ -177,23 +177,13 @@ struct TokenBreakdownCard: View {
                 }
                 .frame(height: 6)
                 .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
-                HStack {
-                    Spacer()
-                    Text("\(tokenbarPercent(summary.cacheReadRate)) input served from cache")
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(TokenBarStyle.cache)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 3)
-                        .background(TokenBarStyle.cache.opacity(0.10), in: Capsule())
-                        .overlay(Capsule().stroke(TokenBarStyle.cache.opacity(0.18), lineWidth: 1))
-                }
             }
             .frame(maxWidth: .infinity, minHeight: 246, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, minHeight: 286)
     }
 
-    private func breakdownColumn(_ label: String, value: Int, pct: Double, color: Color) -> some View {
+    private func breakdownColumn(_ label: String, value: Int, pct: Double?, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 5) {
                 Circle().fill(color).frame(width: 6, height: 6)
@@ -208,9 +198,11 @@ struct TokenBreakdownCard: View {
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-            Text(tokenbarPercent(pct))
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(TokenBarStyle.faint)
+            if let pct {
+                Text(tokenbarPercent(pct))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(TokenBarStyle.faint)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

@@ -29,6 +29,7 @@ struct SettingsView: View {
     @State private var resetAck = ""                // CL-P1-019: type "RESET"
     @State private var sourceSaveMessage: String?
     @State private var sourcePendingDelete: CustomSourceRecord?
+    @State private var cursorCookie = ""
     @State private var settingsTab: SettingsTab = .general
     private let themeOptions = ["Dark", "Light"]
     private let pricingColumns: [CGFloat] = [180, 86, 86, 86, 86, 78, 108]
@@ -162,6 +163,7 @@ struct SettingsView: View {
                         case .pricing:
                             pricingSection
                         case .sources:
+                            cursorDashboardSection
                             customSourcesSection
                             retentionSection
                         }
@@ -244,7 +246,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Settings")
                     .font(.system(size: 28, weight: .semibold, design: .rounded))
-                Text("Local-first. Nothing ever leaves your machine.")
+                Text("Local-first. Remote access only runs for sources you explicitly enable.")
                     .font(.caption)
                     .foregroundStyle(TokenBarStyle.muted)
             }
@@ -540,6 +542,150 @@ struct SettingsView: View {
         }
     }
 
+    private var cursorDashboardSection: some View {
+        let status = runtimeModel.cursorDashboardStatus
+        return settingsSection(
+            title: "Cursor Dashboard (Experimental)",
+            subtitle: "Optional account-wide usage sync. This is not limited to activity on this Mac and uses a private Cursor interface that may change."
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                if !status.isEnabled {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Paste the Cookie request header from an authenticated Cursor Dashboard session.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(TokenBarStyle.muted)
+                        SecureField("Cookie header", text: $cursorCookie)
+                            .textFieldStyle(.roundedBorder)
+                            .privacySensitive()
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    if status.isEnabled {
+                        Button("Disable") {
+                            runtimeModel.disableCursorDashboard()
+                        }
+                        .buttonStyle(SettingsButtonStyle())
+
+                        Button("Manual Full Resync") {
+                            Task { await runtimeModel.fullResyncCursorDashboard() }
+                        }
+                        .buttonStyle(SettingsButtonStyle(kind: .primary))
+                        .disabled(status.phase == .syncing)
+                    } else {
+                        Button("Enable & Sync") {
+                            let credential = cursorCookie
+                            cursorCookie = ""
+                            Task { await runtimeModel.enableCursorDashboard(cookieHeader: credential) }
+                        }
+                        .buttonStyle(SettingsButtonStyle(kind: .primary))
+                        .disabled(
+                            cursorCookie.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                || status.phase == .syncing
+                        )
+                    }
+
+                    Button("Forget Credential", role: .destructive) {
+                        cursorCookie = ""
+                        runtimeModel.forgetCursorDashboardCredential()
+                    }
+                    .buttonStyle(SettingsButtonStyle(kind: .danger))
+
+                    if status.phase == .syncing {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+
+                Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 7) {
+                    GridRow {
+                        cursorStatusLabel("Status")
+                        Text(cursorStatusText(status))
+                            .foregroundStyle(cursorStatusColor(status))
+                    }
+                    GridRow {
+                        cursorStatusLabel("Last success")
+                        Text(status.lastSuccessAt?.formatted(date: .abbreviated, time: .shortened) ?? "Never")
+                    }
+                    GridRow {
+                        cursorStatusLabel("Token coverage")
+                        Text(cursorCoverageText(status.tokenEvents, status.totalEvents))
+                    }
+                    GridRow {
+                        cursorStatusLabel("Directory attribution")
+                        Text(cursorCoverageText(status.attributedTokenEvents, status.tokenEvents))
+                    }
+                    GridRow {
+                        cursorStatusLabel("Cost coverage")
+                        Text(cursorCoverageText(status.costEvents, status.tokenEvents))
+                    }
+                }
+                .font(.system(size: 11.5, design: .monospaced))
+                .foregroundStyle(TokenBarStyle.muted)
+
+                Text("Coverage counters describe the most recently fetched window; retained history may span longer.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(TokenBarStyle.faint)
+
+                if let costCoverage = status.costCoverage, costCoverage < 1 {
+                    Text("Some Cursor costs are unavailable. Amounts shown include known Cursor costs only.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(TokenBarStyle.warn)
+                }
+                if status.tokenEvents > status.attributedTokenEvents {
+                    Text("Unattributed remote events remain under Cursor · Unattributed; they are not presented as local activity.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(TokenBarStyle.muted)
+                }
+                if let message = status.message {
+                    Text(message)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(status.phase == .failed ? TokenBarStyle.error : TokenBarStyle.muted)
+                }
+            }
+        }
+    }
+
+    private func cursorStatusLabel(_ value: String) -> some View {
+        Text(value)
+            .foregroundStyle(TokenBarStyle.faint)
+            .frame(width: 132, alignment: .leading)
+    }
+
+    private func cursorCoverageText(_ numerator: Int, _ denominator: Int) -> String {
+        guard denominator > 0 else { return "Unavailable" }
+        let percent = Double(numerator) / Double(denominator)
+        return "\(numerator.formatted()) / \(denominator.formatted()) (\(percent.formatted(.percent.precision(.fractionLength(0)))))"
+    }
+
+    private func cursorStatusText(_ status: CursorDashboardStatus) -> String {
+        if !status.isEnabled { return "Disabled" }
+        switch status.phase {
+        case .idle:
+            return "Enabled"
+        case .syncing:
+            return "Syncing"
+        case .succeeded:
+            return "Up to date"
+        case .failed:
+            return "Sync failed · previous snapshot kept"
+        }
+    }
+
+    private func cursorStatusColor(_ status: CursorDashboardStatus) -> Color {
+        if !status.isEnabled {
+            return TokenBarStyle.muted
+        }
+        switch status.phase {
+        case .failed:
+            return TokenBarStyle.error
+        case .syncing:
+            return TokenBarStyle.warn
+        case .idle, .succeeded:
+            return status.isEnabled ? TokenBarStyle.cache : TokenBarStyle.muted
+        }
+    }
+
     private var retentionSection: some View {
         settingsSection(
             title: "Data & Retention",
@@ -601,7 +747,7 @@ struct SettingsView: View {
                     }
                     .disabled(resetAck != "RESET")
                 } message: {
-                    Text("This wipes TokenBar's local index, saved prompts, custom sources, and pricing overrides. Upstream agent logs stay on disk and can be re-indexed later. Type RESET to confirm.")
+                    Text("This wipes TokenBar's local index, saved prompts, custom sources, pricing overrides, and the Cursor Dashboard credential and opt-in. Upstream agent logs stay on disk and can be re-indexed later. Type RESET to confirm.")
                 }
             }
         }

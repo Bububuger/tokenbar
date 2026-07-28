@@ -15,7 +15,7 @@
 "tb.export_json" = "JSON exportieren…";
 "tb.reset_all" = "Alles zurücksetzen…";
 "tb.onboarding_title" = "Willkommen — TokenBar auf erste Quelle ausrichten";
-"tb.onboarding_subtitle" = "TokenBar liest Nutzungs­ereignisse nur aus lokalen Datenquellen. Nichts verlässt diesen Mac. Fügen Sie eine Quelle hinzu.";
+"tb.onboarding_subtitle" = "TokenBar arbeitet standardmäßig lokal. Fernzugriff erfolgt nur für ausdrücklich aktivierte Quellen. Fügen Sie eine Quelle hinzu.";
 "tb.day_changed" = "Tageswechsel — wird aktualisiert…";
 "tb.paused" = "PAUSIERT";
 "tb.live" = "live";

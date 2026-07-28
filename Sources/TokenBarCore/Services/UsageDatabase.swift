@@ -396,6 +396,29 @@ public final class UsageDatabase: @unchecked Sendable {
             WHERE agent = 'codex'
             """)
         }
+        migrator.registerMigration("v20_add_actual_cost_and_cursor_sync") { db in
+            let eventColumns = try db.columns(in: "usage_events")
+            if !eventColumns.contains(where: { $0.name == "actual_cost_usd" }) {
+                try db.execute(sql: "ALTER TABLE usage_events ADD COLUMN actual_cost_usd REAL;")
+            }
+            try db.execute(sql: """
+            CREATE TABLE IF NOT EXISTS remote_source_snapshots (
+                source_id TEXT PRIMARY KEY,
+                last_success_at INTEGER,
+                coverage_start INTEGER,
+                coverage_end INTEGER,
+                total_events INTEGER NOT NULL DEFAULT 0 CHECK(total_events >= 0),
+                token_events INTEGER NOT NULL DEFAULT 0 CHECK(token_events >= 0),
+                attributed_events INTEGER NOT NULL DEFAULT 0 CHECK(attributed_events >= 0),
+                cost_events INTEGER NOT NULL DEFAULT 0 CHECK(cost_events >= 0),
+                last_error TEXT
+            );
+            """)
+            try db.execute(sql: """
+            CREATE INDEX IF NOT EXISTS idx_events_source_timestamp
+            ON usage_events(source_path, timestamp)
+            """)
+        }
         return migrator
     }
 }

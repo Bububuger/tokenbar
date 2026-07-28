@@ -194,7 +194,7 @@ struct ProjectDetailView: View {
             TokenBarKPI(title: "Total", value: tokenbarTokens(projectRangeSummary.totalTokens), meta: tokenbarRangeShortLabel(selectedRange), color: TokenBarStyle.muted)
             TokenBarKPI(title: "Input", value: tokenbarTokens(projectRangeSummary.totalInputTokens), meta: "total project input", color: TokenBarStyle.input)
             TokenBarKPI(title: "Output", value: tokenbarTokens(projectRangeSummary.outputTokens), meta: "project output", color: TokenBarStyle.output)
-            TokenBarKPI(title: "Cache read", value: tokenbarTokens(projectRangeSummary.cacheReadTokens), meta: "\(tokenbarPercent(projectRangeSummary.cacheReadRate)) input cached", color: TokenBarStyle.cache)
+            TokenBarKPI(title: "Cache read", value: tokenbarTokens(projectRangeSummary.cacheReadTokens), meta: "cached input tokens", color: TokenBarStyle.cache)
         }
     }
 

@@ -13,6 +13,7 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
     case kiro
     case kimi
     case antigravity
+    case cursor
     case custom
 
     public var displayName: String {
@@ -41,6 +42,8 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
             "Kimi Code"
         case .antigravity:
             "Antigravity"
+        case .cursor:
+            "Cursor"
         case .custom:
             "Custom"
         }
@@ -72,6 +75,8 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
             0.15
         case .antigravity:
             0.50
+        case .cursor:
+            2.00
         case .custom:
             0.15
         }
@@ -91,6 +96,7 @@ public enum ParserKind: String, Sendable, Hashable {
     case kiro
     case kimi
     case antigravity
+    case cursor
     case sample
     case custom
 }
@@ -332,12 +338,14 @@ public struct UsageCostProjection: Sendable, Hashable {
 
 public struct UsageBreakdown: Identifiable, Sendable, Hashable {
     public let name: String
+    public let projectPath: String?
     public let summary: UsageSummary
 
-    public var id: String { name }
+    public var id: String { projectPath ?? name }
 
-    public init(name: String, summary: UsageSummary) {
+    public init(name: String, projectPath: String? = nil, summary: UsageSummary) {
         self.name = name
+        self.projectPath = projectPath
         self.summary = summary
     }
 }
@@ -356,15 +364,26 @@ public struct UsageEventTimeBounds: Sendable, Hashable {
 
 public struct UsageRangeAggregateRow: Sendable, Hashable {
     public let projectName: String
+    public let projectPath: String?
     public let agent: AgentKind
     public let modelName: String?
     public let summary: UsageSummary
+    public let actualCostUSD: Double?
 
-    public init(projectName: String, agent: AgentKind, modelName: String?, summary: UsageSummary) {
+    public init(
+        projectName: String,
+        projectPath: String? = nil,
+        agent: AgentKind,
+        modelName: String?,
+        summary: UsageSummary,
+        actualCostUSD: Double? = nil
+    ) {
         self.projectName = projectName
+        self.projectPath = projectPath
         self.agent = agent
         self.modelName = modelName
         self.summary = summary
+        self.actualCostUSD = actualCostUSD
     }
 }
 
@@ -496,6 +515,7 @@ public struct UsageEvent: Identifiable, Sendable, Hashable {
     public let cacheCreationTokens: Int
     public let reasoningTokens: Int?
     public let modelName: String?
+    public let actualCostUSD: Double?
     public let sourcePath: String
     public let parser: ParserKind
     public let confidence: Double
@@ -515,6 +535,7 @@ public struct UsageEvent: Identifiable, Sendable, Hashable {
         cacheCreationTokens: Int,
         reasoningTokens: Int?,
         modelName: String? = nil,
+        actualCostUSD: Double? = nil,
         sourcePath: String,
         parser: ParserKind,
         confidence: Double
@@ -531,6 +552,7 @@ public struct UsageEvent: Identifiable, Sendable, Hashable {
         self.cacheCreationTokens = cacheCreationTokens
         self.reasoningTokens = reasoningTokens
         self.modelName = modelName
+        self.actualCostUSD = actualCostUSD
         self.sourcePath = sourcePath
         self.parser = parser
         self.confidence = confidence

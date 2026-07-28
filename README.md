@@ -5,8 +5,8 @@
 ### See your AI token spend, live.
 ### 把每一笔 AI 编码 token，钉在你的菜单栏上。
 
-A macOS menu-bar app that aggregates **Claude Code · Codex · Gemini CLI · Hermes · OpenClaw · OpenCode · Warp · Pi · Qoder · Kiro · Kimi Code · Antigravity** usage from your local logs.
-Live tokens, real cost — by project, by agent, by model. **No data upload · No signup · No account.** (One outbound call: an opt-out 24h GitHub-releases version check.)
+A macOS menu-bar app that aggregates **Claude Code · Codex · Gemini CLI · Hermes · OpenClaw · OpenCode · Warp · Pi · Qoder · Kiro · Kimi Code · Antigravity · Cursor** usage.
+Live tokens, real cost — by project, by agent, by model. **Local-first · No signup · No telemetry.** Optional Cursor account sync is off by default and requires explicit setup.
 
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-007AFF?logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![Swift 6](https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white)](https://www.swift.org/)
@@ -33,9 +33,9 @@ Live tokens, real cost — by project, by agent, by model. **No data upload · N
 
 ## ✨ Why TokenBar / 为什么做 TokenBar
 
-You're paying for Claude, Codex, Gemini and a long tail of CLI agents that all silently burn tokens on disk. The bills land monthly; the answers don't. **TokenBar reads the logs those agents already write locally** and gives you the one number you actually want — *what does today look like, by project, by model, in real money* — without ever shipping a byte off your machine.
+You're paying for Claude, Codex, Gemini and a long tail of coding agents that all silently burn tokens. The bills land monthly; the answers don't. **TokenBar reads local logs by default** and gives you the one number you actually want — *what does today look like, by project, by model, in real money*. Cursor account usage is available as a separate, explicit opt-in sync.
 
-> **中文**：你同时在用 Claude、Codex、Gemini 和一堆命令行 Agent，每家都在悄悄烧 token，账单按月寄来、明细却拼不起来。TokenBar 直接读这些 Agent **已经写在本地磁盘上**的日志，把"今天花了多少、按项目 / 按模型 / 折成多少钱"这件唯一你真正关心的事，钉在菜单栏上 —— 全程本地，0 上传、0 注册。
+> **中文**：你同时在用 Claude、Codex、Gemini 和一堆编码 Agent，每家都在悄悄烧 token，账单按月寄来、明细却拼不起来。TokenBar 默认直接读取这些 Agent **已经写在本地磁盘上**的日志，把“今天花了多少、按项目 / 按模型 / 折成多少钱”钉在菜单栏上；Cursor 账号用量是独立的显式可选同步。
 
 <br />
 
@@ -45,7 +45,7 @@ You're paying for Claude, Codex, Gemini and a long tail of CLI agents that all s
 |---|---|---|
 | 🟩 | **Menu-bar first** | A cascade-fill glyph that grows with today's tokens vs. your 30-day peak. A glance, not a tab. <br/> *菜单栏图标会随今日 token 占 30 天峰值的比例「水位上涨」，一眼即看，不必再切窗口。* |
 | 💰 | **Real cost, by model** | USD per million tokens, with per-model price overrides and instant delta recompute. <br/> *每百万 token 美元计价、支持自定义覆盖；改完立刻全局重算。* |
-| 🔒 | **Local-only data** | No agents, no sidecars, no account. *Your usage data never leaves your machine — TokenBar only reads what's already on disk and writes to a local SQLite.* The only outbound network call is an opt-out 24h GitHub-releases version check (toggle in Settings). <br/> *无 Agent、无 sidecar、无账号；使用数据全程留在本机 SQLite。唯一一次对外网络请求是可关闭的 24h GitHub release 版本检查。* |
+| 🔒 | **Local-first data** | Local sources stay on this Mac in SQLite; there is no telemetry or cloud sync. Optional Cursor account sync is off by default, stores its credential in Keychain, and contacts only Cursor after you explicitly enable it. The GitHub release check remains separately opt-out. <br/> *本地数据源只落本机 SQLite，无遥测、无云同步。Cursor 账号同步默认关闭，需显式开启，凭证存入钥匙串，且仅请求 Cursor；GitHub 版本检查可单独关闭。* |
 | 🔎 | **Drill into the source** | Click the popover, slice by project · agent · model · session · prompt. <br/> *点开 Popover 即可按 项目 · Agent · 模型 · 会话 · Prompt 任意切片下钻。* |
 | 🎴 | **`tokenbar-report` skill** | Wrapped-style yearly recap across **3 anime power-system personas** (BLEACH · Hunter × Hunter · JOJO) — pick a card, get a different lens on the same dataset; lens-isolation gate keeps the three reports < 30% overlap. <br/> *年度回顾以三个动漫能力体系人格切镜头（死神 / 猎人 / JOJO），抽卡随机切换；强制视角隔离 < 30% 重合度。* |
 | 🛠 | **`tbar` CLI** | Fourteen subcommands — twelve read queries (`events`, `prompts`, `projects`, `sessions`, `models`, `agents`, `summary`, `timeline`, `sources`, `checkpoints`, `warnings`, `schema`), plus `rebuild` (write, full reindex) and `prompt` (saved-template `/tbar:<slug>` integration). <br/> *十四条命令，与 App 同一份本地索引；`rebuild` 是 CLI 版「Reparse all」，`prompt` 直通菜单栏保存的 `/tbar:<slug>` 模板。* |
@@ -60,7 +60,7 @@ You're paying for Claude, Codex, Gemini and a long tail of CLI agents that all s
 
 ## 🔌 Supported Sources / 已支持的数据源
 
-TokenBar ships with **twelve** zero-config engines. Local-only data — TokenBar only reads the files these CLIs already write themselves; nothing about your usage ever ships off your machine.
+TokenBar ships with **thirteen** built-in engines. Twelve read local files with zero configuration. Cursor also preserves local human prompts for project history; exact account-wide token and cost totals require the optional Dashboard sync in Settings.
 
 <p align="center">
   <img src="docs/assets/sources-grid.png" alt="Claude Code · Codex · Gemini CLI · Hermes · OpenClaw · OpenCode · Warp · Pi · Qoder · Kiro · Kimi Code · Antigravity" width="100%" />
@@ -162,12 +162,13 @@ Output lands at `~/Desktop/tokenbar-report-YYYY-MM-DD/` — one folder, four HTM
 
 ## 🔒 Privacy / 隐私
 
-- **Local-only by construction.** TokenBar does not contain *any* network code in the data path. There is no telemetry endpoint, no analytics SDK, no cloud sync.
+- **Local-first by construction.** Local agent logs, prompts, and the SQLite index stay on this Mac. There is no telemetry endpoint, analytics SDK, or TokenBar cloud sync.
+- **Cursor remote sync is explicit and isolated.** It is off by default, uses a private Cursor Dashboard interface that may change, and is account-wide rather than limited to this Mac. Its credential is stored in macOS Keychain; disabling it stops requests and keeps the last local snapshot, while “Forget credential” removes the Keychain item.
 - **One SQLite database** at `~/Library/Application Support/TokenBar/tokenbar.sqlite` — owned by you, exportable as JSON from `Settings → Data & Retention`, wipe-able from the same panel (type `RESET` to confirm). Reset clears TokenBar's index and saved templates; it does not delete upstream Claude/Codex/Gemini logs.
 - **Prompt capture is local-first and default-on.** TokenBar stores user prompt text in the local SQLite index so project history, `tbar prompts`, and `tokenbar-report` can work. You can hide prompt text in the UI or wipe stored prompts from Diagnostics; upstream agent logs remain the source of truth.
 - **Pricing model is local.** USD-per-million-token rates live in `Settings → Pricing` and you can override any of them per-model.
 
-> **中文**：TokenBar 的数据通路里**没有任何网络代码**。所有索引都落在本机 SQLite，可导出 JSON、RESET 清空 TokenBar 自己的索引与模板；不会删除上游 Agent 原始日志。Prompt 明文默认本地索引，用于项目历史、CLI 查询和报告生成，可在 UI 隐藏或从 Diagnostics 清除已存 prompt。
+> **中文**：TokenBar 默认只读取本地 Agent 日志，索引落在本机 SQLite，无遥测或 TokenBar 云同步。Cursor 远端同步默认关闭，显式开启后才会携带钥匙串中的凭证请求 Cursor；它统计账号范围，并不等同于这台 Mac 的用量。RESET 可清空 TokenBar 索引、模板和 Cursor 凭证，不会删除上游 Agent 原始日志。Prompt 明文默认本地索引，用于项目历史、CLI 查询和报告生成，可在 UI 隐藏或从 Diagnostics 清除已存 prompt。
 
 <br />
 

@@ -372,9 +372,20 @@ public enum UsageAggregator {
             let modelName = event.modelName ?? event.agent.displayName
             let tokenCount = event.inputTokens + event.outputTokens + event.cacheTokens
             let current = totals[modelName] ?? (tokens: 0, cost: 0)
+            let eventCost: Double
+            if let actualCostUSD = event.actualCostUSD {
+                eventCost = actualCostUSD
+            } else if event.agent == .cursor {
+                // Cursor Dashboard's model-list `totalCents` is authoritative.
+                // Missing cost stays unavailable instead of falling back to a
+                // generic per-token estimate.
+                eventCost = 0
+            } else {
+                eventCost = Double(tokenCount) * event.agent.defaultCostPerMillionTokens / 1_000_000
+            }
             totals[modelName] = (
                 tokens: current.tokens + tokenCount,
-                cost: current.cost + Double(tokenCount) * event.agent.defaultCostPerMillionTokens / 1_000_000
+                cost: current.cost + eventCost
             )
         }
         let totalTokens = totalsByModel.values.reduce(0) { $0 + $1.tokens }

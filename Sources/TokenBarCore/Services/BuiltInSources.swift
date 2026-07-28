@@ -31,6 +31,7 @@ public enum BuiltInSources {
             KiroUsageEventSource(),
             KimiUsageEventSource(),
             AntigravityUsageEventSource(),
+            CursorUsageEventSource(),
         ]
     }
 

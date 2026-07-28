@@ -1214,7 +1214,7 @@ private struct OverviewPage: View {
             kpiCard(title: "Total", value: runtimeModel.snapshot.today.totalTokens, meta: "today", color: TokenBarStyle.muted)
             kpiCard(title: "Input", value: runtimeModel.snapshot.today.totalInputTokens, meta: inputShare, color: TokenBarStyle.input)
             kpiCard(title: "Output", value: runtimeModel.snapshot.today.outputTokens, meta: outputShare, color: TokenBarStyle.output)
-            kpiCard(title: "Cache read", value: runtimeModel.snapshot.today.cacheReadTokens, meta: cacheReadRate, color: TokenBarStyle.cache)
+            kpiCard(title: "Cache read", value: runtimeModel.snapshot.today.cacheReadTokens, meta: "cached input tokens", color: TokenBarStyle.cache)
         }
     }
 
@@ -1306,8 +1306,6 @@ private struct OverviewPage: View {
 
     private var inputShare: String { shareText(runtimeModel.snapshot.today.totalInputTokens, total: runtimeModel.snapshot.today.totalTokens) }
     private var outputShare: String { shareText(runtimeModel.snapshot.today.outputTokens, total: runtimeModel.snapshot.today.totalTokens) }
-    private var cacheReadRate: String { tokenbarPercent(runtimeModel.snapshot.today.cacheReadRate) }
-
     private func shareText(_ value: Int, total: Int) -> String {
         guard total > 0 else { return "0%" }
         return "\(Int((Double(value) / Double(total) * 100).rounded()))%"

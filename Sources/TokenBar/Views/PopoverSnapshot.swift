@@ -15,7 +15,6 @@ struct TokenBarPopoverSnapshot: Sendable, Hashable {
     let yesterdayDeltaText: String
     let inputShare: String
     let outputShare: String
-    let cacheReadRate: String
     let hourly: HourlyUsageSnapshot
     let hourlyActivityText: String
     let projectRows: [TokenBarPopoverRankingRow]
@@ -76,10 +75,11 @@ struct TokenBarPopoverSnapshot: Sendable, Hashable {
                 continue
             }
 
+            let projectIdentity = event.projectPath?.isEmpty == false ? event.projectPath! : event.projectName
             last30Cost += eventCost
-            projectCosts[event.projectName, default: 0] += eventCost
+            projectCosts[projectIdentity, default: 0] += eventCost
             agentCosts[agentName, default: 0] += eventCost
-            projectAgentTokens[event.projectName, default: [:]][agentName, default: 0] += eventTokens
+            projectAgentTokens[projectIdentity, default: [:]][agentName, default: 0] += eventTokens
             agentModelTokens[agentName, default: [:]][modelName, default: 0] += eventTokens
 
             var model = modelTotals[modelName] ?? ModelAccumulator()
@@ -112,10 +112,11 @@ struct TokenBarPopoverSnapshot: Sendable, Hashable {
             .map { row in
                 TokenBarPopoverRankingRow(
                     kind: .project,
+                    identity: row.id,
                     name: row.name,
-                    subtitle: rankedNames(projectAgentTokens[row.name], fallback: "local indexed project"),
+                    subtitle: rankedNames(projectAgentTokens[row.id], fallback: "local indexed project"),
                     summary: row.summary,
-                    cost: projectCosts[row.name] ?? 0,
+                    cost: projectCosts[row.id] ?? 0,
                     badge: nil,
                     agentName: nil
                 )
@@ -152,7 +153,7 @@ struct TokenBarPopoverSnapshot: Sendable, Hashable {
                 subtitle: "\(agentName) · \(tokenbarPercent(percentage)) of tokens",
                 summary: summary,
                 cost: model.cost,
-                badge: "\(tokenbarPercent(summary.cacheReadRate)) cache read",
+                badge: "\(tokenbarCompactTokens(summary.cacheReadTokens)) cache read",
                 agentName: agentName
             )
         }
@@ -178,7 +179,6 @@ struct TokenBarPopoverSnapshot: Sendable, Hashable {
             yesterdayDeltaText: yesterdayDeltaText(todayTokens: snapshot.today.totalTokens, yesterdayTokens: yesterdayTotal),
             inputShare: shareText(snapshot.today.totalInputTokens, total: snapshot.today.totalTokens),
             outputShare: shareText(snapshot.today.outputTokens, total: snapshot.today.totalTokens),
-            cacheReadRate: tokenbarPercent(snapshot.today.cacheReadRate),
             hourly: hourly,
             hourlyActivityText: hourlyActivityText,
             projectRows: Array(projectRows),
@@ -240,6 +240,7 @@ struct TokenBarPopoverRankingRow: Identifiable, Sendable, Hashable {
     }
 
     let kind: Kind
+    let identity: String
     let name: String
     let subtitle: String
     let summary: UsageSummary
@@ -247,7 +248,27 @@ struct TokenBarPopoverRankingRow: Identifiable, Sendable, Hashable {
     let badge: String?
     let agentName: String?
 
-    var id: String { "\(kind.rawValue)-\(name)" }
+    var id: String { "\(kind.rawValue)-\(identity)" }
+
+    init(
+        kind: Kind,
+        identity: String? = nil,
+        name: String,
+        subtitle: String,
+        summary: UsageSummary,
+        cost: Double,
+        badge: String?,
+        agentName: String?
+    ) {
+        self.kind = kind
+        self.identity = identity ?? name
+        self.name = name
+        self.subtitle = subtitle
+        self.summary = summary
+        self.cost = cost
+        self.badge = badge
+        self.agentName = agentName
+    }
 }
 
 private struct ModelAccumulator {

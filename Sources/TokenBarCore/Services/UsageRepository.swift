@@ -1,8 +1,51 @@
 import Foundation
 import GRDB
 
+public enum CursorSnapshotError: Error, Sendable, Equatable {
+    case invalidMetadata
+    case duplicateEventIdentifier
+}
+
 public struct UsageRepository: Sendable {
     private let database: UsageDatabase
+    public static let cursorRemoteSourcePath = "cursor-dashboard"
+
+    public struct RemoteSourceSnapshotMetadata: Sendable, Hashable {
+        public let sourceID: String
+        public let lastSuccessAt: Date?
+        public let coverageStart: Date?
+        public let coverageEnd: Date?
+        /// Counts describe the most recently fetched query window, not all
+        /// retained history after a rolling replacement.
+        public let lastWindowTotalEvents: Int
+        public let lastWindowTokenEvents: Int
+        public let lastWindowAttributedEvents: Int
+        /// Token events in the last window with a valid `totalCents`.
+        public let lastWindowCostEvents: Int
+        public let lastError: String?
+
+        public init(
+            sourceID: String,
+            lastSuccessAt: Date?,
+            coverageStart: Date?,
+            coverageEnd: Date?,
+            lastWindowTotalEvents: Int,
+            lastWindowTokenEvents: Int,
+            lastWindowAttributedEvents: Int,
+            lastWindowCostEvents: Int,
+            lastError: String?
+        ) {
+            self.sourceID = sourceID
+            self.lastSuccessAt = lastSuccessAt
+            self.coverageStart = coverageStart
+            self.coverageEnd = coverageEnd
+            self.lastWindowTotalEvents = lastWindowTotalEvents
+            self.lastWindowTokenEvents = lastWindowTokenEvents
+            self.lastWindowAttributedEvents = lastWindowAttributedEvents
+            self.lastWindowCostEvents = lastWindowCostEvents
+            self.lastError = lastError
+        }
+    }
 
     public struct CollectionSignatures: Sendable, Hashable {
         public let eventCount: Int
@@ -114,6 +157,143 @@ public struct UsageRepository: Sendable {
         }
     }
 
+    /// Atomically replaces the authoritative Cursor dashboard snapshot in the
+    /// supplied half-open window. Any insertion or metadata failure rolls the
+    /// transaction back, preserving the previous successful snapshot.
+    @discardableResult
+    public func replaceCursorRemoteSnapshot(
+        events: [UsageEvent],
+        replacementStart: Date? = nil,
+        replacementEnd: Date? = nil,
+        coverageStart: Date?,
+        coverageEnd: Date?,
+        totalEvents: Int,
+        tokenEvents: Int,
+        attributedEvents: Int,
+        costEvents: Int,
+        succeededAt: Date = Date()
+    ) throws -> Int {
+        guard totalEvents >= 0, tokenEvents >= 0, attributedEvents >= 0, costEvents >= 0,
+              tokenEvents <= totalEvents, attributedEvents <= tokenEvents, costEvents <= tokenEvents,
+              events.allSatisfy({
+                  $0.agent == .cursor && $0.sourcePath == Self.cursorRemoteSourcePath
+              })
+        else {
+            throw CursorSnapshotError.invalidMetadata
+        }
+
+        return try database.queue.write { db in
+            var arguments = StatementArguments([Self.cursorRemoteSourcePath])
+            var bounds: [String] = []
+            if let replacementStart {
+                bounds.append("timestamp >= ?")
+                arguments += [replacementStart.tokenBarMillisecondsSince1970]
+            }
+            if let replacementEnd {
+                bounds.append("timestamp < ?")
+                arguments += [replacementEnd.tokenBarMillisecondsSince1970]
+            }
+            let boundSQL = bounds.isEmpty ? "" : " AND " + bounds.joined(separator: " AND ")
+            try db.execute(
+                sql: "DELETE FROM usage_events WHERE source_path = ?\(boundSQL)",
+                arguments: arguments
+            )
+
+            var inserted = 0
+            for event in events {
+                inserted += try insertEvent(event, db: db)
+            }
+            guard inserted == events.count else {
+                throw CursorSnapshotError.duplicateEventIdentifier
+            }
+
+            try db.execute(
+                sql: """
+                INSERT INTO remote_source_snapshots
+                    (source_id, last_success_at, coverage_start, coverage_end,
+                     total_events, token_events, attributed_events, cost_events, last_error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                ON CONFLICT(source_id) DO UPDATE SET
+                    last_success_at = excluded.last_success_at,
+                    coverage_start = CASE
+                        WHEN remote_source_snapshots.coverage_start IS NULL THEN excluded.coverage_start
+                        WHEN excluded.coverage_start IS NULL THEN remote_source_snapshots.coverage_start
+                        ELSE MIN(remote_source_snapshots.coverage_start, excluded.coverage_start)
+                    END,
+                    coverage_end = CASE
+                        WHEN remote_source_snapshots.coverage_end IS NULL THEN excluded.coverage_end
+                        WHEN excluded.coverage_end IS NULL THEN remote_source_snapshots.coverage_end
+                        ELSE MAX(remote_source_snapshots.coverage_end, excluded.coverage_end)
+                    END,
+                    total_events = excluded.total_events,
+                    token_events = excluded.token_events,
+                    attributed_events = excluded.attributed_events,
+                    cost_events = excluded.cost_events,
+                    last_error = NULL
+                """,
+                arguments: [
+                    Self.cursorRemoteSourcePath,
+                    succeededAt.tokenBarMillisecondsSince1970,
+                    coverageStart?.tokenBarMillisecondsSince1970,
+                    coverageEnd?.tokenBarMillisecondsSince1970,
+                    totalEvents,
+                    tokenEvents,
+                    attributedEvents,
+                    costEvents,
+                ]
+            )
+            return inserted
+        }
+    }
+
+    /// Records only a stable, non-sensitive error code. Existing events and
+    /// successful coverage metadata are intentionally untouched.
+    public func recordCursorRemoteSnapshotFailure(errorCode: String) throws {
+        let safeCode = Self.sanitizeRemoteErrorCode(errorCode)
+        try database.queue.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO remote_source_snapshots
+                    (source_id, total_events, token_events, attributed_events, cost_events, last_error)
+                VALUES (?, 0, 0, 0, 0, ?)
+                ON CONFLICT(source_id) DO UPDATE SET last_error = excluded.last_error
+                """,
+                arguments: [Self.cursorRemoteSourcePath, safeCode]
+            )
+        }
+    }
+
+    public func cursorRemoteSnapshotMetadata() throws -> RemoteSourceSnapshotMetadata? {
+        try database.queue.read { db in
+            guard let row = try Row.fetchOne(
+                db,
+                sql: """
+                SELECT source_id, last_success_at, coverage_start, coverage_end,
+                       total_events, token_events, attributed_events, cost_events, last_error
+                FROM remote_source_snapshots
+                WHERE source_id = ?
+                """,
+                arguments: [Self.cursorRemoteSourcePath]
+            ) else {
+                return nil
+            }
+            let lastSuccess: Int64? = row["last_success_at"]
+            let coverageStart: Int64? = row["coverage_start"]
+            let coverageEnd: Int64? = row["coverage_end"]
+            return RemoteSourceSnapshotMetadata(
+                sourceID: row["source_id"],
+                lastSuccessAt: lastSuccess.map(Date.tokenBarDate(millisecondsSince1970:)),
+                coverageStart: coverageStart.map(Date.tokenBarDate(millisecondsSince1970:)),
+                coverageEnd: coverageEnd.map(Date.tokenBarDate(millisecondsSince1970:)),
+                lastWindowTotalEvents: row["total_events"],
+                lastWindowTokenEvents: row["token_events"],
+                lastWindowAttributedEvents: row["attributed_events"],
+                lastWindowCostEvents: row["cost_events"],
+                lastError: row["last_error"]
+            )
+        }
+    }
+
     public func deleteWatermark(sourcePath: String) throws {
         try database.queue.write { db in
             try db.execute(sql: "DELETE FROM source_watermarks WHERE source_path = ?", arguments: [sourcePath])
@@ -203,7 +383,7 @@ public struct UsageRepository: Sendable {
             let rows = try Row.fetchAll(db, sql: """
             SELECT id, agent, project_path, project_name, session_id, timestamp,
                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens, model_name,
-                   source_path, parser, confidence
+                   actual_cost_usd, source_path, parser, confidence
             FROM usage_events
             ORDER BY timestamp ASC, id ASC
             """)
@@ -230,7 +410,7 @@ public struct UsageRepository: Sendable {
                 rows = try Row.fetchAll(db, sql: """
                 SELECT id, agent, project_path, project_name, session_id, timestamp,
                        input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens, model_name,
-                       source_path, parser, confidence
+                       actual_cost_usd, source_path, parser, confidence
                 FROM usage_events
                 WHERE project_name = ?
                 ORDER BY timestamp DESC, id DESC
@@ -240,7 +420,7 @@ public struct UsageRepository: Sendable {
                 rows = try Row.fetchAll(db, sql: """
                 SELECT id, agent, project_path, project_name, session_id, timestamp,
                        input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens, model_name,
-                       source_path, parser, confidence
+                       actual_cost_usd, source_path, parser, confidence
                 FROM usage_events
                 WHERE project_name = ?
                 ORDER BY timestamp DESC, id DESC
@@ -596,15 +776,21 @@ public struct UsageRepository: Sendable {
         try database.queue.read { db in
             let rows = try Row.fetchAll(db, sql: """
             SELECT project_name,
+                   project_path,
                    agent,
                    COALESCE(model_name, '') AS model_name,
                    SUM(input_tokens) AS input_tokens,
                    SUM(output_tokens) AS output_tokens,
                    SUM(cache_read_tokens) AS cache_read_tokens,
-                   SUM(cache_creation_tokens) AS cache_creation_tokens
+                   SUM(cache_creation_tokens) AS cache_creation_tokens,
+                   CASE
+                       WHEN agent = 'cursor' THEN COALESCE(SUM(actual_cost_usd), 0)
+                       WHEN COUNT(*) = COUNT(actual_cost_usd) THEN SUM(actual_cost_usd)
+                       ELSE NULL
+                   END AS actual_cost_usd
             FROM usage_events
             WHERE timestamp >= ? AND timestamp < ?
-            GROUP BY project_name, agent, COALESCE(model_name, '')
+            GROUP BY project_name, project_path, agent, COALESCE(model_name, '')
             """, arguments: [
                 start.tokenBarMillisecondsSince1970,
                 end.tokenBarMillisecondsSince1970,
@@ -617,6 +803,7 @@ public struct UsageRepository: Sendable {
                 let rawModelName = row["model_name"] as String
                 return UsageRangeAggregateRow(
                     projectName: row["project_name"],
+                    projectPath: row["project_path"],
                     agent: agent,
                     modelName: rawModelName.isEmpty ? nil : rawModelName,
                     summary: UsageSummary(
@@ -624,7 +811,8 @@ public struct UsageRepository: Sendable {
                         outputTokens: row["output_tokens"],
                         cacheReadTokens: row["cache_read_tokens"],
                         cacheCreationTokens: row["cache_creation_tokens"]
-                    )
+                    ),
+                    actualCostUSD: row["actual_cost_usd"]
                 )
             }
 
@@ -1083,8 +1271,8 @@ public struct UsageRepository: Sendable {
         try db.execute(
             sql: """
             INSERT OR IGNORE INTO usage_events
-            (id, agent, project_path, project_name, session_id, timestamp, input_tokens, output_tokens, cache_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens, model_name, source_path, parser, confidence)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, agent, project_path, project_name, session_id, timestamp, input_tokens, output_tokens, cache_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens, model_name, actual_cost_usd, source_path, parser, confidence)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             arguments: [
                 event.id,
@@ -1100,6 +1288,7 @@ public struct UsageRepository: Sendable {
                 event.cacheCreationTokens,
                 event.reasoningTokens,
                 event.modelName,
+                event.actualCostUSD,
                 event.sourcePath,
                 event.parser.rawValue,
                 event.confidence,
@@ -1316,19 +1505,21 @@ public struct UsageRepository: Sendable {
         }
         let rows = try Row.fetchAll(db, sql: """
         SELECT project_name AS name,
+               project_path,
                SUM(input_tokens) AS input_tokens,
                SUM(output_tokens) AS output_tokens,
                SUM(cache_read_tokens) AS cache_read_tokens,
                SUM(cache_creation_tokens) AS cache_creation_tokens
         FROM usage_events
         WHERE timestamp >= ? AND timestamp < ?
-        GROUP BY project_name
+        GROUP BY project_name, project_path
         ORDER BY (SUM(input_tokens) + SUM(output_tokens) + SUM(cache_read_tokens) + SUM(cache_creation_tokens)) DESC, name ASC
         \(limitSQL)
         """, arguments: arguments)
         return rows.map { row in
             UsageBreakdown(
                 name: row["name"] as String,
+                projectPath: row["project_path"],
                 summary: UsageSummary(
                     inputTokens: row["input_tokens"],
                     outputTokens: row["output_tokens"],
@@ -1401,7 +1592,8 @@ public struct UsageRepository: Sendable {
                SUM(input_tokens) AS input_tokens,
                SUM(output_tokens) AS output_tokens,
                SUM(cache_read_tokens) AS cache_read_tokens,
-               SUM(cache_creation_tokens) AS cache_creation_tokens
+               SUM(cache_creation_tokens) AS cache_creation_tokens,
+               COALESCE(SUM(actual_cost_usd), 0) AS actual_cost_usd
         FROM usage_events
         \(whereClause)
         GROUP BY COALESCE(model_name, ''), agent
@@ -1427,7 +1619,11 @@ public struct UsageRepository: Sendable {
             outputByModel[modelName] = UsageModelSummary(
                 name: modelName,
                 totalTokens: existing.totalTokens + summary.totalTokens,
-                cost: existing.cost + (Double(summary.totalTokens) * agent.defaultCostPerMillionTokens / 1_000_000)
+                cost: existing.cost + (
+                    agent == .cursor
+                        ? (row["actual_cost_usd"] as Double)
+                        : (Double(summary.totalTokens) * agent.defaultCostPerMillionTokens / 1_000_000)
+                )
             )
         }
         return Array(outputByModel.values)
@@ -1499,6 +1695,7 @@ public struct UsageRepository: Sendable {
             cacheCreationTokens: row["cache_creation_tokens"],
             reasoningTokens: row["reasoning_tokens"],
             modelName: row["model_name"],
+            actualCostUSD: row["actual_cost_usd"],
             sourcePath: row["source_path"],
             parser: parser,
             confidence: row["confidence"]
@@ -1612,6 +1809,13 @@ public struct UsageRepository: Sendable {
             db,
             sql: "SELECT COALESCE(warnings, 0) FROM checkpoints ORDER BY id DESC LIMIT 1"
         ) ?? 0
+    }
+
+    private static func sanitizeRemoteErrorCode(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._:-"))
+        let scalars = value.unicodeScalars.prefix(80).map { allowed.contains($0) ? Character(String($0)) : "_" }
+        let sanitized = String(scalars)
+        return sanitized.isEmpty ? "unknown_error" : sanitized
     }
 
     private struct CollectionFingerprint: Sendable {

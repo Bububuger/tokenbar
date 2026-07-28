@@ -96,9 +96,11 @@ struct KimiUsageParserTests {
             under: session,
             agentID: "main",
             content: """
-            {"type":"context.append_loop_event","usageScope":"turn","time":1785200000000,"model":"ignored","usage":{"inputOther":999,"output":999,"inputCacheRead":999,"inputCacheCreation":999}}
-            {"type":"usage.record","usageScope":"session","time":1785200000500,"model":"ignored","usage":{"inputOther":888,"output":888,"inputCacheRead":888,"inputCacheCreation":888}}
+            {"type":"context.append_loop_event","usageScope":"turn","time":1785200000000,"usage":{"inputOther":999,"output":999,"inputCacheRead":999,"inputCacheCreation":999},"event":{"usage":{"inputOther":999,"output":999,"inputCacheRead":999,"inputCacheCreation":999}}}
+            {"type":"usage.record","usageScope":"session","time":1785200000500,"model":"kimi-for-coding","usage":{"inputOther":8,"output":9,"inputCacheRead":10,"inputCacheCreation":11}}
             {"type":"usage.record","usageScope":"turn","time":1785200001000,"model":"kimi-k2.5","usage":{"inputOther":11,"output":22,"inputCacheRead":33,"inputCacheCreation":44}}
+            {"type":"usage.record","time":1785200001500,"model":"kimi-for-coding","usage":{"inputOther":1,"output":2,"inputCacheRead":3,"inputCacheCreation":4}}
+            {"type":"usage.record","usageScope":"request","time":1785200001750,"model":"ignored","usage":{"inputOther":777,"output":777,"inputCacheRead":777,"inputCacheCreation":777}}
             """
         )
         let subagentFile = try writeWire(
@@ -116,8 +118,16 @@ struct KimiUsageParserTests {
             lines: lines(try String(contentsOf: mainFile, encoding: .utf8)),
             fileURL: mainFile
         )
-        #expect(main.events.count == 1)
-        let event = try #require(main.events.first)
+        #expect(main.events.count == 3)
+        let compaction = main.events[0]
+        #expect(compaction.inputTokens == 8)
+        #expect(compaction.outputTokens == 9)
+        #expect(compaction.cacheReadTokens == 10)
+        #expect(compaction.cacheCreationTokens == 11)
+        #expect(compaction.modelName == "kimi-for-coding")
+        #expect(compaction.id == "\(mainFile.path)#kimi#line-2")
+
+        let event = main.events[1]
         #expect(event.inputTokens == 11)
         #expect(event.outputTokens == 22)
         #expect(event.cacheReadTokens == 33)
@@ -130,6 +140,13 @@ struct KimiUsageParserTests {
         #expect(event.projectName == "moon")
         #expect(event.id == "\(mainFile.path)#kimi#line-3")
 
+        let missingScope = main.events[2]
+        #expect(missingScope.inputTokens == 1)
+        #expect(missingScope.outputTokens == 2)
+        #expect(missingScope.cacheReadTokens == 3)
+        #expect(missingScope.cacheCreationTokens == 4)
+        #expect(missingScope.id == "\(mainFile.path)#kimi#line-4")
+
         let repeated = KimiUsageParser.parse(
             lines: lines(try String(contentsOf: mainFile, encoding: .utf8)),
             fileURL: mainFile
@@ -138,7 +155,7 @@ struct KimiUsageParserTests {
             lines: lines(try String(contentsOf: subagentFile, encoding: .utf8)),
             fileURL: subagentFile
         )
-        #expect(repeated.events.first?.id == event.id)
+        #expect(repeated.events.map(\.id) == main.events.map(\.id))
         #expect(subagent.events.first?.id != event.id)
         #expect(subagent.events.first?.sessionId == "session_1234")
         #expect(subagent.events.first?.projectPath == "/work/projects/moon")

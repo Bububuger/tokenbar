@@ -3,7 +3,9 @@ import Foundation
 /// Parses current Kimi Code sessions at `~/.kimi-code/sessions/**/wire.jsonl`
 /// and legacy sessions at `~/.kimi/sessions/**/wire.jsonl`.
 ///
-/// One JSONL line per assistant turn with FLAT usage fields:
+/// Current `usage.record` rows contain one independent model invocation with
+/// nested usage fields and a `turn` or `session` scope. Missing scope is treated
+/// as `session` for replay compatibility. Legacy rows use FLAT usage fields:
 /// `input_other` (input excluding cache), `output`, `input_cache_read`,
 /// `input_cache_creation`. Mapping: `input = input_other`,
 /// `cacheRead = input_cache_read`, `cacheCreation = input_cache_creation`.
@@ -29,10 +31,17 @@ public enum KimiUsageParser {
                 continue
             }
 
-            if let type = object["type"] as? String {
-                guard type == "usage.record",
-                      object["usageScope"] as? String == "turn" else {
+            if object["type"] != nil {
+                // Ignore context.append_loop_event mirrors so usage is not
+                // counted twice. Missing usageScope follows replay's session default.
+                guard object["type"] as? String == "usage.record" else {
                     continue
+                }
+                if let rawScope = object["usageScope"] {
+                    guard let scope = rawScope as? String,
+                          scope == "turn" || scope == "session" else {
+                        continue
+                    }
                 }
             }
 

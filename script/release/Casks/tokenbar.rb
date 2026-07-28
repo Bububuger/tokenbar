@@ -32,7 +32,7 @@ cask "tokenbar" do
     strategy :github_latest
   end
 
-  depends_on macos: :ventura
+  depends_on macos: :sonoma
 
   app "TokenBar.app"
   # Embedded CLI — symlinked onto $PATH so `tbar` works from any shell.

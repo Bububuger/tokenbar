@@ -47,3 +47,4 @@ jobs:
               --verify-tag \
               --title "TokenBar v1.8.12" \
               --notes "Fix Codex totals for forked subagent rollouts by excluding replayed parent usage and duplicate replayed prompts while retaining each child task's live usage and human prompts. Incomplete fork files now wait for their live-turn boundary before indexing. Reparse history after updating to correct existing totals."
+          fi

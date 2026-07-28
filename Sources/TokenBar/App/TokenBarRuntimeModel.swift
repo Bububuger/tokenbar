@@ -166,6 +166,7 @@ final class TokenBarRuntimeModel: ObservableObject {
     @Published private(set) var lastCheckpoint: CheckpointSummary?
     @Published private(set) var refreshState: RefreshState
     @Published private(set) var selectedProjectName: String?
+    @Published private(set) var selectedProjectPath: String?
     @Published private(set) var selectedSourceName: String?
     @Published private(set) var selectedModelName: String?
     @Published private(set) var projectDetail: ProjectDetailSnapshot?
@@ -259,6 +260,7 @@ final class TokenBarRuntimeModel: ObservableObject {
     private let cursorCredentialStore: CursorCredentialStore
     private let cursorDefaults: UserDefaults
     private var cursorDashboardSyncTask: Task<CursorDashboardSyncResult, Error>?
+    private var cursorDashboardSyncCommitGate: CursorSnapshotCommitGate?
     private var cursorDashboardSyncGeneration = 0
     var store: UsageStore { usageStore }
     private let builtInSources: [any InspectableUsageEventSource]
@@ -348,6 +350,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         self.archivedProjectNames = settingsStore.archivedProjectNames
         self.refreshState = .idle
         self.selectedProjectName = nil
+        self.selectedProjectPath = nil
         self.projectDetail = nil
         self.prompts = []
         self.eventCount = 0
@@ -713,18 +716,21 @@ final class TokenBarRuntimeModel: ObservableObject {
         lastCheckpoint = state.lastCheckpoint
         if selectedProjectName == nil {
             selectedProjectName = state.snapshot.topProjects.first?.name
+            selectedProjectPath = state.snapshot.topProjects.first?.projectPath
         }
         let detailProjectName = selectedProjectName
+        let detailProjectPath = selectedProjectPath
         let computedProjectDetail = await Self.computeProjectDetailSnapshot(
             projectName: detailProjectName,
+            projectPath: detailProjectPath,
             from: state.events,
             referenceDate: now,
             calendar: calendar
         )
-        if selectedProjectName == detailProjectName {
+        if selectedProjectName == detailProjectName, selectedProjectPath == detailProjectPath {
             projectDetail = computedProjectDetail
             if let computedProjectDetail {
-                cacheProjectDetail(computedProjectDetail)
+                cacheProjectDetail(computedProjectDetail, projectPath: detailProjectPath)
             }
         }
         TokenBarTelemetry.timing(
@@ -941,18 +947,21 @@ final class TokenBarRuntimeModel: ObservableObject {
         lastCheckpoint = state.lastCheckpoint
         if selectedProjectName == nil {
             selectedProjectName = state.snapshot.topProjects.first?.name
+            selectedProjectPath = state.snapshot.topProjects.first?.projectPath
         }
         let detailProjectName = selectedProjectName
+        let detailProjectPath = selectedProjectPath
         let computedProjectDetail = await Self.computeProjectDetailSnapshot(
             projectName: detailProjectName,
+            projectPath: detailProjectPath,
             from: state.events,
             referenceDate: now,
             calendar: Calendar(identifier: .gregorian)
         )
-        if selectedProjectName == detailProjectName {
+        if selectedProjectName == detailProjectName, selectedProjectPath == detailProjectPath {
             projectDetail = computedProjectDetail
             if let computedProjectDetail {
-                cacheProjectDetail(computedProjectDetail)
+                cacheProjectDetail(computedProjectDetail, projectPath: detailProjectPath)
             }
         }
         TokenBarTelemetry.timing(
@@ -1339,10 +1348,13 @@ final class TokenBarRuntimeModel: ObservableObject {
         )
     }
 
-    func openProject(named name: String, source: String = "project.list") {
+    func openProject(named name: String, projectPath: String? = nil, source: String = "project.list") {
         let started = Date()
-        if selectedProjectName == name, projectDetail?.projectName == name {
-            navigate(to: .project(name), source: source)
+        let route = TokenBarProjectRoute(name: name, projectPath: projectPath)
+        if selectedProjectName == name,
+           selectedProjectPath == route.projectPath,
+           projectDetail?.projectName == name {
+            navigate(to: .project(route), source: source)
             TokenBarTelemetry.event(
                 "project.open.skip_current",
                 metadata: "source=\(source) project=\(name)",
@@ -1354,7 +1366,7 @@ final class TokenBarRuntimeModel: ObservableObject {
 
         projectDetailTask?.cancel()
         let signature = eventSignature
-        let cachedDetail = projectDetailCache[name].flatMap { cached -> ProjectDetailSnapshot? in
+        let cachedDetail = projectDetailCache[route.identity].flatMap { cached -> ProjectDetailSnapshot? in
             cached.eventsSignature == signature ? cached.detail : nil
         }
         TokenBarTelemetry.event(
@@ -1363,12 +1375,13 @@ final class TokenBarRuntimeModel: ObservableObject {
             success: true
         )
         selectedProjectName = name
+        selectedProjectPath = route.projectPath
         if let cachedDetail {
             projectDetail = cachedDetail
-        } else if projectDetail?.projectName != name {
+        } else {
             projectDetail = nil
         }
-        navigate(to: .project(name), source: source)
+        navigate(to: .project(route), source: source)
         TokenBarTelemetry.timing(
             "project.open.route_ready",
             startedAt: started,
@@ -1388,7 +1401,10 @@ final class TokenBarRuntimeModel: ObservableObject {
             }
 
             let loadStarted = Date()
-            let projectEvents = (try? await usageStore.projectEvents(projectName: name)) ?? []
+            let projectEvents = (try? await usageStore.projectEvents(
+                projectName: name,
+                projectPath: route.projectPath
+            )) ?? []
             guard !Task.isCancelled else { return }
             TokenBarTelemetry.timing(
                 "project.open.project_events",
@@ -1412,10 +1428,10 @@ final class TokenBarRuntimeModel: ObservableObject {
                 metadata: "source=\(source) project=\(name) events=\(projectEvents.count)"
             )
 
-            guard selectedProjectName == name else { return }
+            guard selectedProjectName == name, selectedProjectPath == route.projectPath else { return }
             projectDetail = detail
             if let detail {
-                cacheProjectDetail(detail)
+                cacheProjectDetail(detail, projectPath: route.projectPath)
             }
             TokenBarTelemetry.event(
                 "project.detail.load",
@@ -1508,14 +1524,16 @@ final class TokenBarRuntimeModel: ObservableObject {
             success: true
         )
 
-        if archived, selectedProjectName == normalized, mainRoute == .project(normalized) {
+        if archived,
+           selectedProjectName == normalized,
+           mainRoute == .project(TokenBarProjectRoute(name: normalized, projectPath: selectedProjectPath)) {
             navigate(to: .today, source: "\(source).archived_current")
         }
     }
 
-    func projectDetail(for name: String) async -> ProjectDetailSnapshot? {
+    func projectDetail(for name: String, projectPath: String? = nil) async -> ProjectDetailSnapshot? {
         let now = Date()
-        let projectEvents = (try? await usageStore.projectEvents(projectName: name)) ?? []
+        let projectEvents = (try? await usageStore.projectEvents(projectName: name, projectPath: projectPath)) ?? []
         return Self.makeProjectDetailSnapshot(
             projectName: name,
             from: projectEvents,
@@ -1524,8 +1542,8 @@ final class TokenBarRuntimeModel: ObservableObject {
         )
     }
 
-    func projectEvents(for name: String) async -> [UsageEvent] {
-        (try? await usageStore.projectEvents(projectName: name)) ?? []
+    func projectEvents(for name: String, projectPath: String? = nil) async -> [UsageEvent] {
+        (try? await usageStore.projectEvents(projectName: name, projectPath: projectPath)) ?? []
     }
 
     func overviewRangeData(
@@ -1573,12 +1591,21 @@ final class TokenBarRuntimeModel: ObservableObject {
         )
     }
 
-    func projectPromptHistory(for name: String, includeContent: Bool = true) async -> [PromptRecord] {
-        (try? await usageStore.projectPromptHistory(projectName: name, includeContent: includeContent)) ?? []
+    func projectPromptHistory(
+        for name: String,
+        projectPath: String? = nil,
+        includeContent: Bool = true
+    ) async -> [PromptRecord] {
+        (try? await usageStore.projectPromptHistory(
+            projectName: name,
+            projectPath: projectPath,
+            includeContent: includeContent
+        )) ?? []
     }
 
     func projectPromptHistoryPage(
         for name: String,
+        projectPath: String? = nil,
         limit: Int,
         offset: Int,
         includeContent: Bool = true,
@@ -1587,6 +1614,7 @@ final class TokenBarRuntimeModel: ObservableObject {
     ) async -> PromptHistoryPage {
         (try? await usageStore.projectPromptHistoryPage(
             projectName: name,
+            projectPath: projectPath,
             limit: limit,
             offset: offset,
             includeContent: includeContent,
@@ -1602,20 +1630,22 @@ final class TokenBarRuntimeModel: ObservableObject {
 
     func projectPromptCountsByDay(
         for name: String,
+        projectPath: String? = nil,
         start: Date,
         end: Date,
         calendar: Calendar = Calendar(identifier: .gregorian)
     ) async -> [Date: Int] {
         (try? await usageStore.projectPromptCountsByDay(
             projectName: name,
+            projectPath: projectPath,
             start: start,
             end: end,
             calendar: calendar
         )) ?? [:]
     }
 
-    private func cacheProjectDetail(_ detail: ProjectDetailSnapshot) {
-        projectDetailCache[detail.projectName] = CachedProjectDetail(
+    private func cacheProjectDetail(_ detail: ProjectDetailSnapshot, projectPath: String? = nil) {
+        projectDetailCache[projectPath ?? detail.projectName] = CachedProjectDetail(
             detail: detail,
             eventsSignature: eventSignature
         )
@@ -1627,6 +1657,7 @@ final class TokenBarRuntimeModel: ObservableObject {
 
     nonisolated private static func computeProjectDetailSnapshot(
         projectName: String?,
+        projectPath: String?,
         from events: [UsageEvent],
         referenceDate: Date,
         calendar: Calendar
@@ -1635,6 +1666,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         return await Task.detached(priority: .utility) {
             Self.makeProjectDetailSnapshot(
                 projectName: projectName,
+                projectPath: projectPath,
                 from: events,
                 referenceDate: referenceDate,
                 calendar: calendar
@@ -1644,12 +1676,18 @@ final class TokenBarRuntimeModel: ObservableObject {
 
     nonisolated private static func makeProjectDetailSnapshot(
         projectName: String,
+        projectPath: String? = nil,
         from events: [UsageEvent],
         referenceDate: Date,
         calendar: Calendar
     ) -> ProjectDetailSnapshot? {
         let started = Date()
-        let projectEvents = events.filter { $0.projectName == projectName }
+        let projectEvents = events.filter {
+            if let projectPath, !projectPath.isEmpty {
+                return $0.projectPath == projectPath
+            }
+            return $0.projectName == projectName
+        }
         let days = Self.projectDetailWindowDays(
             projectEvents: projectEvents,
             referenceDate: referenceDate,
@@ -1657,7 +1695,7 @@ final class TokenBarRuntimeModel: ObservableObject {
         )
         let detail = UsageAggregator.makeProjectDetail(
             projectName: projectName,
-            from: events,
+            from: projectEvents,
             referenceDate: referenceDate,
             calendar: calendar,
             days: days
@@ -2004,8 +2042,10 @@ final class TokenBarRuntimeModel: ObservableObject {
 
     private func cancelCursorDashboardSync() {
         cursorDashboardSyncGeneration += 1
+        cursorDashboardSyncCommitGate?.cancel()
         cursorDashboardSyncTask?.cancel()
         cursorDashboardSyncTask = nil
+        cursorDashboardSyncCommitGate = nil
     }
 
     private func loadCursorDashboardMetadata() {
@@ -2053,6 +2093,7 @@ final class TokenBarRuntimeModel: ObservableObject {
             ? nil
             : Calendar(identifier: .gregorian).date(byAdding: .day, value: -35, to: now)
         let service = CursorDashboardUsageSyncService(repository: cursorRepository)
+        let commitGate = CursorSnapshotCommitGate()
         cursorDashboardSyncGeneration += 1
         let generation = cursorDashboardSyncGeneration
         let syncTask = Task {
@@ -2062,10 +2103,12 @@ final class TokenBarRuntimeModel: ObservableObject {
                 // Freeze the query window for both full and rolling syncs so
                 // newly arriving usage cannot reshuffle offset-based pages
                 // while this collection run is in progress.
-                endDate: now
+                endDate: now,
+                commitGate: commitGate
             )
         }
         cursorDashboardSyncTask = syncTask
+        cursorDashboardSyncCommitGate = commitGate
 
         do {
             let result = try await syncTask.value
@@ -2074,6 +2117,7 @@ final class TokenBarRuntimeModel: ObservableObject {
                 return
             }
             cursorDashboardSyncTask = nil
+            cursorDashboardSyncCommitGate = nil
             cursorDashboardStatus.phase = .succeeded
             cursorDashboardStatus.lastSuccessAt = Date()
             cursorDashboardStatus.totalEvents = result.totalEvents
@@ -2098,6 +2142,7 @@ final class TokenBarRuntimeModel: ObservableObject {
                 return
             }
             cursorDashboardSyncTask = nil
+            cursorDashboardSyncCommitGate = nil
             loadCursorDashboardMetadata()
             cursorDashboardStatus.phase = .failed
             cursorDashboardStatus.message = cursorDashboardFailureMessage(error)
@@ -2147,6 +2192,7 @@ final class TokenBarRuntimeModel: ObservableObject {
             customSources = []
             savedPrompts = []
             selectedProjectName = nil
+            selectedProjectPath = nil
             projectDetail = nil
             projectDetailCache.removeAll()
             let referenceDate = Date()
@@ -2201,16 +2247,19 @@ final class TokenBarRuntimeModel: ObservableObject {
         snapshot = state.snapshot
         lastCheckpoint = state.lastCheckpoint
         if let selectedProjectName {
+            let selectedProjectPath = self.selectedProjectPath
             let computedProjectDetail = await Self.computeProjectDetailSnapshot(
                 projectName: selectedProjectName,
+                projectPath: selectedProjectPath,
                 from: state.events,
                 referenceDate: referenceDate,
                 calendar: Calendar(identifier: .gregorian)
             )
-            if self.selectedProjectName == selectedProjectName {
+            if self.selectedProjectName == selectedProjectName,
+               self.selectedProjectPath == selectedProjectPath {
                 projectDetail = computedProjectDetail
                 if let computedProjectDetail {
-                    cacheProjectDetail(computedProjectDetail)
+                    cacheProjectDetail(computedProjectDetail, projectPath: selectedProjectPath)
                 }
             }
         }
@@ -2314,10 +2363,12 @@ final class TokenBarRuntimeModel: ObservableObject {
         lastCheckpoint = state.lastCheckpoint
         if selectedProjectName == nil {
             selectedProjectName = state.snapshot.topProjects.first?.name
+            selectedProjectPath = state.snapshot.topProjects.first?.projectPath
         }
         projectDetail = selectedProjectName.flatMap {
             Self.makeProjectDetailSnapshot(
                 projectName: $0,
+                projectPath: selectedProjectPath,
                 from: state.events,
                 referenceDate: referenceDate,
                 calendar: Calendar(identifier: .gregorian)

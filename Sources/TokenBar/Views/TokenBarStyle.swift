@@ -933,6 +933,7 @@ private func rankingRows(
         let identity = row.projectPath ?? row.name
         return TokenBarRankingRow(
             identity: identity,
+            projectPath: row.projectPath,
             name: row.name,
             summary: row.summary,
             totalTokens: row.summary.totalTokens,
@@ -1293,6 +1294,7 @@ enum TokenBarRankingKind: Sendable {
 /// string with no cost column.
 struct TokenBarRankingRow: Identifiable, Hashable, Sendable {
     let identity: String
+    let projectPath: String?
     let name: String
     let summary: UsageSummary
     let totalTokens: Int
@@ -1303,6 +1305,7 @@ struct TokenBarRankingRow: Identifiable, Hashable, Sendable {
 
     init(
         identity: String? = nil,
+        projectPath: String? = nil,
         name: String,
         summary: UsageSummary,
         totalTokens: Int,
@@ -1310,6 +1313,7 @@ struct TokenBarRankingRow: Identifiable, Hashable, Sendable {
         cost: Double
     ) {
         self.identity = identity ?? name
+        self.projectPath = projectPath
         self.name = name
         self.summary = summary
         self.totalTokens = totalTokens
@@ -1367,6 +1371,7 @@ func tokenbarRankingRowsForFilteredEvents(
         let rowEvents = eventsByName[identity] ?? []
         return TokenBarRankingRow(
             identity: identity,
+            projectPath: row.projectPath,
             name: row.name,
             summary: row.summary,
             totalTokens: row.summary.totalTokens,

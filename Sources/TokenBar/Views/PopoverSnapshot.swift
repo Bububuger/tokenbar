@@ -113,6 +113,7 @@ struct TokenBarPopoverSnapshot: Sendable, Hashable {
                 TokenBarPopoverRankingRow(
                     kind: .project,
                     identity: row.id,
+                    projectPath: row.projectPath,
                     name: row.name,
                     subtitle: rankedNames(projectAgentTokens[row.id], fallback: "local indexed project"),
                     summary: row.summary,
@@ -241,6 +242,7 @@ struct TokenBarPopoverRankingRow: Identifiable, Sendable, Hashable {
 
     let kind: Kind
     let identity: String
+    let projectPath: String?
     let name: String
     let subtitle: String
     let summary: UsageSummary
@@ -253,6 +255,7 @@ struct TokenBarPopoverRankingRow: Identifiable, Sendable, Hashable {
     init(
         kind: Kind,
         identity: String? = nil,
+        projectPath: String? = nil,
         name: String,
         subtitle: String,
         summary: UsageSummary,
@@ -262,6 +265,7 @@ struct TokenBarPopoverRankingRow: Identifiable, Sendable, Hashable {
     ) {
         self.kind = kind
         self.identity = identity ?? name
+        self.projectPath = projectPath
         self.name = name
         self.subtitle = subtitle
         self.summary = summary

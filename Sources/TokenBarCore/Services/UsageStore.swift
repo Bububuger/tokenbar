@@ -263,8 +263,8 @@ public actor UsageStore {
         )
     }
 
-    public func projectEvents(projectName: String, limit: Int? = nil) throws -> [UsageEvent] {
-        try repository.projectEvents(projectName: projectName, limit: limit)
+    public func projectEvents(projectName: String, projectPath: String? = nil, limit: Int? = nil) throws -> [UsageEvent] {
+        try repository.projectEvents(projectName: projectName, projectPath: projectPath, limit: limit)
     }
 
     public func eventTimeBounds() throws -> UsageEventTimeBounds {
@@ -289,11 +289,13 @@ public actor UsageStore {
 
     public func projectPromptHistory(
         projectName: String,
+        projectPath: String? = nil,
         limit: Int? = nil,
         includeContent: Bool = false
     ) throws -> [PromptRecord] {
         try repository.projectPromptHistory(
             projectName: projectName,
+            projectPath: projectPath,
             limit: limit,
             includeContent: includeContent
         )
@@ -301,6 +303,7 @@ public actor UsageStore {
 
     public func projectPromptHistoryPage(
         projectName: String,
+        projectPath: String? = nil,
         limit: Int,
         offset: Int,
         includeContent: Bool = false,
@@ -310,6 +313,7 @@ public actor UsageStore {
     ) throws -> PromptHistoryPage {
         try repository.projectPromptHistoryPage(
             projectName: projectName,
+            projectPath: projectPath,
             limit: limit,
             offset: offset,
             includeContent: includeContent,
@@ -321,20 +325,22 @@ public actor UsageStore {
 
     public func projectPromptCountsByDay(
         projectName: String,
+        projectPath: String? = nil,
         start: Date,
         end: Date,
         calendar: Calendar
     ) throws -> [Date: Int] {
         try repository.projectPromptCountsByDay(
             projectName: projectName,
+            projectPath: projectPath,
             start: start,
             end: end,
             calendar: calendar
         )
     }
 
-    public func projectSummary(projectName: String) throws -> UsageSummary {
-        try repository.projectSummary(projectName: projectName)
+    public func projectSummary(projectName: String, projectPath: String? = nil) throws -> UsageSummary {
+        try repository.projectSummary(projectName: projectName, projectPath: projectPath)
     }
 
     private func makeState(

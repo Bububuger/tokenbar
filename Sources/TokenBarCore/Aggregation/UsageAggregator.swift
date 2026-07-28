@@ -49,16 +49,16 @@ public enum UsageAggregator {
             totals: Dictionary(grouping: todayEvents, by: { $0.agent.displayName }),
             topCount: topCount
         )
-        let topProjectsToday = rankedBreakdowns(
-            totals: Dictionary(grouping: todayEvents, by: \.projectName),
+        let topProjectsToday = rankedProjectBreakdowns(
+            events: todayEvents,
             topCount: topCount
         )
         let topAgents = rankedBreakdowns(
             totals: Dictionary(grouping: last30Events, by: { $0.agent.displayName }),
             topCount: topCount
         )
-        let topProjects = rankedBreakdowns(
-            totals: Dictionary(grouping: last30Events, by: \.projectName),
+        let topProjects = rankedProjectBreakdowns(
+            events: last30Events,
             topCount: topCount
         )
 
@@ -324,6 +324,29 @@ public enum UsageAggregator {
             .sorted { lhs, rhs in
                 if lhs.summary.totalTokens == rhs.summary.totalTokens {
                     return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                }
+                return lhs.summary.totalTokens > rhs.summary.totalTokens
+            }
+            .prefix(topCount)
+            .map { $0 }
+    }
+
+    private static func rankedProjectBreakdowns(
+        events: [UsageEvent],
+        topCount: Int
+    ) -> [UsageBreakdown] {
+        Dictionary(grouping: events) { $0.projectPath ?? $0.projectName }
+            .compactMap { _, events -> UsageBreakdown? in
+                guard let project = events.first else { return nil }
+                return UsageBreakdown(
+                    name: project.projectName,
+                    projectPath: project.projectPath,
+                    summary: summarize(events)
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.summary.totalTokens == rhs.summary.totalTokens {
+                    return lhs.id.localizedCaseInsensitiveCompare(rhs.id) == .orderedAscending
                 }
                 return lhs.summary.totalTokens > rhs.summary.totalTokens
             }

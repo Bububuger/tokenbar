@@ -35,7 +35,13 @@ struct ContentView: View {
                 onSelectDiagnostics: { runtimeModel.navigate(to: .diagnostics, source: "sidebar.diagnostics") },
                 onSelectSettings: { runtimeModel.navigate(to: .settings, source: "sidebar.settings") },
                 onSelectSavedPrompts: { runtimeModel.navigate(to: .savedPrompts, source: "sidebar.saved_prompts") },
-                onSelectProject: { runtimeModel.openProject(named: $0, source: "sidebar.project") },
+                onSelectProject: {
+                    runtimeModel.openProject(
+                        named: $0.name,
+                        projectPath: $0.projectPath,
+                        source: "sidebar.project"
+                    )
+                },
                 onSelectSource: { runtimeModel.openSource(named: $0, source: "sidebar.source") },
                 onSelectModel: { runtimeModel.openModel(named: $0, source: "sidebar.model") }
             )
@@ -92,8 +98,8 @@ struct ContentView: View {
                                     EmptyView()
                                 case .savedPrompts:
                                     EmptyView()
-                                case .project(let projectName):
-                                    projectPage(projectName)
+                                case .project(let project):
+                                    projectPage(project)
                                 case .source(let sourceName):
                                     sourcePage(sourceName)
                                 case .model(let modelName):
@@ -192,11 +198,11 @@ struct ContentView: View {
     }
 
     private var projectPageTaskID: String {
-        guard case .project(let projectName) = runtimeModel.mainRoute else {
+        guard case .project(let project) = runtimeModel.mainRoute else {
             return "none|\(runtimeModel.mainRoute.telemetryName)"
         }
         return [
-            projectName,
+            project.identity,
             selectedRange,
             runtimeModel.eventSignature,
             pricingOverridesJSON,
@@ -301,7 +307,7 @@ struct ContentView: View {
 
     @MainActor
     private func rebuildProjectPageData(reason: String) async {
-        guard case .project(let projectName) = runtimeModel.mainRoute else {
+        guard case .project(let project) = runtimeModel.mainRoute else {
             return
         }
 
@@ -309,7 +315,7 @@ struct ContentView: View {
         let pricingOverrides = pricingOverridesJSON
         let eventSignature = runtimeModel.eventSignature
         if projectPageData?.isCurrent(
-            projectName: projectName,
+            project: project,
             selection: selection,
             eventSignature: eventSignature,
             pricingOverridesJSON: pricingOverrides
@@ -320,14 +326,17 @@ struct ContentView: View {
         let started = Date()
         TokenBarTelemetry.event(
             "main.project.page_data.compute.begin",
-            metadata: "reason=\(reason) project=\(projectName) range=\(selection) events=\(runtimeModel.eventCount) prompts=\(runtimeModel.promptCount)",
+            metadata: "reason=\(reason) project=\(project.identity) range=\(selection) events=\(runtimeModel.eventCount) prompts=\(runtimeModel.promptCount)",
             success: true
         )
-        let projectEvents = await runtimeModel.projectEvents(for: projectName)
+        let projectEvents = await runtimeModel.projectEvents(
+            for: project.name,
+            projectPath: project.projectPath
+        )
         guard !Task.isCancelled else { return }
         let data = await Task.detached(priority: .userInitiated) {
             ProjectPageData.make(
-                projectName: projectName,
+                project: project,
                 selection: selection,
                 events: projectEvents,
                 eventSignature: eventSignature,
@@ -335,8 +344,8 @@ struct ContentView: View {
             )
         }.value
         guard !Task.isCancelled,
-              case .project(let currentProjectName) = runtimeModel.mainRoute,
-              currentProjectName == projectName,
+              case .project(let currentProject) = runtimeModel.mainRoute,
+              currentProject == project,
               selectedRange == selection,
               runtimeModel.eventSignature == eventSignature,
               pricingOverridesJSON == pricingOverrides else {
@@ -346,7 +355,7 @@ struct ContentView: View {
         TokenBarTelemetry.timing(
             "main.project.page_data.compute",
             startedAt: started,
-            metadata: "project=\(projectName) range=\(selection) project_events=\(data.events.count)"
+            metadata: "project=\(project.identity) range=\(selection) project_events=\(data.events.count)"
         )
     }
 
@@ -394,18 +403,23 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func projectPage(_ projectName: String) -> some View {
-        let isDetailReady = (runtimeModel.projectDetail?.projectName == projectName)
+    private func projectPage(_ project: TokenBarProjectRoute) -> some View {
+        let isDetailReady = (
+            runtimeModel.projectDetail?.projectName == project.name
+                && runtimeModel.selectedProjectPath == project.projectPath
+        )
         Group {
-            if let detail = runtimeModel.projectDetail, detail.projectName == projectName {
+            if let detail = runtimeModel.projectDetail,
+               detail.projectName == project.name,
+               runtimeModel.selectedProjectPath == project.projectPath {
                 let pageData = projectPageData?.isCurrent(
-                    projectName: projectName,
+                    project: project,
                     selection: selectedRange,
                     eventSignature: runtimeModel.eventSignature,
                     pricingOverridesJSON: pricingOverridesJSON
                 ) == true
                     ? projectPageData
-                    : ProjectPageData.placeholder(projectName: projectName, selection: selectedRange, detail: detail)
+                    : ProjectPageData.placeholder(project: project, selection: selectedRange, detail: detail)
                 ProjectDetailView(
                     detail: detail,
                     projectPath: pageData?.projectPath,
@@ -422,20 +436,20 @@ struct ContentView: View {
                     onRefresh: { Task { await runtimeModel.refresh() } },
                     onBack: { runtimeModel.navigate(to: .today, source: "project.back") }
                 )
-                .id(projectName)
-                .onAppear { recordRouteViewAppear(.project(projectName)) }
+                .id(project.identity)
+                .onAppear { recordRouteViewAppear(.project(project)) }
                 .transition(.opacity)
             } else {
                 // 180ms grace before the pending placeholder shows — if real
                 // data arrives within that window the user only ever sees the
                 // outer route cross-fade, no flash of placeholder.
                 DelayedAppear(delay: .milliseconds(180), fadeIn: .easeOut(duration: 0.12)) {
-                    ProjectDetailPendingView(projectName: projectName)
+                    ProjectDetailPendingView(projectName: project.name)
                         .onAppear {
-                            recordRouteViewAppear(.project(projectName))
+                            recordRouteViewAppear(.project(project))
                             TokenBarTelemetry.event(
                                 "main.project.pending.appear",
-                                metadata: "project=\(projectName) events=\(runtimeModel.eventCount)",
+                                metadata: "project=\(project.identity) events=\(runtimeModel.eventCount)",
                                 success: true
                             )
                         }
@@ -458,7 +472,13 @@ struct ContentView: View {
             refreshState: runtimeModel.refreshState,
             onRefresh: { Task { await runtimeModel.refresh() } },
             onBack: { runtimeModel.navigate(to: .today, source: "source.back") },
-            onSelectProject: { runtimeModel.openProject(named: $0, source: "source.project_share") }
+            onSelectProject: {
+                runtimeModel.openProject(
+                    named: $0.name,
+                    projectPath: $0.projectPath,
+                    source: "source.project_share"
+                )
+            }
         )
         .id(sourceName)
         .onAppear { recordRouteViewAppear(.source(sourceName)) }
@@ -477,7 +497,13 @@ struct ContentView: View {
             refreshState: runtimeModel.refreshState,
             onRefresh: { Task { await runtimeModel.refresh() } },
             onBack: { runtimeModel.navigate(to: .today, source: "model.back") },
-            onSelectProject: { runtimeModel.openProject(named: $0, source: "model.project_share") }
+            onSelectProject: {
+                runtimeModel.openProject(
+                    named: $0.name,
+                    projectPath: $0.projectPath,
+                    source: "model.project_share"
+                )
+            }
         )
         .id(modelName)
         .onAppear { recordRouteViewAppear(.model(modelName)) }
@@ -623,10 +649,10 @@ struct ContentView: View {
 
 private struct ProjectPageData: Sendable {
     let projectName: String
+    let projectPath: String?
     let selection: String
     let eventSignature: String
     let pricingOverridesJSON: String
-    let projectPath: String?
     let allTimeSummary: UsageSummary
     let allTimeCost: UsageCostProjection
     let events: [UsageEvent]
@@ -641,28 +667,29 @@ private struct ProjectPageData: Sendable {
     }
 
     func isCurrent(
-        projectName: String,
+        project: TokenBarProjectRoute,
         selection: String,
         eventSignature: String,
         pricingOverridesJSON: String
     ) -> Bool {
-        self.projectName == projectName
+        self.projectName == project.name
+            && self.projectPath == project.projectPath
             && self.selection == selection
             && self.eventSignature == eventSignature
             && self.pricingOverridesJSON == pricingOverridesJSON
     }
 
     static func placeholder(
-        projectName: String,
+        project: TokenBarProjectRoute,
         selection: String,
         detail: ProjectDetailSnapshot
     ) -> ProjectPageData {
         ProjectPageData(
-            projectName: projectName,
+            projectName: project.name,
+            projectPath: project.projectPath,
             selection: selection,
             eventSignature: "placeholder",
             pricingOverridesJSON: "",
-            projectPath: nil,
             allTimeSummary: detail.summary,
             allTimeCost: detail.estimatedCost,
             events: [],
@@ -675,7 +702,7 @@ private struct ProjectPageData: Sendable {
     }
 
     static func make(
-        projectName: String,
+        project: TokenBarProjectRoute,
         selection: String,
         events: [UsageEvent],
         eventSignature: String,
@@ -687,21 +714,12 @@ private struct ProjectPageData: Sendable {
         var outputTokens = 0
         var cacheReadTokens = 0
         var cacheCreationTokens = 0
-        var latestPath: String?
-        var latestPathTimestamp = Date.distantPast
-
-        for event in events where event.projectName == projectName {
+        for event in events {
             projectEvents.append(event)
             inputTokens += event.inputTokens
             outputTokens += event.outputTokens
             cacheReadTokens += event.cacheReadTokens
             cacheCreationTokens += event.cacheCreationTokens
-            if let projectPath = event.projectPath,
-               !projectPath.isEmpty,
-               event.timestamp > latestPathTimestamp {
-                latestPath = projectPath
-                latestPathTimestamp = event.timestamp
-            }
         }
 
         let allTimeSummary = UsageSummary(
@@ -715,11 +733,11 @@ private struct ProjectPageData: Sendable {
         let rangeSummary = tokenbarSummary(rangeEvents)
 
         return ProjectPageData(
-            projectName: projectName,
+            projectName: project.name,
+            projectPath: project.projectPath,
             selection: selection,
             eventSignature: eventSignature,
             pricingOverridesJSON: pricingOverridesJSON,
-            projectPath: latestPath,
             allTimeSummary: allTimeSummary,
             allTimeCost: tokenbarCostProjection(events: projectEvents),
             events: projectEvents,
@@ -814,7 +832,7 @@ private struct TokenBarSidebar: View {
     let onSelectDiagnostics: () -> Void
     let onSelectSettings: () -> Void
     let onSelectSavedPrompts: () -> Void
-    let onSelectProject: (String) -> Void
+    let onSelectProject: (UsageBreakdown) -> Void
     let onSelectSource: (String) -> Void
     let onSelectModel: (String) -> Void
     @State private var projectSearchText = ""
@@ -953,10 +971,10 @@ private struct TokenBarSidebar: View {
 
     @ViewBuilder
     private func sidebarListRow(_ row: UsageBreakdown) -> some View {
-        let selected = isRowSelected(row.name)
+        let selected = isRowSelected(row)
         Button {
             switch listTab {
-            case .projects: onSelectProject(row.name)
+            case .projects: onSelectProject(row)
             case .sources:  onSelectSource(row.name)
             case .models:   onSelectModel(row.name)
             }
@@ -989,11 +1007,14 @@ private struct TokenBarSidebar: View {
         .foregroundStyle(selected ? TokenBarStyle.foreground : TokenBarStyle.muted)
     }
 
-    private func isRowSelected(_ name: String) -> Bool {
+    private func isRowSelected(_ row: UsageBreakdown) -> Bool {
         switch (listTab, activeRoute) {
-        case (.projects, .project(let n)): return n == name
-        case (.sources, .source(let n)):   return n == name
-        case (.models, .model(let n)):     return n == name
+        case (.projects, .project(let project)):
+            return project.name == row.name && project.projectPath == row.projectPath
+        case (.sources, .source(let name)):
+            return name == row.name
+        case (.models, .model(let name)):
+            return name == row.name
         default: return false
         }
     }
@@ -1121,7 +1142,13 @@ private struct OverviewPage: View {
                             title: "Top projects",
                             footnote: "\(rangeMetrics.projectRows.count) of \(rangeMetrics.projectCount)",
                             rows: rangeMetrics.projectRows,
-                            onSelect: { runtimeModel.openProject(named: $0, source: "overview.ranking.project") }
+                            onSelect: {
+                                runtimeModel.openProject(
+                                    named: $0.name,
+                                    projectPath: $0.projectPath,
+                                    source: "overview.ranking.project"
+                                )
+                            }
                         )
                         RankingCard(
                             title: "Top agents",
@@ -1524,7 +1551,7 @@ struct RankingCard: View {
     let title: String
     let footnote: String
     let rows: [TokenBarRankingRow]
-    let onSelect: ((String) -> Void)?
+    let onSelect: ((TokenBarRankingRow) -> Void)?
 
     var body: some View {
         TokenBarCard {
@@ -1540,7 +1567,7 @@ struct RankingCard: View {
                 VStack(spacing: 0) {
                     ForEach(Array(rows.prefix(5).enumerated()), id: \.element.id) { index, row in
                         Button {
-                            onSelect?(row.name)
+                            onSelect?(row)
                         } label: {
                             HStack(spacing: 10) {
                                 Text("\(index + 1)")

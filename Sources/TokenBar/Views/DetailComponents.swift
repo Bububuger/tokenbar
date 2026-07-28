@@ -40,10 +40,16 @@ func tokenbarSourceBreakdowns(events: [UsageEvent], customNamesById: [String: St
 func tokenbarProjectShare(events: [UsageEvent], topCount: Int = 5) -> [AgentShareSlice] {
     let total = tokenbarSummary(events).totalTokens
     guard total > 0 else { return [] }
-    return Dictionary(grouping: events, by: \.projectName)
-        .map { name, grouped in
+    return Dictionary(grouping: events) { $0.projectPath ?? $0.projectName }
+        .compactMap { _, grouped -> AgentShareSlice? in
+            guard let project = grouped.first else { return nil }
             let tokens = tokenbarSummary(grouped).totalTokens
-            return AgentShareSlice(name: name, totalTokens: tokens, percentage: Double(tokens) / Double(total))
+            return AgentShareSlice(
+                name: project.projectName,
+                projectPath: project.projectPath,
+                totalTokens: tokens,
+                percentage: Double(tokens) / Double(total)
+            )
         }
         .sorted { lhs, rhs in
             if lhs.totalTokens == rhs.totalTokens {
@@ -105,7 +111,7 @@ struct DetailSessionSummary: Identifiable, Sendable, Hashable {
 struct ShareDonutCard: View {
     let title: String
     let slices: [AgentShareSlice]
-    var onSelect: ((String) -> Void)? = nil
+    var onSelect: ((AgentShareSlice) -> Void)? = nil
 
     var body: some View {
         TokenBarCard {
@@ -124,7 +130,7 @@ struct ShareDonutCard: View {
                         } else {
                             ForEach(slices.prefix(5)) { slice in
                                 Button {
-                                    onSelect?(slice.name)
+                                    onSelect?(slice)
                                 } label: {
                                     HStack(spacing: 9) {
                                         Circle()

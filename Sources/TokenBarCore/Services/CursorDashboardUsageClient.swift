@@ -226,7 +226,8 @@ public struct CursorDashboardUsageSyncService: Sendable {
     public func sync(
         cookie: String,
         startDate: Date? = nil,
-        endDate: Date? = nil
+        endDate: Date? = nil,
+        commitGate: CursorSnapshotCommitGate? = nil
     ) async throws -> CursorDashboardSyncResult {
         do {
             let page = try await client.fetchAll(
@@ -298,7 +299,8 @@ public struct CursorDashboardUsageSyncService: Sendable {
                 totalEvents: page.totalCount,
                 tokenEvents: tokenEvents,
                 attributedEvents: attributedEvents,
-                costEvents: costEvents
+                costEvents: costEvents,
+                commitGate: commitGate
             )
             return CursorDashboardSyncResult(
                 totalEvents: page.totalCount,
@@ -312,7 +314,10 @@ public struct CursorDashboardUsageSyncService: Sendable {
                 throw error
             }
             let safeCode = (error as? CursorDashboardUsageError)?.safeCode ?? "cursor_sync_failed"
-            try? repository.recordCursorRemoteSnapshotFailure(errorCode: safeCode)
+            try? repository.recordCursorRemoteSnapshotFailure(
+                errorCode: safeCode,
+                commitGate: commitGate
+            )
             throw error
         }
     }

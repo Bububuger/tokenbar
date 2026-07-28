@@ -822,6 +822,158 @@ struct Sprint8StorageTests {
     }
 
     @Test
+    func projectPathScopedQueriesKeepSameNamedDirectoriesSeparate() throws {
+        let dbURL = temporaryDatabaseURL()
+        let repository = try UsageRepository(databaseURL: dbURL)
+        let referenceDate = fixedDate()
+        let calendar = Calendar(identifier: .gregorian)
+        let pathA = "/work/team-a/shared"
+        let pathB = "/work/team-b/shared"
+
+        let eventA = dbEvent(
+            id: "same-name-a",
+            agent: .codex,
+            projectPath: pathA,
+            projectName: "shared",
+            sessionId: "session-a",
+            timestamp: referenceDate,
+            inputTokens: 100,
+            outputTokens: 10,
+            cacheTokens: 5
+        )
+        let eventB = dbEvent(
+            id: "same-name-b",
+            agent: .claudeCode,
+            projectPath: pathB,
+            projectName: "shared",
+            sessionId: "session-b",
+            timestamp: referenceDate,
+            inputTokens: 200,
+            outputTokens: 20,
+            cacheTokens: 10
+        )
+        let legacyEvent = UsageEvent(
+            id: "same-name-legacy",
+            agent: .hermes,
+            projectPath: nil,
+            projectName: "shared",
+            sessionId: "session-legacy",
+            timestamp: referenceDate,
+            inputTokens: 300,
+            outputTokens: 30,
+            cacheReadTokens: 15,
+            cacheCreationTokens: 0,
+            reasoningTokens: nil,
+            modelName: nil,
+            sourcePath: "/tmp/legacy.jsonl",
+            parser: .hermes,
+            confidence: 1
+        )
+        let prompts = [
+            PromptRecord(
+                id: "same-name-prompt-a",
+                eventId: nil,
+                agent: .codex,
+                projectName: "shared",
+                sessionId: "session-a",
+                timestamp: referenceDate,
+                content: "team a prompt",
+                contentHash: "hash-a",
+                sourcePath: "/tmp/a.jsonl"
+            ),
+            PromptRecord(
+                id: "same-name-prompt-b",
+                eventId: nil,
+                agent: .claudeCode,
+                projectName: "shared",
+                sessionId: "session-b",
+                timestamp: referenceDate,
+                content: "team b prompt",
+                contentHash: "hash-b",
+                sourcePath: "/tmp/b.jsonl"
+            ),
+            PromptRecord(
+                id: "same-name-prompt-legacy",
+                eventId: nil,
+                agent: .hermes,
+                projectName: "shared",
+                sessionId: "session-legacy",
+                timestamp: referenceDate,
+                content: "legacy prompt",
+                contentHash: "hash-legacy",
+                sourcePath: "/tmp/legacy.jsonl"
+            ),
+        ]
+
+        _ = try repository.insertCheckpoint(
+            trigger: "same-name-path-test",
+            startedAt: referenceDate,
+            endedAt: referenceDate,
+            events: [eventA, eventB, legacyEvent],
+            prompts: prompts,
+            nextWatermarks: [],
+            warnings: [],
+            error: nil
+        )
+
+        let start = calendar.startOfDay(for: referenceDate)
+        let end = calendar.date(byAdding: .day, value: 1, to: start)!
+        let breakdowns = try repository.projectBreakdowns(start: start, end: end)
+            .filter { $0.name == "shared" }
+        #expect(Set(breakdowns.map(\.projectPath)) == Set([pathA, pathB, nil]))
+        let snapshot = try repository.makeSnapshot(referenceDate: referenceDate, calendar: calendar)
+        let snapshotProjects = snapshot.topProjects.filter { $0.name == "shared" }
+        #expect(Set(snapshotProjects.map(\.projectPath)) == Set([pathA, pathB, nil]))
+        let inMemorySnapshot = UsageAggregator.makeSnapshot(
+            from: [eventA, eventB, legacyEvent],
+            referenceDate: referenceDate,
+            calendar: calendar
+        )
+        #expect(Set(inMemorySnapshot.topProjects.map(\.projectPath)) == Set([pathA, pathB, nil]))
+
+        let pathAEvents = try repository.projectEvents(projectName: "shared", projectPath: pathA)
+        #expect(pathAEvents.map(\.id) == ["same-name-a"])
+        #expect(try repository.projectSummary(projectName: "shared", projectPath: pathA).totalTokens == 115)
+
+        let pathAPrompts = try repository.projectPromptHistory(
+            projectName: "shared",
+            projectPath: pathA,
+            includeContent: true
+        )
+        #expect(pathAPrompts.map(\.id) == ["same-name-prompt-a"])
+        let pathAPage = try repository.projectPromptHistoryPage(
+            projectName: "shared",
+            projectPath: pathA,
+            limit: 10,
+            offset: 0,
+            includeContent: true
+        )
+        #expect(pathAPage.prompts.map(\.id) == ["same-name-prompt-a"])
+        let pathACounts = try repository.projectPromptCountsByDay(
+            projectName: "shared",
+            projectPath: pathA,
+            start: start,
+            end: end,
+            calendar: calendar
+        )
+        #expect(pathACounts.values.reduce(0, +) == 1)
+
+        let detailA = try repository.makeProjectDetail(
+            projectName: "shared",
+            projectPath: pathA,
+            referenceDate: referenceDate,
+            calendar: calendar
+        )
+        #expect(detailA?.summary.totalTokens == 115)
+        #expect(detailA?.agentShare.map(\.name) == ["Codex"])
+        #expect(detailA?.recentSessions.map(\.sessionId) == ["session-a"])
+
+        #expect(try repository.projectEvents(projectName: "shared").count == 3)
+        #expect(try repository.projectPromptHistory(projectName: "shared").count == 3)
+        #expect(try repository.projectSummary(projectName: "shared").totalTokens == 690)
+    }
+
+    @Test
     func projectPromptHistoryPagePaginatesAndFiltersInSQLite() throws {
         let dbURL = temporaryDatabaseURL()
         let repository = try UsageRepository(databaseURL: dbURL)
@@ -1673,6 +1825,7 @@ struct Sprint8StorageTests {
     private func dbEvent(
         id: String,
         agent: AgentKind,
+        projectPath: String? = nil,
         projectName: String,
         sessionId: String,
         timestamp: Date,
@@ -1696,7 +1849,7 @@ struct Sprint8StorageTests {
         return UsageEvent(
             id: id,
             agent: agent,
-            projectPath: "/tmp/\(projectName)",
+            projectPath: projectPath ?? "/tmp/\(projectName)",
             projectName: projectName,
             sessionId: sessionId,
             timestamp: timestamp,

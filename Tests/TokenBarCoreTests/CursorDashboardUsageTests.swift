@@ -302,6 +302,102 @@ struct CursorDashboardUsageTests {
         #expect(try repository.allEvents().map(\.id) == ["old"])
     }
 
+    @Test
+    func cancellationAtCommitBoundaryRollsBackReplacement() throws {
+        let databaseURL = temporaryDirectory().appendingPathComponent("tokenbar.sqlite")
+        let repository = try UsageRepository(databaseURL: databaseURL)
+        let old = usageEvent(id: "old", timestamp: Date(timeIntervalSince1970: 1))
+        _ = try repository.replaceCursorRemoteSnapshot(
+            events: [old],
+            coverageStart: nil,
+            coverageEnd: Date(timeIntervalSince1970: 10),
+            totalEvents: 1,
+            tokenEvents: 1,
+            attributedEvents: 1,
+            costEvents: 1
+        )
+
+        let readyToCommit = DispatchSemaphore(value: 0)
+        let allowCommitCheck = DispatchSemaphore(value: 0)
+        let finished = DispatchSemaphore(value: 0)
+        let result = CursorCommitAttemptResult()
+        let gate = CursorSnapshotCommitGate {
+            readyToCommit.signal()
+            _ = allowCommitCheck.wait(timeout: .now() + 5)
+        }
+        let replacement = usageEvent(id: "replacement", timestamp: Date(timeIntervalSince1970: 2))
+
+        DispatchQueue.global().async {
+            do {
+                _ = try repository.replaceCursorRemoteSnapshot(
+                    events: [replacement],
+                    coverageStart: nil,
+                    coverageEnd: Date(timeIntervalSince1970: 20),
+                    totalEvents: 1,
+                    tokenEvents: 1,
+                    attributedEvents: 1,
+                    costEvents: 1,
+                    commitGate: gate
+                )
+                result.recordSuccess()
+            } catch {
+                result.record(error: error)
+            }
+            finished.signal()
+        }
+
+        #expect(readyToCommit.wait(timeout: .now() + 5) == .success)
+        gate.cancel()
+        allowCommitCheck.signal()
+        #expect(finished.wait(timeout: .now() + 5) == .success)
+        #expect(result.wasCancelled)
+        #expect(try repository.allEvents().map(\.id) == ["old"])
+        let metadata = try repository.cursorRemoteSnapshotMetadata()
+        #expect(metadata?.coverageEnd == Date(timeIntervalSince1970: 10))
+        #expect(metadata?.lastWindowTotalEvents == 1)
+    }
+
+    @Test
+    func localReparsePreservesRemoteSnapshotWhileFullResetRemovesIt() throws {
+        let databaseURL = temporaryDirectory().appendingPathComponent("tokenbar.sqlite")
+        let repository = try UsageRepository(databaseURL: databaseURL)
+        let remote = usageEvent(id: "remote", timestamp: Date(timeIntervalSince1970: 1))
+        _ = try repository.replaceCursorRemoteSnapshot(
+            events: [remote],
+            coverageStart: nil,
+            coverageEnd: Date(timeIntervalSince1970: 10),
+            totalEvents: 1,
+            tokenEvents: 1,
+            attributedEvents: 1,
+            costEvents: 1
+        )
+
+        try repository.resetIndexForFullReparse()
+        #expect(try repository.allEvents().map(\.id) == ["remote"])
+        #expect(try repository.cursorRemoteSnapshotMetadata() != nil)
+
+        try repository.resetAllData()
+        #expect(try repository.allEvents().isEmpty)
+        #expect(try repository.cursorRemoteSnapshotMetadata() == nil)
+    }
+
+    @Test
+    func cancelledGateDoesNotWriteFailureMetadata() throws {
+        let repository = try UsageRepository(
+            databaseURL: temporaryDirectory().appendingPathComponent("tokenbar.sqlite")
+        )
+        let gate = CursorSnapshotCommitGate()
+        gate.cancel()
+
+        #expect(throws: CancellationError.self) {
+            try repository.recordCursorRemoteSnapshotFailure(
+                errorCode: "cursor_sync_failed",
+                commitGate: gate
+            )
+        }
+        #expect(try repository.cursorRemoteSnapshotMetadata() == nil)
+    }
+
     private func makeClient(recorder: RequestRecorder) -> CursorDashboardUsageClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [CursorDashboardURLProtocol.self]
@@ -362,6 +458,28 @@ struct CursorDashboardUsageTests {
             sql: "INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)",
             arguments: [key, Data(json.utf8)]
         )
+    }
+}
+
+private final class CursorCommitAttemptResult: @unchecked Sendable {
+    private let lock = NSLock()
+    private var succeeded = false
+    private var cancelled = false
+
+    var wasCancelled: Bool {
+        lock.withLock { cancelled && !succeeded }
+    }
+
+    func recordSuccess() {
+        lock.withLock {
+            succeeded = true
+        }
+    }
+
+    func record(error: Error) {
+        lock.withLock {
+            cancelled = error is CancellationError
+        }
     }
 }
 

@@ -16,7 +16,7 @@ struct ModelDetailView: View {
     let refreshState: RefreshState
     let onRefresh: (() -> Void)?
     let onBack: () -> Void
-    let onSelectProject: (String) -> Void
+    let onSelectProject: (AgentShareSlice) -> Void
 
     @State private var metrics = ModelDetailRangeMetrics.empty
     @State private var isRangeLoading = false

@@ -316,8 +316,12 @@ struct PopoverView: View {
                             summary: row.summary,
                             color: TokenBarStyle.input
                         ) {
-                            runtimeModel.openProject(named: row.name, source: "popover.ranking.project")
-                            openMain(route: .project(row.name))
+                            runtimeModel.openProject(
+                                named: row.name,
+                                projectPath: row.projectPath,
+                                source: "popover.ranking.project"
+                            )
+                            openMain(route: .project(TokenBarProjectRoute(name: row.name, projectPath: row.projectPath)))
                         }
                     }
                 case .agents:

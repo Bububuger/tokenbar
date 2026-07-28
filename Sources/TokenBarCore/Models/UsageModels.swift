@@ -345,7 +345,7 @@ public struct UsageBreakdown: Identifiable, Sendable, Hashable {
 
     public init(name: String, projectPath: String? = nil, summary: UsageSummary) {
         self.name = name
-        self.projectPath = projectPath
+        self.projectPath = projectPath?.isEmpty == false ? projectPath : nil
         self.summary = summary
     }
 }
@@ -490,13 +490,15 @@ public struct HourlyUsageSnapshot: Sendable, Hashable {
 
 public struct AgentShareSlice: Identifiable, Sendable, Hashable {
     public let name: String
+    public let projectPath: String?
     public let totalTokens: Int
     public let percentage: Double
 
-    public var id: String { name }
+    public var id: String { projectPath ?? name }
 
-    public init(name: String, totalTokens: Int, percentage: Double) {
+    public init(name: String, projectPath: String? = nil, totalTokens: Int, percentage: Double) {
         self.name = name
+        self.projectPath = projectPath
         self.totalTokens = totalTokens
         self.percentage = percentage
     }

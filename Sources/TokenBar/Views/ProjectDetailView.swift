@@ -328,6 +328,7 @@ struct ProjectDetailView: View {
            let end = calendar.date(byAdding: .day, value: 1, to: lastDay) {
             countsByDay = await runtimeModel.projectPromptCountsByDay(
                 for: projectName,
+                projectPath: projectPath,
                 start: firstDay,
                 end: end,
                 calendar: calendar
@@ -998,6 +999,7 @@ struct ProjectDetailView: View {
     private var promptHistoryTaskID: String {
         [
             detail.projectName,
+            projectPath ?? "",
             "\(promptPage)",
             "\(promptPageSize)",
             promptSearchText,
@@ -1021,6 +1023,7 @@ struct ProjectDetailView: View {
         )
         let pageResult = await runtimeModel.projectPromptHistoryPage(
             for: detail.projectName,
+            projectPath: projectPath,
             limit: promptPageSize,
             offset: page * promptPageSize,
             includeContent: true,

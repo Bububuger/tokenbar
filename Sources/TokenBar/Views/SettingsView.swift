@@ -654,8 +654,16 @@ struct SettingsView: View {
 
     private func cursorCoverageText(_ numerator: Int, _ denominator: Int) -> String {
         guard denominator > 0 else { return "Unavailable" }
-        let percent = Double(numerator) / Double(denominator)
-        return "\(numerator.formatted()) / \(denominator.formatted()) (\(percent.formatted(.percent.precision(.fractionLength(0)))))"
+        let ratio = min(max(Double(numerator) / Double(denominator), 0), 1)
+        let percentText: String
+        if numerator == denominator {
+            percentText = "100%"
+        } else {
+            // Truncate incomplete coverage to one decimal place so a value
+            // such as 657 / 660 can never be rounded up to a misleading 100%.
+            percentText = String(format: "%.1f%%", floor(ratio * 1_000) / 10)
+        }
+        return "\(numerator.formatted()) / \(denominator.formatted()) (\(percentText))"
     }
 
     private func cursorStatusText(_ status: CursorDashboardStatus) -> String {

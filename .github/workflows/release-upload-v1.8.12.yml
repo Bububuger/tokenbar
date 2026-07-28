@@ -1,0 +1,49 @@
+name: Publish TokenBar v1.8.12
+
+on:
+  push:
+    branches:
+      - codex/release-upload-1.8.12
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: macos-26-intel
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install xcodegen
+        run: |
+          if ! brew list xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+
+      - name: Build release DMG
+        run: |
+          mkdir -p "$RUNNER_TEMP/tokenbar-release"
+          TMPDIR="$RUNNER_TEMP/tokenbar-release" script/release.sh 1.8.12
+
+      - name: Print build errors
+        if: failure()
+        run: |
+          grep -nE "error:|fatal error|signal [0-9]+" \
+            "$RUNNER_TEMP/tokenbar-release/tokenbar-release-build.log" | tail -100 || true
+
+      - name: Verify release DMG
+        run: |
+          shasum -a 256 dist/TokenBar-1.8.12.dmg
+          hdiutil verify dist/TokenBar-1.8.12.dmg
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v1.8.12 >/dev/null 2>&1; then
+            gh release upload v1.8.12 dist/TokenBar-1.8.12.dmg --clobber
+          else
+            gh release create v1.8.12 dist/TokenBar-1.8.12.dmg \
+              --verify-tag \
+              --title "TokenBar v1.8.12" \
+              --notes "Fix Codex totals for forked subagent rollouts by excluding replayed parent usage and duplicate replayed prompts while retaining each child task's live usage and human prompts. Incomplete fork files now wait for their live-turn boundary before indexing. Reparse history after updating to correct existing totals."

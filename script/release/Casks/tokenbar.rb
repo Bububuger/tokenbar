@@ -27,14 +27,14 @@ cask "tokenbar" do
   desc "Local-first menu-bar dashboard + CLI for AI coding token usage"
   homepage "https://github.com/Bububuger/tokenbar"
 
-  depends_on macos: ">= :ventura"
   livecheck do
     url :url
     strategy :github_latest
   end
 
-  app "TokenBar.app"
+  depends_on macos: :ventura
 
+  app "TokenBar.app"
   # Embedded CLI — symlinked onto $PATH so `tbar` works from any shell.
   # The path inside the .app is produced by script/release.sh step [4/6].
   binary "#{appdir}/TokenBar.app/Contents/MacOS/tbar"
@@ -46,14 +46,14 @@ cask "tokenbar" do
   # new install. Failure is non-fatal (older OSes / no xattr binary etc.).
   postflight do
     system_command "/usr/bin/xattr",
-                   args: ["-r", "-d", "com.apple.quarantine", "#{appdir}/TokenBar.app"],
+                   args:         ["-r", "-d", "com.apple.quarantine", "#{appdir}/TokenBar.app"],
                    must_succeed: false
   end
 
   zap trash: [
     "~/Library/Application Support/com.javis.TokenBar",
-    "~/Library/Preferences/com.javis.TokenBar.plist",
     "~/Library/Caches/com.javis.TokenBar",
+    "~/Library/Preferences/com.javis.TokenBar.plist",
     "~/Library/Saved Application State/com.javis.TokenBar.savedState",
   ]
 

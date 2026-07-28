@@ -4,11 +4,25 @@ public struct KimiUsageEventSource: InspectableUsageEventSource, ResourceBudgete
     public let sourceName = "Kimi Code"
     public let rootPath: String
     public let agent: AgentKind = .kimi
+    private let rootDirectory: String?
     private let fileManager: FileManager
+    private let environment: [String: String]
+    private let homeDirectory: String
 
-    public init(rootPath: String = "~/.kimi", fileManager: FileManager = .default) {
-        self.rootPath = rootPath
+    public init(
+        rootPath: String? = nil,
+        fileManager: FileManager = .default,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        homeDirectory: String = NSHomeDirectory()
+    ) {
+        self.rootDirectory = rootPath
         self.fileManager = fileManager
+        self.environment = environment
+        self.homeDirectory = homeDirectory
+        self.rootPath = rootPath ?? KimiDataSource.resolvedRootDirectories(
+            environment: environment,
+            homeDirectory: homeDirectory
+        ).joined(separator: ", ")
     }
 
     public func loadEvents(
@@ -32,8 +46,10 @@ public struct KimiUsageEventSource: InspectableUsageEventSource, ResourceBudgete
     ) async throws -> UsageSourceLoadResult {
         _ = calendar
         let files = try KimiDataSource.discoverSessionFiles(
-            rootDirectory: rootPath,
-            fileManager: fileManager
+            rootDirectory: rootDirectory,
+            fileManager: fileManager,
+            environment: environment,
+            homeDirectory: homeDirectory
         )
         return try await JSONLWatermarkLoader.load(
             files: files,
@@ -50,15 +66,21 @@ public struct KimiUsageEventSource: InspectableUsageEventSource, ResourceBudgete
     public func status(referenceDate: Date, calendar: Calendar) async -> UsageDataSourceStatus {
         _ = referenceDate
         _ = calendar
-        let expanded = CodexDataSource.expandHome(in: rootPath)
+        let roots = KimiDataSource.resolvedRootDirectories(
+            rootDirectory: rootDirectory,
+            environment: environment,
+            homeDirectory: homeDirectory
+        )
         let discoveredCount = (try? KimiDataSource.discoverSessionFiles(
-            rootDirectory: rootPath,
-            fileManager: fileManager
+            rootDirectory: rootDirectory,
+            fileManager: fileManager,
+            environment: environment,
+            homeDirectory: homeDirectory
         ).count) ?? 0
         return UsageDataSourceStatus(
             sourceName: sourceName,
             rootPath: rootPath,
-            isReadable: fileManager.isReadableFile(atPath: expanded),
+            isReadable: roots.contains { fileManager.isReadableFile(atPath: $0) },
             discoveredFileCount: discoveredCount
         )
     }

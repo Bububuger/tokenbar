@@ -82,6 +82,198 @@ struct KimiUsageParserTests {
         #expect(result.events.isEmpty)
     }
 
+    @Test
+    func parsesCurrentMainAndSubagentUsageWithSessionState() throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = root
+            .appendingPathComponent("sessions/work-key/session_1234", isDirectory: true)
+        try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
+        try #"{"workDir":"/work/projects/moon"}"#
+            .write(to: session.appendingPathComponent("state.json"), atomically: true, encoding: .utf8)
+
+        let mainFile = try writeWire(
+            under: session,
+            agentID: "main",
+            content: """
+            {"type":"context.append_loop_event","usageScope":"turn","time":1785200000000,"model":"ignored","usage":{"inputOther":999,"output":999,"inputCacheRead":999,"inputCacheCreation":999}}
+            {"type":"usage.record","usageScope":"session","time":1785200000500,"model":"ignored","usage":{"inputOther":888,"output":888,"inputCacheRead":888,"inputCacheCreation":888}}
+            {"type":"usage.record","usageScope":"turn","time":1785200001000,"model":"kimi-k2.5","usage":{"inputOther":11,"output":22,"inputCacheRead":33,"inputCacheCreation":44}}
+            """
+        )
+        let subagentFile = try writeWire(
+            under: session,
+            agentID: "researcher",
+            content: """
+            {"type":"usage.record","usageScope":"turn","time":1785200002000,"model":"kimi-k2.5","usage":{"inputOther":5,"output":6,"inputCacheRead":7,"inputCacheCreation":8}}
+            """
+        )
+
+        let discovered = try KimiDataSource.discoverSessionFiles(rootDirectory: root.path)
+        #expect(discovered.map(standardizedPath) == [mainFile, subagentFile].map(standardizedPath).sorted())
+
+        let main = KimiUsageParser.parse(
+            lines: lines(try String(contentsOf: mainFile, encoding: .utf8)),
+            fileURL: mainFile
+        )
+        #expect(main.events.count == 1)
+        let event = try #require(main.events.first)
+        #expect(event.inputTokens == 11)
+        #expect(event.outputTokens == 22)
+        #expect(event.cacheReadTokens == 33)
+        #expect(event.cacheCreationTokens == 44)
+        #expect(total(event) == 110)
+        #expect(event.timestamp == Date(timeIntervalSince1970: 1_785_200_001))
+        #expect(event.modelName == "kimi-k2.5")
+        #expect(event.sessionId == "session_1234")
+        #expect(event.projectPath == "/work/projects/moon")
+        #expect(event.projectName == "moon")
+        #expect(event.id == "\(mainFile.path)#kimi#line-3")
+
+        let repeated = KimiUsageParser.parse(
+            lines: lines(try String(contentsOf: mainFile, encoding: .utf8)),
+            fileURL: mainFile
+        )
+        let subagent = KimiUsageParser.parse(
+            lines: lines(try String(contentsOf: subagentFile, encoding: .utf8)),
+            fileURL: subagentFile
+        )
+        #expect(repeated.events.first?.id == event.id)
+        #expect(subagent.events.first?.id != event.id)
+        #expect(subagent.events.first?.sessionId == "session_1234")
+        #expect(subagent.events.first?.projectPath == "/work/projects/moon")
+    }
+
+    @Test
+    func legacyRowsRemainSupportedWithCwdFallback() {
+        let file = URL(fileURLWithPath: "/tmp/legacy-session/wire.jsonl")
+        let result = KimiUsageParser.parse(
+            lines: lines("""
+            {"id":"legacy-id","role":"assistant","timestamp":"2026-05-31T09:00:01.000Z","cwd":"/legacy/project","model":"legacy-model","input_other":9,"output":8,"input_cache_read":7,"input_cache_creation":6}
+            {"message_id":"legacy-message-id","role":"assistant","timestamp":"2026-05-31T09:00:02.000Z","cwd":"/legacy/project","model":"legacy-model","input_other":1,"output":1,"input_cache_read":0,"input_cache_creation":0}
+            """),
+            fileURL: file
+        )
+
+        #expect(result.events.count == 2)
+        #expect(result.events.first?.inputTokens == 9)
+        #expect(result.events.first?.outputTokens == 8)
+        #expect(result.events.first?.cacheReadTokens == 7)
+        #expect(result.events.first?.cacheCreationTokens == 6)
+        #expect(result.events.first?.sessionId == "legacy-session")
+        #expect(result.events.first?.projectPath == "/legacy/project")
+        #expect(result.events.first?.projectName == "project")
+        #expect(result.events.first?.id == "\(file.path)#kimi#legacy-id")
+        #expect(result.events.last?.id == "\(file.path)#kimi#legacy-message-id")
+    }
+
+    @Test
+    func currentUsageFallsBackToStateCustomCwd() throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = root
+            .appendingPathComponent("sessions/work-key/session_custom", isDirectory: true)
+        try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
+        try #"{"custom":{"cwd":"/repo/foo"}}"#
+            .write(to: session.appendingPathComponent("state.json"), atomically: true, encoding: .utf8)
+        let file = try writeWire(
+            under: session,
+            agentID: "main",
+            content: """
+            {"type":"usage.record","usageScope":"turn","time":1785200001000,"model":"kimi-k2.5","usage":{"inputOther":1,"output":2,"inputCacheRead":3,"inputCacheCreation":4}}
+            """
+        )
+
+        let result = KimiUsageParser.parse(
+            lines: lines(try String(contentsOf: file, encoding: .utf8)),
+            fileURL: file
+        )
+
+        #expect(result.events.count == 1)
+        #expect(result.events.first?.projectPath == "/repo/foo")
+        #expect(result.events.first?.projectName == "foo")
+    }
+
+    @Test
+    func resolvesDefaultRootsFromEnvironmentAndRetainsLegacyRoot() {
+        let roots = KimiDataSource.resolvedRootDirectories(
+            environment: ["KIMI_CODE_HOME": "/custom/kimi-code"],
+            homeDirectory: "/test/home"
+        )
+        #expect(roots == ["/custom/kimi-code", "/test/home/.kimi"])
+
+        let fallback = KimiDataSource.resolvedRootDirectories(
+            environment: [:],
+            homeDirectory: "/test/home"
+        )
+        #expect(fallback == ["/test/home/.kimi-code", "/test/home/.kimi"])
+
+        let deduplicated = KimiDataSource.resolvedRootDirectories(
+            environment: ["KIMI_CODE_HOME": "/test/home/.kimi"],
+            homeDirectory: "/test/home"
+        )
+        #expect(deduplicated == ["/test/home/.kimi"])
+    }
+
+    @Test
+    func customRootDiscoveryIsIsolatedFromDefaults() throws {
+        let sandbox = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: sandbox) }
+        let home = sandbox.appendingPathComponent("home", isDirectory: true)
+        let custom = sandbox.appendingPathComponent("custom", isDirectory: true)
+        let environmentRoot = sandbox.appendingPathComponent("env", isDirectory: true)
+
+        let defaultNew = try writeLegacyWire(root: home.appendingPathComponent(".kimi-code"), sessionID: "default-new")
+        let legacy = try writeLegacyWire(root: home.appendingPathComponent(".kimi"), sessionID: "legacy")
+        let environment = try writeLegacyWire(root: environmentRoot, sessionID: "environment")
+        let customFile = try writeLegacyWire(root: custom, sessionID: "custom")
+
+        let defaults = try KimiDataSource.discoverSessionFiles(
+            environment: ["KIMI_CODE_HOME": environmentRoot.path],
+            homeDirectory: home.path
+        )
+        #expect(defaults.map(standardizedPath) == [environment, legacy].map(standardizedPath).sorted())
+        #expect(!defaults.map(standardizedPath).contains(standardizedPath(defaultNew)))
+
+        let isolated = try KimiDataSource.discoverSessionFiles(
+            rootDirectory: custom.path,
+            environment: ["KIMI_CODE_HOME": environmentRoot.path],
+            homeDirectory: home.path
+        )
+        #expect(isolated.map(standardizedPath) == [standardizedPath(customFile)])
+    }
+
+    private func temporaryDirectory() -> URL {
+        URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+            .appendingPathComponent(".build/KimiTests", isDirectory: true)
+            .appendingPathComponent("kimi-test-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    private func standardizedPath(_ url: URL) -> String {
+        url.standardizedFileURL.path
+    }
+
+    private func writeWire(under session: URL, agentID: String, content: String) throws -> URL {
+        let directory = session
+            .appendingPathComponent("agents", isDirectory: true)
+            .appendingPathComponent(agentID, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("wire.jsonl")
+        try (content + "\n").write(to: file, atomically: true, encoding: .utf8)
+        return file
+    }
+
+    private func writeLegacyWire(root: URL, sessionID: String) throws -> URL {
+        let directory = root
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("wire.jsonl")
+        try #"{"input_other":1,"output":1,"input_cache_read":0,"input_cache_creation":0}"#
+            .write(to: file, atomically: true, encoding: .utf8)
+        return file
+    }
+
     private func total(_ e: UsageEvent) -> Int {
         e.inputTokens + e.outputTokens + e.cacheReadTokens + e.cacheCreationTokens + (e.reasoningTokens ?? 0)
     }

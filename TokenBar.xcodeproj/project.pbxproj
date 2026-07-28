@@ -1079,10 +1079,10 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				531D59D64152CE6396100035 /* TokenBar */,
-				D87E78CC62BF2755A5ACAB2D /* TokenBarCLI */,
 				6AB58245F26765B1B2BD0FEB /* TokenBarCore */,
+				531D59D64152CE6396100035 /* TokenBar */,
 				4C7E200DFF105E5D8A9FC9D6 /* TokenBarProbe */,
+				D87E78CC62BF2755A5ACAB2D /* TokenBarCLI */,
 				0BF80752B81B2840A0FF8933 /* TokenBarTests */,
 			);
 		};

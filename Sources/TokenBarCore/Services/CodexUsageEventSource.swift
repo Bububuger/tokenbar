@@ -62,8 +62,15 @@ public struct CodexUsageEventSource: InspectableUsageEventSource, ResourceBudget
         let canonicalActiveRootPath = rootURL.lastPathComponent == "archived_sessions"
             ? rootURL.deletingLastPathComponent().appendingPathComponent("sessions", isDirectory: true).path
             : rootURL.path
+        let readyFiles = files.filter { fileURL in
+            guard watermarks[fileURL.path] == nil,
+                  let preflight = try? CodexUsageParser.replayPreflight(fileURL: fileURL) else {
+                return true
+            }
+            return !preflight.shouldDeferNewFile
+        }
         return try await JSONLWatermarkLoader.load(
-            files: files,
+            files: readyFiles,
             agent: agent,
             sourceName: sourceName,
             watermarks: watermarks,

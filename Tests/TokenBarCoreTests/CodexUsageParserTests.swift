@@ -135,6 +135,72 @@ struct CodexUsageParserTests {
         #expect(loaded.events.count == 1)
         #expect(loaded.events.reduce(0) { $0 + $1.inputTokens + $1.outputTokens } == 12)
         #expect(loaded.prompts.count == 1)
+        #expect(loaded.nextWatermarks.count == 1)
+    }
+
+    @Test
+    func eventSourceDefersNewForkUntilReplayBoundaryArrives() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root
+            .appendingPathComponent("2026/07/28", isDirectory: true)
+            .appendingPathComponent("rollout-2026-07-28T12-00-00-fork.jsonl")
+        let incompleteLines = [
+            sessionMetadata(
+                id: "child",
+                forkedFromID: "parent",
+                threadSource: "subagent",
+                hasSubagentSource: true,
+                cwd: "/work/child"
+            ),
+            userPrompt("replayed parent prompt"),
+            tokenCount(last: usage(input: 1_000, read: 800, output: 100, total: 1_100)),
+        ]
+        try writeJSONLines(incompleteLines, to: file)
+
+        let calendar = Calendar(identifier: .gregorian)
+        let referenceDate = try #require(calendar.date(
+            from: DateComponents(year: 2026, month: 7, day: 28, hour: 12)
+        ))
+        let source = CodexUsageEventSource(rootPath: root.path, daysBack: 1)
+        let first = try await source.loadEvents(
+            since: [:],
+            referenceDate: referenceDate,
+            calendar: calendar
+        )
+
+        #expect(first.events.isEmpty)
+        #expect(first.prompts.isEmpty)
+        #expect(first.nextWatermarks.isEmpty)
+        #expect(first.warnings.isEmpty)
+
+        try writeJSONLines(
+            incompleteLines + [
+                interAgentMetadata(triggerTurn: true),
+                userPrompt("live child prompt"),
+                tokenCount(last: usage(input: 200, read: 50, output: 20, total: 220)),
+            ],
+            to: file
+        )
+        let firstWatermarks = Dictionary(
+            uniqueKeysWithValues: first.nextWatermarks.map { ($0.sourcePath, $0) }
+        )
+        let second = try await source.loadEvents(
+            since: firstWatermarks,
+            referenceDate: referenceDate,
+            calendar: calendar
+        )
+
+        #expect(second.events.count == 1)
+        #expect(second.events[0].sessionId == "child")
+        #expect(second.events[0].projectPath == "/work/child")
+        #expect(totalTokens(second.events[0]) == 220)
+        #expect(second.prompts.count == 1)
+        #expect(second.prompts[0].content == "live child prompt")
+        #expect(second.prompts[0].sessionId == "child")
+        #expect(second.nextWatermarks.count == 1)
+        #expect(second.warnings.count == 1)
+        #expect(second.warnings[0].message.contains("forced full reparse"))
     }
 
     @Test
@@ -213,6 +279,191 @@ struct CodexUsageParserTests {
         // Total input must equal sum of distinct payloads, not the doubled raw.
         let totalInput = result.events.reduce(0) { $0 + $1.inputTokens }
         #expect(totalInput == 250)
+    }
+
+    @Test
+    func parserSkipsSubagentParentReplayTokensButKeepsUserPrompts() {
+        let result = parseJSONLines([
+            sessionMetadata(
+                id: "child",
+                forkedFromID: "parent",
+                threadSource: "subagent",
+                hasSubagentSource: true,
+                cwd: "/work/child",
+                model: "owner-model"
+            ),
+            tokenCount(
+                last: usage(input: 100, read: 40, output: 10, total: 110),
+                total: usage(input: 100, read: 40, output: 10, total: 110)
+            ),
+            sessionMetadata(
+                id: "parent",
+                threadSource: "user",
+                cwd: "/work/parent",
+                model: "parent-model"
+            ),
+            userPrompt("human prompt inside parent replay"),
+            tokenCount(last: usage(input: 1_000, read: 800, output: 100, total: 1_100)),
+            interAgentMetadata(triggerTurn: false),
+            tokenCount(last: usage(input: 2_000, read: 1_600, output: 200, total: 2_200)),
+            turnContext(model: "latest-turn-model"),
+            interAgentMetadata(triggerTurn: true),
+            tokenCount(total: usage(input: 200, read: 50, output: 0, total: 200)),
+        ])
+
+        #expect(result.events.count == 1)
+        #expect(result.events[0].sessionId == "child")
+        #expect(result.events[0].projectPath == "/work/child")
+        #expect(result.events[0].modelName == "latest-turn-model")
+        #expect(totalTokens(result.events[0]) == 200)
+        #expect(result.prompts.isEmpty)
+        #expect(result.warnings.isEmpty)
+    }
+
+    @Test
+    func parserKeepsMatchingNestedSessionTokensForRootOwner() {
+        let result = parseJSONLines([
+            sessionMetadata(
+                id: "root",
+                forkedFromID: "parent",
+                threadSource: "user",
+                hasSubagentSource: true
+            ),
+            userPrompt("root human prompt"),
+            sessionMetadata(id: "parent", threadSource: "user"),
+            tokenCount(last: usage(input: 200, read: 50, output: 20, total: 220)),
+        ])
+
+        #expect(result.events.count == 1)
+        #expect(totalTokens(result.events[0]) == 220)
+        #expect(result.prompts.count == 1)
+        #expect(result.prompts[0].content == "root human prompt")
+        #expect(result.warnings.isEmpty)
+    }
+
+    @Test
+    func parserSkipsReplayWithoutNestedParentMetadata() {
+        let result = parseJSONLines([
+            sessionMetadata(
+                id: "child",
+                forkedFromID: "parent",
+                threadSource: "subagent",
+                hasSubagentSource: true
+            ),
+            tokenCount(last: usage(input: 1_000, read: 800, output: 100, total: 1_100)),
+            interAgentMetadata(triggerTurn: false),
+            userPrompt("replayed parent prompt"),
+            interAgentMetadata(triggerTurn: true),
+            userPrompt("live child prompt"),
+            tokenCount(last: usage(input: 200, read: 50, output: 20, total: 220)),
+        ])
+
+        #expect(result.events.count == 1)
+        #expect(result.events[0].sessionId == "child")
+        #expect(totalTokens(result.events[0]) == 220)
+        #expect(result.prompts.count == 1)
+        #expect(result.prompts[0].content == "live child prompt")
+        #expect(result.prompts[0].sessionId == "child")
+    }
+
+    @Test
+    func parserFailsOpenWhenReplayUnlockMarkerIsMissing() {
+        let result = parseJSONLines([
+            sessionMetadata(
+                id: "child",
+                forkedFromID: "parent",
+                threadSource: "subagent",
+                hasSubagentSource: true
+            ),
+            userPrompt("prompt without boundary"),
+            tokenCount(last: usage(input: 100, read: 40, output: 10, total: 110)),
+        ])
+
+        #expect(result.events.count == 1)
+        #expect(totalTokens(result.events[0]) == 110)
+        #expect(result.prompts.count == 1)
+        #expect(result.prompts[0].content == "prompt without boundary")
+        #expect(result.warnings.count == 1)
+        #expect(result.warnings[0].message.contains("replay boundary missing"))
+    }
+
+    @Test
+    func parserRequiresStrictSubagentSourceMetadata() {
+        let missingThreadSource = parseJSONLines([
+            sessionMetadata(id: "child", forkedFromID: "parent", hasSubagentSource: true),
+            sessionMetadata(id: "parent", threadSource: "user"),
+            tokenCount(last: usage(input: 100, read: 40, output: 10, total: 110)),
+        ])
+        let missingThreadSpawn = parseJSONLines([
+            sessionMetadata(
+                id: "child",
+                forkedFromID: "parent",
+                threadSource: "subagent",
+                hasSubagentSource: false
+            ),
+            sessionMetadata(id: "parent", threadSource: "user"),
+            tokenCount(last: usage(input: 100, read: 40, output: 10, total: 110)),
+        ])
+        let invalidThreadSpawn = parseJSONLines([
+            #"{"timestamp":"2026-07-24T00:00:00Z","type":"session_meta","payload":{"id":"child","forked_from_id":"parent","thread_source":"subagent","source":{"subagent":{"thread_spawn":"invalid"}},"cwd":"/tmp/tokenbar"}}"#,
+            sessionMetadata(id: "parent", threadSource: "user"),
+            tokenCount(last: usage(input: 100, read: 40, output: 10, total: 110)),
+        ])
+        let emptyParentID = parseJSONLines([
+            sessionMetadata(
+                id: "child",
+                forkedFromID: " ",
+                threadSource: "subagent",
+                hasSubagentSource: true
+            ),
+            sessionMetadata(id: " ", threadSource: "user"),
+            tokenCount(last: usage(input: 100, read: 40, output: 10, total: 110)),
+        ])
+
+        #expect(missingThreadSource.events.count == 1)
+        #expect(missingThreadSpawn.events.count == 1)
+        #expect(invalidThreadSpawn.events.count == 1)
+        #expect(emptyParentID.events.count == 1)
+    }
+
+    @Test
+    func asyncParserSkipsSubagentParentReplayTokens() async {
+        let result = await parseJSONLinesAsync([
+            sessionMetadata(
+                id: "child",
+                forkedFromID: "parent",
+                threadSource: "subagent",
+                hasSubagentSource: true
+            ),
+            tokenCount(last: usage(input: 100, read: 40, output: 10, total: 110)),
+            sessionMetadata(id: "parent", threadSource: "user"),
+            tokenCount(last: usage(input: 1_000, read: 800, output: 100, total: 1_100)),
+            interAgentMetadata(triggerTurn: false),
+            tokenCount(last: usage(input: 2_000, read: 1_600, output: 200, total: 2_200)),
+            interAgentMetadata(triggerTurn: true),
+            tokenCount(last: usage(input: 200, read: 50, output: 20, total: 220)),
+        ])
+
+        #expect(result.events.count == 1)
+        #expect(result.events[0].sessionId == "child")
+        #expect(totalTokens(result.events[0]) == 220)
+    }
+
+    @Test
+    func parserWithoutOwnerMetadataKeepsIncrementalUsage() {
+        let result = CodexUsageParser.parse(
+            lines: lineRecords([
+                tokenCount(last: usage(input: 100, read: 40, output: 10, total: 110)),
+            ]),
+            fileURL: parserFixtureURL,
+            initialSessionID: "initial-child",
+            initialProjectPath: "/work/child"
+        )
+
+        #expect(result.events.count == 1)
+        #expect(result.events[0].sessionId == "initial-child")
+        #expect(result.events[0].projectPath == "/work/child")
+        #expect(totalTokens(result.events[0]) == 110)
     }
 
     @Test
@@ -423,12 +674,16 @@ struct CodexUsageParserTests {
     }
 
     private func writeRollout(to file: URL) throws {
-        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         let lines = [
             #"{"timestamp":"2026-04-27T12:00:00Z","type":"session_meta","payload":{"id":"stable-session","cwd":"/tmp/tokenbar"}}"#,
             #"{"timestamp":"2026-04-27T12:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"same prompt"}]}}"#,
             #"{"timestamp":"2026-04-27T12:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":2,"reasoning_output_tokens":0,"total_tokens":12}}}}"#,
         ]
+        try writeJSONLines(lines, to: file)
+    }
+
+    private func writeJSONLines(_ lines: [String], to file: URL) throws {
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try (lines.joined(separator: "\n") + "\n").write(to: file, atomically: true, encoding: .utf8)
     }
 
@@ -481,9 +736,40 @@ struct CodexUsageParserTests {
         """
     }
 
-    private func turnContext() -> String {
+    private func turnContext(model: String = "gpt-5.6") -> String {
         """
-        {"timestamp":"2026-07-24T00:00:01Z","type":"turn_context","payload":{"model":"gpt-5.6"}}
+        {"timestamp":"2026-07-24T00:00:01Z","type":"turn_context","payload":{"model":"\(model)"}}
+        """
+    }
+
+    private func sessionMetadata(
+        id: String,
+        forkedFromID: String? = nil,
+        threadSource: String? = nil,
+        hasSubagentSource: Bool = false,
+        cwd: String = "/tmp/tokenbar",
+        model: String? = nil
+    ) -> String {
+        let forkedFromField = forkedFromID.map { ",\"forked_from_id\":\"\($0)\"" } ?? ""
+        let threadSourceField = threadSource.map { ",\"thread_source\":\"\($0)\"" } ?? ""
+        let sourceField = hasSubagentSource
+            ? #","source":{"subagent":{"thread_spawn":{}}}"#
+            : ""
+        let modelField = model.map { ",\"model\":\"\($0)\"" } ?? ""
+        return """
+        {"timestamp":"2026-07-24T00:00:00Z","type":"session_meta","payload":{"id":"\(id)"\(forkedFromField)\(threadSourceField)\(sourceField),"cwd":"\(cwd)"\(modelField)}}
+        """
+    }
+
+    private func interAgentMetadata(triggerTurn: Bool) -> String {
+        """
+        {"timestamp":"2026-07-24T00:00:01Z","type":"inter_agent_communication_metadata","payload":{"trigger_turn":\(triggerTurn)}}
+        """
+    }
+
+    private func userPrompt(_ content: String) -> String {
+        """
+        {"timestamp":"2026-07-24T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"\(content)"}]}}
         """
     }
 

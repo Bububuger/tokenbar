@@ -36,6 +36,15 @@ private final class LockedISO8601TimestampParser: @unchecked Sendable {
 public enum CodexUsageParser {
     private static let timestampParser = LockedISO8601TimestampParser()
 
+    struct ReplayPreflight {
+        let isStrictOwner: Bool
+        let hasUnlockMarker: Bool
+
+        var shouldDeferNewFile: Bool {
+            isStrictOwner && !hasUnlockMarker
+        }
+    }
+
     /// Dedup signature for back-to-back `token_count` events that carry
     /// identical `last_token_usage` payloads. Codex's `event_msg` stream
     /// emits the same payload twice (initial + render-complete) ~7 lines
@@ -73,6 +82,71 @@ public enum CodexUsageParser {
         let usage: UsageDedupKey
         let cumulativeTotal: RawUsage?
         let lineNumber: Int
+    }
+
+    /// Subagent rollout files can embed the parent transcript before the
+    /// child's live turn. Token usage and prompts inside that replay are
+    /// duplicates of the parent rollout.
+    private struct ParentReplayState {
+        enum SessionMetadataDisposition: Equatable {
+            case apply
+            case applyWithMissingUnlockWarning
+            case ignoreDuringReplay
+        }
+
+        struct OwnerContext {
+            let sessionID: String?
+            let projectPath: String?
+            let modelName: String?
+        }
+
+        private var hasOwnerMetadata = false
+        private var ownerContext: OwnerContext?
+
+        private(set) var isReplayingParent = false
+
+        mutating func observeSessionMetadata(
+            _ payload: [String: Any]?,
+            hasUnlockMarker: Bool,
+            currentSessionID: String?,
+            currentProjectPath: String?,
+            currentModelName: String?
+        ) -> SessionMetadataDisposition {
+            guard let payload else { return .apply }
+            if !hasOwnerMetadata {
+                hasOwnerMetadata = true
+                guard CodexUsageParser.isStrictSubagentOwner(payload) else {
+                    return .apply
+                }
+                ownerContext = OwnerContext(
+                    sessionID: payload["id"] as? String ?? currentSessionID,
+                    projectPath: payload["cwd"] as? String ?? currentProjectPath,
+                    modelName: payload["model"] as? String ?? currentModelName
+                )
+                guard hasUnlockMarker else {
+                    return .applyWithMissingUnlockWarning
+                }
+                isReplayingParent = true
+                return .apply
+            }
+
+            if isReplayingParent {
+                return .ignoreDuringReplay
+            }
+            return .apply
+        }
+
+        mutating func exitReplayIfTriggered(_ object: [String: Any]) -> OwnerContext? {
+            guard isReplayingParent,
+                  object["type"] as? String == "inter_agent_communication_metadata",
+                  let payload = object["payload"] as? [String: Any],
+                  payload["trigger_turn"] as? Bool == true else {
+                return nil
+            }
+            isReplayingParent = false
+            return ownerContext
+        }
+
     }
 
     private struct NormalizedUsage {
@@ -134,6 +208,9 @@ public enum CodexUsageParser {
         var warnings: [CodexParseWarning] = []
         var lastEmittedUsage: UsageDedupState?
         var previousTotalUsage: RawUsage?
+        var parentReplayState = ParentReplayState()
+        var latestTurnContextModel: String?
+        let hasReplayUnlockMarker = replayPreflight(in: lines).hasUnlockMarker
 
         for line in lines {
             let lineNumber = line.lineNumber
@@ -154,22 +231,52 @@ public enum CodexUsageParser {
 
             if let type = object["type"] as? String, type == "session_meta" {
                 let payload = object["payload"] as? [String: Any]
+                let disposition = parentReplayState.observeSessionMetadata(
+                    payload,
+                    hasUnlockMarker: hasReplayUnlockMarker,
+                    currentSessionID: sessionID,
+                    currentProjectPath: projectPath,
+                    currentModelName: modelName
+                )
+                if disposition == .ignoreDuringReplay {
+                    continue
+                }
                 sessionID = payload?["id"] as? String ?? sessionID
                 projectPath = payload?["cwd"] as? String ?? projectPath
                 modelName = payload?["model"] as? String ?? modelName
                 lastEmittedUsage = nil
                 previousTotalUsage = nil
+                if disposition == .applyWithMissingUnlockWarning {
+                    warnings.append(CodexParseWarning(
+                        sourcePath: sourcePath,
+                        lineNumber: lineNumber,
+                        message: "subagent replay boundary missing; usage parsed without replay filtering"
+                    ))
+                }
                 continue
             }
 
             if let type = object["type"] as? String, type == "turn_context" {
                 let payload = object["payload"] as? [String: Any]
-                modelName = payload?["model"] as? String ?? modelName
+                if let turnModel = payload?["model"] as? String {
+                    modelName = turnModel
+                    latestTurnContextModel = turnModel
+                }
                 lastEmittedUsage = nil
                 continue
             }
 
-            if let prompt = extractUserPrompt(
+            if let owner = parentReplayState.exitReplayIfTriggered(object) {
+                sessionID = owner.sessionID
+                projectPath = owner.projectPath
+                modelName = latestTurnContextModel ?? owner.modelName
+                lastEmittedUsage = nil
+                previousTotalUsage = nil
+                continue
+            }
+
+            if !parentReplayState.isReplayingParent,
+               let prompt = extractUserPrompt(
                 object: object,
                 sourcePath: sourcePath,
                 identityPath: identityPath,
@@ -190,6 +297,9 @@ public enum CodexUsageParser {
             guard let payload = object["payload"] as? [String: Any],
                   let payloadType = payload["type"] as? String,
                   payloadType == "token_count" else {
+                continue
+            }
+            guard !parentReplayState.isReplayingParent else {
                 continue
             }
 
@@ -290,6 +400,9 @@ public enum CodexUsageParser {
         var warnings: [CodexParseWarning] = []
         var lastEmittedUsage: UsageDedupState?
         var previousTotalUsage: RawUsage?
+        var parentReplayState = ParentReplayState()
+        var latestTurnContextModel: String?
+        let hasReplayUnlockMarker = replayPreflight(in: lines).hasUnlockMarker
         var sliceStartedAt = Date()
         var linesSinceThrottle = 0
 
@@ -312,16 +425,42 @@ public enum CodexUsageParser {
 
             if let type = object["type"] as? String, type == "session_meta" {
                 let payload = object["payload"] as? [String: Any]
-                sessionID = payload?["id"] as? String ?? sessionID
-                projectPath = payload?["cwd"] as? String ?? projectPath
-                modelName = payload?["model"] as? String ?? modelName
-                lastEmittedUsage = nil
-                previousTotalUsage = nil
+                let disposition = parentReplayState.observeSessionMetadata(
+                    payload,
+                    hasUnlockMarker: hasReplayUnlockMarker,
+                    currentSessionID: sessionID,
+                    currentProjectPath: projectPath,
+                    currentModelName: modelName
+                )
+                if disposition != .ignoreDuringReplay {
+                    sessionID = payload?["id"] as? String ?? sessionID
+                    projectPath = payload?["cwd"] as? String ?? projectPath
+                    modelName = payload?["model"] as? String ?? modelName
+                    lastEmittedUsage = nil
+                    previousTotalUsage = nil
+                    if disposition == .applyWithMissingUnlockWarning {
+                        warnings.append(CodexParseWarning(
+                            sourcePath: sourcePath,
+                            lineNumber: lineNumber,
+                            message: "subagent replay boundary missing; usage parsed without replay filtering"
+                        ))
+                    }
+                }
             } else if let type = object["type"] as? String, type == "turn_context" {
                 let payload = object["payload"] as? [String: Any]
-                modelName = payload?["model"] as? String ?? modelName
+                if let turnModel = payload?["model"] as? String {
+                    modelName = turnModel
+                    latestTurnContextModel = turnModel
+                }
                 lastEmittedUsage = nil
-            } else if let prompt = extractUserPrompt(
+            } else if let owner = parentReplayState.exitReplayIfTriggered(object) {
+                sessionID = owner.sessionID
+                projectPath = owner.projectPath
+                modelName = latestTurnContextModel ?? owner.modelName
+                lastEmittedUsage = nil
+                previousTotalUsage = nil
+            } else if !parentReplayState.isReplayingParent,
+                      let prompt = extractUserPrompt(
                 object: object,
                 sourcePath: sourcePath,
                 identityPath: identityPath,
@@ -335,7 +474,8 @@ public enum CodexUsageParser {
             } else if let type = object["type"] as? String, type == "event_msg",
                       let payload = object["payload"] as? [String: Any],
                       let payloadType = payload["type"] as? String,
-                      payloadType == "token_count" {
+                      payloadType == "token_count",
+                      !parentReplayState.isReplayingParent {
                 guard let info = payload["info"] as? [String: Any] else {
                     warnings.append(CodexParseWarning(sourcePath: sourcePath, lineNumber: lineNumber, message: "token_count record missing info"))
                     continue
@@ -526,6 +666,62 @@ public enum CodexUsageParser {
         // heuristic to the observed duplicate-render window so a later,
         // legitimately identical completion is not dropped.
         return lineNumber > prior.lineNumber && lineNumber - prior.lineNumber <= 12
+    }
+
+    static func replayPreflight(fileURL: URL) throws -> ReplayPreflight {
+        let text = try String(contentsOf: fileURL, encoding: .utf8)
+        return replayPreflight(lineTexts: text.split(whereSeparator: \.isNewline))
+    }
+
+    private static func replayPreflight(in lines: [JSONLLineRecord]) -> ReplayPreflight {
+        replayPreflight(lineTexts: lines.lazy.map(\.text))
+    }
+
+    private static func replayPreflight<Lines: Sequence>(
+        lineTexts: Lines
+    ) -> ReplayPreflight where Lines.Element: StringProtocol {
+        var strictOwner: Bool?
+        for lineText in lineTexts {
+            if strictOwner == nil {
+                guard lineText.contains("session_meta"),
+                      let data = String(lineText).data(using: .utf8),
+                      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      object["type"] as? String == "session_meta" else {
+                    continue
+                }
+                let payload = object["payload"] as? [String: Any] ?? [:]
+                strictOwner = isStrictSubagentOwner(payload)
+                if strictOwner == false {
+                    return ReplayPreflight(isStrictOwner: false, hasUnlockMarker: false)
+                }
+                continue
+            }
+
+            guard lineText.contains("inter_agent_communication_metadata"),
+                  let data = String(lineText).data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  object["type"] as? String == "inter_agent_communication_metadata",
+                  let payload = object["payload"] as? [String: Any],
+                  payload["trigger_turn"] as? Bool == true else {
+                continue
+            }
+            return ReplayPreflight(isStrictOwner: true, hasUnlockMarker: true)
+        }
+        return ReplayPreflight(
+            isStrictOwner: strictOwner == true,
+            hasUnlockMarker: false
+        )
+    }
+
+    private static func isStrictSubagentOwner(_ payload: [String: Any]) -> Bool {
+        guard payload["thread_source"] as? String == "subagent",
+              let source = payload["source"] as? [String: Any],
+              let subagent = source["subagent"] as? [String: Any],
+              subagent["thread_spawn"] is [String: Any],
+              let parentSessionID = payload["forked_from_id"] as? String else {
+            return false
+        }
+        return !parentSessionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private static func parseRawUsage(_ usage: [String: Any]) -> RawUsage? {

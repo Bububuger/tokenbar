@@ -1,65 +1,57 @@
-# Codex Collaboration Workflow
+# AGENTS.md — TokenBar 项目合同
 
-## Default Development Split
+## 项目与架构
 
-For non-trivial product or code implementation work, use this division of labor:
+TokenBar 是原生 macOS 应用，使用 SwiftUI 构建菜单栏、popover、窗口和设置体验，并通过独立 Core 层发现、解析、聚合和持久化各类 Agent 用量。
 
-- GPT-5.5 owns product discussion, technical planning, scope control, and final acceptance.
-- GPT-5.3-Codex-Spark (`gpt-5.3-codex-spark`, referred to as `codex-spark`) owns concrete code execution when implementation work is needed.
+- `Sources/TokenBar`：应用入口、SwiftUI views、运行时模型和资源。
+- `Sources/TokenBarCore`：数据源、parser、用量模型、聚合、存储、索引与诊断服务。
+- `Sources/TokenBarCLI`：命令行入口与过滤、library 等子命令。
+- `Sources/TokenBarProbe`：探针入口。
+- `Tests/TokenBarCoreTests`：Core 回归测试。
+- `script/`：构建、运行、测试和本地验证脚本。
+- `project.yml`：XcodeGen 项目定义；`TokenBar.xcodeproj` 为生成后的 Xcode 工程。
 
-Do not delegate every small task. For one-line fixes, quick inspections, simple command output, or low-risk text edits, handle the work directly.
+优先使用 SwiftUI 的 `MenuBarExtra`、`Window`、`WindowGroup`、`Settings`、`NavigationSplitView`、toolbar、快捷键和系统材质；仅在状态栏控制、窗口激活、焦点、hover、文件面板、拖放或诊断等 SwiftUI 无法可靠表达的行为上使用窄 AppKit bridge。
 
-Prefer delegating token-heavy but lower-reasoning execution work to `codex-spark`, such as repeated build/test runs, log collection, screenshot attempts, UI automation probes, and broad mechanical verification. GPT-5.5 should define the concrete target and acceptance criteria first, then judge the result.
+## macOS 构建与运行
 
-## Workflow
+使用 shell 与 Xcode toolchain 驱动本地开发：
 
-1. Discuss the product or engineering intent with the user first.
-2. Convert the agreed direction into explicit acceptance criteria before implementation.
-3. Delegate bounded code changes to a `codex-spark` worker when the task is implementation-heavy.
-4. Tell the worker the exact files or modules it owns, that it is not alone in the codebase, and that it must not revert unrelated edits.
-5. Require the worker to edit files directly, run relevant build/test commands, and report changed paths plus verification results.
-6. GPT-5.5 reviews the worker result, checks diffs and screenshots/logs where relevant, and performs final acceptance.
-7. If the worker result misses the product intent, GPT-5.5 either sends a precise follow-up to the worker or applies a small integration fix directly.
+```bash
+xcodegen generate --spec project.yml --project .
+script/test.sh
+script/build_and_run.sh --verify
+```
 
-## macOS App Workflow
+- Xcode 工程配置变化后，先重新生成工程。
+- SDK 变化时使用 SDK 隔离的 build cache，避免复用陈旧 SwiftSyntax 或 package 预编译产物。
+- App Store archive、notarization 和最终签名属于独立发布阶段。
 
-Use a shell-first workflow for TokenBar. Xcode is the required toolchain for this native macOS app, but the Xcode GUI should not be the default development driver.
+## 按需操作入口
 
-- Build and test from scripts or `xcodebuild`, not the Xcode Run button.
-- Regenerate the project with `xcodegen generate --spec project.yml --project .` before Xcode-target builds when project settings may have changed.
-- Use `script/test.sh` for the standard test path.
-- Use `script/build_and_run.sh --verify` for the standard local app build/run verification path.
-- Keep development signing scriptable, but treat App Store archive, notarization, and final signing as a separate release phase requiring explicit human acceptance.
-- Prefer SwiftUI scenes and views first: `MenuBarExtra`, `Window`, `WindowGroup`, `Settings`, `NavigationSplitView`, toolbars, keyboard shortcuts, and system materials.
-- Use narrow AppKit bridges when SwiftUI cannot reliably express macOS behavior, especially status item control, window activation, focus, hover timing, file panels, drag and drop, and diagnostics.
-- Do not accept generated Swift/macOS APIs without building. AI-produced macOS code must pass a real build before it is treated as usable.
-- Keep SDK and DerivedData cache issues isolated in scripts. If Xcode SDK changes, avoid stale SwiftSyntax or package prebuilt artifacts by using SDK-specific build cache paths.
+| 触发 | 读取 |
+| --- | --- |
+| 版本发布、DMG、tag、GitHub Release、Homebrew Cask | [`docs/runbooks/release.md`](docs/runbooks/release.md) |
+| 全量重建本地历史索引、`tbar rebuild`、重建性能或失败排查 | [`docs/runbooks/history-rebuild.md`](docs/runbooks/history-rebuild.md) |
 
-## UI And macOS App Work
+入口合同只保留日常开发约束；发布和全历史重建步骤不在这里重复。
 
-For UI-facing work, especially macOS status bar, popover, or window changes:
+## UI 验收
 
-- Define the visible user-facing behavior before code changes.
-- State the visible acceptance criteria before delegating implementation.
-- Use mocked data when the user explicitly allows it or when visual validation would otherwise be blocked.
-- Explain which data is mocked, which data is real, and the time window behind every visible number.
-- Verify with a real build/run path, not just static code inspection.
-- Capture screenshots for visual acceptance when possible.
-- For status bar work, validate against menu-bar space constraints. Prefer a compact icon or chart indicator over adding numeric text to the menu-bar item.
-- For popover and window work, validate singleton behavior. Repeated clicks on Details or Diagnostics should focus an existing window instead of creating duplicates.
-- For time-windowed metrics, avoid mixing Today, 30d, and Total numbers without labels. The UI must make the time window explicit.
+- UI 改动必须经过真实 build/run；静态代码检查不能证明 macOS 行为可用。
+- 视觉验收可使用明确标注的 mock 数据；可见数字需说明数据来源和时间窗口。
+- 菜单栏空间有限，优先紧凑图标或图表指示，不直接增加数值文本。
+- Details、Diagnostics 等窗口重复打开时聚焦既有窗口，不创建重复实例。
+- Today、30d、Total 等不同时间窗口不得无标签混用。
+- 视觉改动在可行时保留截图证据。
 
-## Logging And Diagnostics
+## 日志与诊断
 
-- Use Swift `Logger` for runtime diagnostics that may matter during local verification.
-- Prefer `log stream` or script-collected logs over ad hoc print debugging when investigating app runtime behavior.
-- Privacy, accessibility, file access, and automation permissions should be represented explicitly in `Info.plist`, entitlements, or diagnostics UI when they affect user-facing behavior.
+- 运行时诊断使用 Swift `Logger`。
+- 调查运行行为时使用 `log stream` 或脚本收集日志。
+- 隐私、Accessibility、文件访问和自动化权限若影响用户行为，应在 `Info.plist`、entitlements 或 Diagnostics UI 中显式呈现。
 
-## Final Reporting
+## 交付报告
 
-Final responses should be concise and include:
-
-- What changed at the product level.
-- The key files changed.
-- The verification performed.
-- Any remaining caveat or follow-up decision.
+报告包括产品层变化、实际修改文件、构建/测试与 UI 验证证据，以及仍存在的限制或待决项。

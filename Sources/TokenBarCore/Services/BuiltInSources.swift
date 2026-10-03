@@ -34,6 +34,7 @@ public enum BuiltInSources {
             CursorUsageEventSource(),
             DshUsageEventSource(),
             DshUsageEventSource(),
+            DshUsageEventSource(),
         ]
     }
 

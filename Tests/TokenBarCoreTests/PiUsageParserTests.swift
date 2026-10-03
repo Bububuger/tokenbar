@@ -69,6 +69,18 @@ struct PiUsageParserTests {
     }
 
     @Test
+    func surfacesReasoningField() throws {
+        let records = lines([
+            #"{"type":"session","version":3,"id":"s","timestamp":"2026-05-30T10:00:00Z","cwd":"/p"}"#,
+            #"{"type":"message","id":"a1","timestamp":1780178401000,"message":{"role":"assistant","model":"m","usage":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0,"reasoning":7,"totalTokens":15,"cost":0}}}"#,
+        ])
+
+        let result = PiUsageParser.parse(lines: records, fileURL: URL(fileURLWithPath: "/tmp/pi/s.jsonl"))
+        #expect(result.events.count == 1)
+        #expect(result.events[0].reasoningTokens == 7)
+    }
+
+    @Test
     func multipleAssistantTurnsAccumulate() throws {
         let records = lines([
             #"{"type":"session","version":3,"id":"s","timestamp":"2026-05-30T10:00:00Z","cwd":"/Users/me/proj"}"#,

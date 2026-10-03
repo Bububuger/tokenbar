@@ -59,7 +59,6 @@ targets:
     platform: macOS
     sources:
       - path: Sources/TokenBarCore
-      - path: Sources/Czstd
     dependencies:
       - package: GRDB
         product: GRDB

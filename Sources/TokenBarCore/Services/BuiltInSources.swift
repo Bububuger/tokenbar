@@ -33,6 +33,7 @@ public enum BuiltInSources {
             AntigravityUsageEventSource(),
             CursorUsageEventSource(),
             DshUsageEventSource(),
+            DshUsageEventSource(),
         ]
     }
 

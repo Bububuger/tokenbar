@@ -5,13 +5,13 @@ import Testing
 
 struct Sprint8StorageTests {
     @Test
-    func builtInSourcesIncludesAllThirteenAgents() {
+    func builtInSourcesIncludesAllFifteenAgents() {
         let sources = BuiltInSources.all()
         let agents = Set(sources.map(\.agent))
-        #expect(sources.count == 13)
+        #expect(sources.count == 15)
         #expect(agents == Set<AgentKind>([
             .codex, .claudeCode, .hermes, .geminiCLI, .openclaw, .openCode, .warp, .pi,
-            .qoder, .kiro, .kimi, .antigravity, .cursor,
+            .qoder, .kiro, .kimi, .antigravity, .cursor, .grok, .devin,
         ]))
     }
 

@@ -1,0 +1,14 @@
+{
+  "info": {
+    "id": "01a0f582-74e1-7e83-8a16-acd82d9426da",
+    "cwd": "/Users/work/worktree-copy"
+  },
+  "session_summary": "staged fixture session",
+  "created_at": "2026-10-01T03:29:22.682081Z",
+  "updated_at": "2026-10-01T07:11:17.210466Z",
+  "num_messages": 6,
+  "current_model_id": "grok-4.7-xhigh",
+  "session_kind": "worktree",
+  "source_workspace_dir": "/Users/work/observ-real",
+  "git_root_dir": "/Users/work/worktree-copy/"
+}

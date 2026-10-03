@@ -32,6 +32,7 @@ public enum BuiltInSources {
             KimiUsageEventSource(),
             AntigravityUsageEventSource(),
             CursorUsageEventSource(),
+            DshUsageEventSource(),
         ]
     }
 

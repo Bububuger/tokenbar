@@ -1,0 +1,3 @@
+{"type": "session", "version": 0, "id": "session-old12345-0000-0000-0000-000000000000", "createdAt": 1780000000000, "cwd": "/Users/x/api", "delegationDepth": 0}
+{"type": "user/message", "seq": 1, "time": 1780000001000, "data": {"content": [{"type": "text", "text": "旧格式问题"}], "source": {"kind": "user"}, "role": "user", "id": "u1"}}
+{"type": "assistant/message", "seq": 2, "time": 1780000002000, "data": {"turn": 1, "step": 1, "message": {"role": "assistant", "content": [{"type": "reasoning", "text": "think"}, {"type": "text", "text": "答"}], "source": {"kind": "model", "provider": "deepseek-official", "model": "deepseek-v4-flash"}}, "usage": {"inputTokens": 4767, "outputTokens": 169, "cacheReadTokens": 7296, "reasoningTokens": 135}}}

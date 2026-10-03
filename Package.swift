@@ -65,9 +65,14 @@ let package = Package(
             path: "Tests/TokenBarCLITests"
         ),
         .target(
+            name: "Czstd",
+            path: "Sources/Czstd"
+        ),
+        .target(
             name: "TokenBarCore",
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
+                "Czstd",
             ],
             path: "Sources/TokenBarCore"
         ),

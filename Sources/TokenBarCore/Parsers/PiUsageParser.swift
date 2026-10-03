@@ -9,29 +9,7 @@ public typealias PiParseResult = ParseResult
 /// session id; subsequent `type: "message"` lines whose `message.role` is
 /// `assistant` carry `message.usage` (input / output / cacheRead / cacheWrite),
 /// `message.model`, and a unix-ms `message.timestamp`.
-///
-/// omp (oh-my-pi) is a fork of pi and writes the same schema under
-/// `~/.omp/agent/sessions/<encoded-cwd>/<ts>_<id>.jsonl`; the only usage-level
-/// difference is the reasoning field name, captured by `Dialect`.
 public enum PiUsageParser {
-    /// Per-fork differences between pi and omp. Keeping them in one value means a
-    /// third fork is a new constant rather than a new parser that can drift.
-    public struct Dialect: Sendable {
-        public let agent: AgentKind
-        public let parser: ParserKind
-        /// Usage field carrying reasoning tokens: pi uses `reasoning`, omp uses
-        /// `reasoningTokens`.
-        public let reasoningKey: String
-
-        public init(agent: AgentKind, parser: ParserKind, reasoningKey: String) {
-            self.agent = agent
-            self.parser = parser
-            self.reasoningKey = reasoningKey
-        }
-
-        public static let pi = Dialect(agent: .pi, parser: .pi, reasoningKey: "reasoning")
-        public static let omp = Dialect(agent: .omp, parser: .omp, reasoningKey: "reasoningTokens")
-    }
     public static func sessionContext(fileURL: URL) -> (sessionID: String?, projectPath: String?) {
         guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else {
             return (nil, nil)
@@ -53,8 +31,7 @@ public enum PiUsageParser {
         lines: [JSONLLineRecord],
         fileURL: URL,
         initialSessionID: String? = nil,
-        initialProjectPath: String? = nil,
-        dialect: Dialect = .pi
+        initialProjectPath: String? = nil
     ) -> PiParseResult {
         let sourcePath = fileURL.path
         var sessionID = initialSessionID
@@ -98,9 +75,6 @@ public enum PiUsageParser {
             let cacheWrite = intValue(usage["cacheWrite"])
             let cacheTotal = cacheRead + cacheWrite
             guard input + output + cacheTotal > 0 else { continue }
-            // Reasoning is reported separately from output by both forks and is
-            // never part of totalTokens; surface it for the Details view only.
-            let reasoning = intValue(usage[dialect.reasoningKey])
 
             guard let timestamp = resolveTimestamp(messageDict: messageDict, outer: object) else {
                 warnings.append(PiParseWarning(
@@ -115,12 +89,12 @@ public enum PiUsageParser {
             let resolvedSession = sessionID ?? fileURL.deletingPathExtension().lastPathComponent
             let resolvedProjectName = projectPath.map {
                 URL(fileURLWithPath: $0).lastPathComponent
-            } ?? dialect.agent.rawValue
+            } ?? "pi"
             let model = messageDict["model"] as? String
 
             events.append(UsageEvent(
                 id: "\(sourcePath)#\(messageID)",
-                agent: dialect.agent,
+                agent: .pi,
                 projectPath: projectPath,
                 projectName: resolvedProjectName,
                 sessionId: resolvedSession,
@@ -129,10 +103,10 @@ public enum PiUsageParser {
                 outputTokens: output,
                 cacheReadTokens: cacheRead,
                 cacheCreationTokens: cacheWrite,
-                reasoningTokens: reasoning,
+                reasoningTokens: 0,
                 modelName: model,
                 sourcePath: sourcePath,
-                parser: dialect.parser,
+                parser: .pi,
                 confidence: 1.0
             ))
         }

@@ -9,7 +9,6 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
     case openCode
     case warp
     case pi
-    case omp
     case qoder
     case kiro
     case kimi
@@ -36,8 +35,6 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
             "Warp"
         case .pi:
             "Pi"
-        case .omp:
-            "oh-my-pi"
         case .qoder:
             "Qoder"
         case .kiro:
@@ -73,8 +70,6 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
             2.00
         case .pi:
             2.00
-        case .omp:
-            0.00
         case .qoder:
             2.15
         case .kiro:
@@ -102,7 +97,6 @@ public enum ParserKind: String, Sendable, Hashable {
     case openCode
     case warp
     case pi
-    case omp
     case qoder
     case kiro
     case kimi

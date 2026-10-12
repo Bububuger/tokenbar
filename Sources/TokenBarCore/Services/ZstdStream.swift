@@ -39,6 +39,7 @@ public enum ZstdStream {
             var input = ZSTD_inBuffer(src: srcBase, size: src.count, pos: 0)
 
             while input.pos < input.size {
+                let frameStart = input.pos
                 var producedTotal = 0
                 var frameOpen = true
                 while frameOpen {
@@ -65,7 +66,7 @@ public enum ZstdStream {
                         frameOpen = false
                     }
                 }
-                if producedTotal == 0 && input.pos < input.size && !truncated {
+                if producedTotal == 0 && input.pos == frameStart && input.pos < input.size && !truncated {
                     // No forward progress on a non-empty remainder: stop
                     // instead of looping forever on adversarial input.
                     truncated = true

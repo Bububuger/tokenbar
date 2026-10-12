@@ -15,6 +15,8 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
     case kimi
     case antigravity
     case cursor
+    case grok
+    case devin
     case dsh
     case custom
 
@@ -48,6 +50,10 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
             "Antigravity"
         case .cursor:
             "Cursor"
+        case .grok:
+            "Grok CLI"
+        case .devin:
+            "Devin"
         case .dsh:
             "DeepSeek Harness"
         case .custom:
@@ -85,6 +91,10 @@ public enum AgentKind: String, CaseIterable, Sendable, Hashable {
             0.50
         case .cursor:
             2.00
+        case .grok:
+            3.00
+        case .devin:
+            0.00
         case .dsh:
             0.00
         case .custom:
@@ -108,6 +118,8 @@ public enum ParserKind: String, Sendable, Hashable {
     case kimi
     case antigravity
     case cursor
+    case grok
+    case devin
     case dsh
     case sample
     case custom

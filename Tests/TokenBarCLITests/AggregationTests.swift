@@ -30,7 +30,8 @@ struct AggregationTests {
         cache: Int,
         cacheCreation: Int = 0,
         date: Date,
-        session: String = "s1"
+        session: String = "s1",
+        actualCostUSD: Double? = nil
     ) -> UsageEvent {
         UsageEvent(
             id: id,
@@ -45,6 +46,7 @@ struct AggregationTests {
             cacheCreationTokens: cacheCreation,
             reasoningTokens: nil,
             modelName: model,
+            actualCostUSD: actualCostUSD,
             sourcePath: "/tmp/\(project)/source",
             parser: .sample,
             confidence: 1.0
@@ -206,6 +208,23 @@ struct AggregationTests {
         #expect(buckets.count == 1)
         #expect(buckets[0].totalTokens == 300)
         #expect(buckets[0].hourOfDay == 10)
+    }
+
+    @Test
+    func costsPreferReportedValuesAndRetainFallbackForMissingEvents() throws {
+        let events = [
+            makeEvent(id: "reported", agent: .grok, project: "p", model: "m", input: 1_000_000, output: 0, cache: 0, date: Self.dayA, actualCostUSD: 0.25),
+            makeEvent(id: "fallback", agent: .grok, project: "p", model: "m", input: 1_000_000, output: 0, cache: 0, date: Self.dayA),
+            makeEvent(id: "free", agent: .omp, project: "p", model: "m", input: 1_000_000, output: 0, cache: 0, date: Self.dayA, actualCostUSD: 0),
+            makeEvent(id: "cursor-unavailable", agent: .cursor, project: "p", model: "m", input: 1_000_000, output: 0, cache: 0, date: Self.dayA),
+        ]
+        #expect(abs(CostEstimator.estimate(events: events) - 3.25) < 0.000001)
+        #expect(CostEstimator.source(events: events) == "mixed")
+        #expect(CostEstimator.source(events: [events[2]]) == "actual")
+        for grouping: [GroupByDimension] in [[], [.model], [.agent]] {
+            let rows = Aggregation.aggregate(events: events, prompts: [], groupBy: grouping, calendar: Self.calendar)
+            #expect(abs(rows.reduce(0) { $0 + $1.estimatedCostUSD } - 3.25) < 0.000001)
+        }
     }
 
     @Test

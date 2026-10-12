@@ -74,6 +74,28 @@ struct DevinUsageParserTests {
     }
 
     @Test
+    func separatesClaudeCacheWritesFromFreshInput() throws {
+        let result = try parseTranscript("""
+        {
+          "schema_version": "ATIF-v1.7",
+          "session_id": "claude-cache-write",
+          "agent": {"model_name": "claude"},
+          "steps": [
+            {"step_id": "11", "timestamp": "2026-10-01T07:16:48Z", "metrics": {"prompt_tokens": 45633, "cached_tokens": 12018, "completion_tokens": 100, "extra": {"cache_creation_input_tokens": 33611}}}
+          ],
+          "final_metrics": {"total_prompt_tokens": 45633, "total_cached_tokens": 12018, "total_completion_tokens": 100}
+        }
+        """)
+        #expect(result.events.count == 1)
+        let event = result.events[0]
+        #expect(event.inputTokens == 4)
+        #expect(event.cacheReadTokens == 12018)
+        #expect(event.cacheCreationTokens == 33611)
+        #expect(event.inputTokens + event.outputTokens + event.cacheTokens == 45733)
+        #expect(result.warnings.isEmpty)
+    }
+
+    @Test
     func unknownProjectFallsBackToUnknownName() throws {
         let result = try parseTranscript(Self.transcript, projects: [:])
         #expect(result.events[0].projectName == "unknown")

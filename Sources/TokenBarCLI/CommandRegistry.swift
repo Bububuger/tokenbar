@@ -16,6 +16,7 @@ struct CommandDescriptor: Encodable {
 
 enum CommandRegistry {
     static let tokenFieldSemantics = "Token fields: inputTokens is retained for compatibility and means uncached input; uncachedInputTokens is its explicit alias; totalInputTokens = uncachedInputTokens + cacheReadTokens + cacheCreationTokens; totalTokens = totalInputTokens + outputTokens."
+    static let costFieldSemantics = "Costs prefer source-reported values and otherwise use default per-agent rates. costSource is actual, defaults, or mixed; Cursor without reported cost stays unavailable."
 
     static let commonFilters = [
         "--db <path>",
@@ -107,7 +108,7 @@ enum CommandRegistry {
                 "outputTokens", "cacheReadTokens", "cacheCreationTokens", "totalTokens",
                 "estimatedCostUSD", "costSource",
             ],
-            extras: [tokenFieldSemantics],
+            extras: [tokenFieldSemantics, costFieldSemantics],
             defaultLimit: 100
         ),
         CommandDescriptor(
@@ -144,6 +145,7 @@ enum CommandRegistry {
             extras: [
                 "--group-by accepts a comma-separated list. Empty = single global row.",
                 tokenFieldSemantics,
+                costFieldSemantics,
             ],
             defaultLimit: 100
         ),

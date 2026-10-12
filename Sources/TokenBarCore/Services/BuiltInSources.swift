@@ -27,14 +27,15 @@ public enum BuiltInSources {
             OpenCodeUsageEventSource(),
             WarpUsageEventSource(),
             PiUsageEventSource(),
+            OmpUsageEventSource(),
             QoderUsageEventSource(),
             KiroUsageEventSource(),
             KimiUsageEventSource(),
+            GrokUsageEventSource(),
+            DevinUsageEventSource(),
+            DshUsageEventSource(),
             AntigravityUsageEventSource(),
             CursorUsageEventSource(),
-            DshUsageEventSource(),
-            DshUsageEventSource(),
-            DshUsageEventSource(),
         ]
     }
 

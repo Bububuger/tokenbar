@@ -907,7 +907,8 @@ public struct UsageRepository: Sendable {
                    END AS actual_cost_usd
             FROM usage_events
             WHERE timestamp >= ? AND timestamp < ?
-            GROUP BY project_name, project_path, agent, COALESCE(model_name, '')
+            GROUP BY project_name, project_path, agent, COALESCE(model_name, ''),
+                     CASE WHEN agent = 'cursor' THEN 0 ELSE actual_cost_usd IS NULL END
             """, arguments: [
                 start.tokenBarMillisecondsSince1970,
                 end.tokenBarMillisecondsSince1970,
@@ -1732,7 +1733,10 @@ public struct UsageRepository: Sendable {
                SUM(output_tokens) AS output_tokens,
                SUM(cache_read_tokens) AS cache_read_tokens,
                SUM(cache_creation_tokens) AS cache_creation_tokens,
-               COALESCE(SUM(actual_cost_usd), 0) AS actual_cost_usd
+               COALESCE(SUM(actual_cost_usd), 0) AS actual_cost_usd,
+               SUM(CASE WHEN actual_cost_usd IS NULL
+                   THEN input_tokens + output_tokens + cache_read_tokens + cache_creation_tokens
+                   ELSE 0 END) AS estimated_tokens
         FROM usage_events
         \(whereClause)
         GROUP BY COALESCE(model_name, ''), agent
@@ -1758,10 +1762,10 @@ public struct UsageRepository: Sendable {
             outputByModel[modelName] = UsageModelSummary(
                 name: modelName,
                 totalTokens: existing.totalTokens + summary.totalTokens,
-                cost: existing.cost + (
+                cost: existing.cost + (row["actual_cost_usd"] as Double) + (
                     agent == .cursor
-                        ? (row["actual_cost_usd"] as Double)
-                        : (Double(summary.totalTokens) * agent.defaultCostPerMillionTokens / 1_000_000)
+                        ? 0
+                        : (Double(row["estimated_tokens"] as Int) * agent.defaultCostPerMillionTokens / 1_000_000)
                 )
             )
         }

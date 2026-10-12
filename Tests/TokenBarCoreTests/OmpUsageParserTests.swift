@@ -17,7 +17,7 @@ struct OmpUsageParserTests {
             #"{"type":"session","version":3,"id":"sess-omp-1","timestamp":"2026-10-01T07:16:45.518Z","cwd":"/Users/me/work/observ"}"#,
             #"{"type":"model_change","timestamp":"2026-10-01T07:16:46.000Z","model":"swe-2"}"#,
             #"{"type":"message","id":"u1","timestamp":"2026-10-01T07:16:47.000Z","message":{"role":"user","content":"hi"}}"#,
-            #"{"type":"message","id":"m1","parentId":"u1","timestamp":"2026-10-01T07:16:48.937Z","message":{"role":"assistant","model":"swe-2","usage":{"input":120,"output":40,"cacheRead":300,"cacheWrite":0,"reasoningTokens":25,"totalTokens":460,"cost":0},"stopReason":"stop"}}"#,
+            #"{"type":"message","id":"m1","parentId":"u1","timestamp":"2026-10-01T07:16:48.937Z","message":{"role":"assistant","model":"swe-2","usage":{"input":120,"output":40,"cacheRead":300,"cacheWrite":0,"reasoningTokens":25,"totalTokens":460,"cost":{"input":0.0012,"output":0.0004,"cacheRead":0.0003,"cacheWrite":0,"total":0.0019}},"stopReason":"stop"}}"#,
         ])
 
         let result = PiUsageParser.parse(
@@ -40,6 +40,19 @@ struct OmpUsageParserTests {
         #expect(e.cacheCreationTokens == 0)
         #expect(e.reasoningTokens == 25)
         #expect(e.modelName == "swe-2")
+        #expect(e.actualCostUSD == 0.0019)
+        #expect(e.inputTokens + e.outputTokens + e.cacheTokens == 460)
+    }
+
+    @Test
+    func preservesReportedZeroAndFallsBackOnlyWhenCostIsMissing() {
+        let records = lines([
+            #"{"type":"message","id":"zero","timestamp":"2026-10-01T07:16:48Z","message":{"role":"assistant","usage":{"input":10,"output":5,"cost":{"total":0}}}}"#,
+            #"{"type":"message","id":"numeric","timestamp":"2026-10-01T07:16:49Z","message":{"role":"assistant","usage":{"input":10,"output":5,"cost":0.002}}}"#,
+            #"{"type":"message","id":"missing","timestamp":"2026-10-01T07:16:50Z","message":{"role":"assistant","usage":{"input":10,"output":5}}}"#,
+        ])
+        let result = PiUsageParser.parse(lines: records, fileURL: URL(fileURLWithPath: "/tmp/omp/cost.jsonl"), dialect: .omp)
+        #expect(result.events.map(\.actualCostUSD) == [0, 0.002, nil])
     }
 
     @Test

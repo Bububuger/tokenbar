@@ -8,9 +8,10 @@ import Foundation
 /// cache-hit subset of it (OpenAI wire semantics — verified via the
 /// `cached_{t+1} ≈ prompt_t` chain across 6371 steps and the 84/84
 /// `sum(steps) == final_metrics` check, GROK-DEVIN-SUPPORT-PLAN.md §4.2).
-/// Mapping: fresh input = `prompt_tokens − cached_tokens` (clamped ≥ 0),
-/// cacheRead = `cached_tokens`, output = `completion_tokens`. Devin has no
-/// cache-write or per-request cost signal; cost stays nil (subscription).
+/// Claude models also report cache writes in
+/// `metrics.extra.cache_creation_input_tokens`, included in the prompt.
+/// Fresh input excludes both cache reads and writes; output is
+/// `completion_tokens`. Per-request cost stays nil (subscription).
 ///
 /// Project attribution is resolved by the caller from the sibling
 /// `sessions.db` (`sessions.working_directory`) and passed in as a
@@ -73,13 +74,15 @@ public enum DevinUsageParser {
             }
             let prompt = rawPrompt.intValue
             let cached = (metrics["cached_tokens"] as? NSNumber)?.intValue ?? 0
+            let extra = metrics["extra"] as? [String: Any]
+            let cacheCreation = max((extra?["cache_creation_input_tokens"] as? NSNumber)?.intValue ?? 0, 0)
             let completion = (metrics["completion_tokens"] as? NSNumber)?.intValue ?? 0
             promptTotal += prompt
             cachedTotal += cached
             completionTotal += completion
 
-            let freshInput = max(prompt - cached, 0)
-            guard freshInput + completion + cached > 0 else { continue }
+            let freshInput = max(prompt - cached - cacheCreation, 0)
+            guard freshInput + completion + cached + cacheCreation > 0 else { continue }
 
             let stepID = (step["step_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 ?? "step-\(index)"
@@ -97,7 +100,7 @@ public enum DevinUsageParser {
                     inputTokens: freshInput,
                     outputTokens: completion,
                     cacheReadTokens: cached,
-                    cacheCreationTokens: 0,
+                    cacheCreationTokens: cacheCreation,
                     reasoningTokens: nil,
                     modelName: model,
                     actualCostUSD: nil,

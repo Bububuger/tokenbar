@@ -76,7 +76,7 @@ enum SummaryCommand {
             eventCount: events.count,
             promptCount: prompts.count,
             estimatedCostUSD: CostEstimator.estimate(events: events),
-            costSource: "defaults"
+            costSource: CostEstimator.source(events: events)
         )
 
         let result = Result(

@@ -383,7 +383,7 @@ enum SchemaCommand {
             groupByDimensions: GroupByDimension.allCases.map(\.rawValue),
             bucketKinds: TimeBucket.allCases.map(\.rawValue),
             commands: CommandRegistry.all,
-            costSource: "defaults"
+            costSource: "actual-or-defaults"
         )
 
         // schema is always JSON.

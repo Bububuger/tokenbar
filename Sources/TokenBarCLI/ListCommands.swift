@@ -457,6 +457,7 @@ enum ModelsCommand {
             var eventCount = 0
             var agents = Set<String>()
             var costUSD: Double = 0
+            var reportedCostCount = 0
         }
 
         var byModel: [String: Bucket] = [:]
@@ -469,7 +470,8 @@ enum ModelsCommand {
             bucket.cacheCreationTokens += event.cacheCreationTokens
             bucket.eventCount += 1
             bucket.agents.insert(event.agent.rawValue)
-            bucket.costUSD += Double(event.inputTokens + event.outputTokens + event.cacheTokens) * event.agent.defaultCostPerMillionTokens / 1_000_000
+            bucket.costUSD += CostEstimator.estimate(event: event)
+            if event.actualCostUSD != nil { bucket.reportedCostCount += 1 }
             byModel[name] = bucket
         }
 
@@ -486,7 +488,7 @@ enum ModelsCommand {
                 cacheCreationTokens: bucket.cacheCreationTokens,
                 totalTokens: bucket.inputTokens + bucket.outputTokens + bucket.cacheReadTokens + bucket.cacheCreationTokens,
                 estimatedCostUSD: bucket.costUSD,
-                costSource: "defaults"
+                costSource: CostEstimator.source(reportedCount: bucket.reportedCostCount, eventCount: bucket.eventCount)
             )
         }
 

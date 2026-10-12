@@ -52,18 +52,14 @@ struct DshGroundTruthTests {
             }
 
             let sessionID = (file as NSString).deletingPathExtension
-            guard let events = bySession[sessionID], !events.isEmpty else {
-                let message = "session has projcache but no parsed events: " + sessionID
-                Issue.record(Comment(rawValue: message))
-                continue
-            }
+            // Initialized sessions can legitimately have no usage events and
+            // four zero totals. Nonzero cache totals still fail the comparison.
+            let events = bySession[sessionID] ?? []
 
             // Truncate at the seq the projcache snapshot recorded.
             let truncated = events.filter { event in
                 Self.seq(of: event) <= cutoffSeq
             }
-            #expect(!truncated.isEmpty)
-
             let input = truncated.reduce(0) { $0 + $1.inputTokens }
             let output = truncated.reduce(0) { $0 + $1.outputTokens }
             let cacheRead = truncated.reduce(0) { $0 + $1.cacheReadTokens }

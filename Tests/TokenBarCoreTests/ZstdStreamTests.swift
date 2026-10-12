@@ -46,6 +46,21 @@ struct ZstdStreamTests {
     }
 
     @Test
+    func skipsEmptyAndSkippableFramesBeforeUsageFrames() throws {
+        let prefixes = [
+            Data([0x28, 0xB5, 0x2F, 0xFD, 0x20, 0x00, 0x01, 0x00, 0x00]),
+            Data([0x50, 0x2A, 0x4D, 0x18, 0x02, 0x00, 0x00, 0x00, 0xAA, 0xBB]),
+        ]
+        let compressed = try fixture("dsh-v4.jsonl.zstd")
+        let expected = try expectedPlaintext("dsh-v4")
+        for prefix in prefixes {
+            let (data, truncated) = try ZstdStream.decompressStreaming(prefix + compressed)
+            #expect(!truncated)
+            #expect(String(data: data, encoding: .utf8) == expected)
+        }
+    }
+
+    @Test
     func truncatedTailFrameEmitsPrefixAndFlag() throws {
         let compressed = try fixture("dsh-v4.jsonl.zstd")
         // Keep only the bytes of the first frame: every frame is >= 12 bytes

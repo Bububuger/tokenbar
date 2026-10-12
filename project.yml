@@ -54,13 +54,26 @@ schemes:
     run:
       config: Debug
 targets:
+  Czstd:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/Czstd
+    settings:
+      base:
+        PRODUCT_MODULE_NAME: Czstd
+        CODE_SIGNING_ALLOWED: NO
+        DEFINES_MODULE: YES
+        MODULEMAP_FILE: "$(SRCROOT)/Sources/Czstd/include/module.modulemap"
+        PUBLIC_HEADERS_FOLDER_PATH: include/Czstd
   TokenBarCore:
     type: framework
     platform: macOS
     sources:
       - path: Sources/TokenBarCore
-      - path: Sources/Czstd
     dependencies:
+      - target: Czstd
+        link: true
       - package: GRDB
         product: GRDB
     settings:

@@ -84,17 +84,26 @@ func tokenBreakdownText(
 }
 
 enum CostEstimator {
-    /// Compute an approximate cost for a token bucket using the per-agent
-    /// default rate table. Does NOT honor user pricing overrides (those live
-    /// in the app's UserDefaults and are out of scope for this CLI version).
-    /// Use `costSource: "defaults"` in the JSON payload.
+    /// Prefer source-reported costs, falling back per event to default rates.
+    /// User pricing overrides live in the app's UserDefaults.
     static func estimate(events: [UsageEvent]) -> Double {
-        var cost = 0.0
-        for event in events {
-            let tokens = event.inputTokens + event.outputTokens + event.cacheTokens
-            cost += Double(tokens) * event.agent.defaultCostPerMillionTokens / 1_000_000
-        }
-        return cost
+        events.reduce(0) { $0 + estimate(event: $1) }
+    }
+
+    static func estimate(event: UsageEvent) -> Double {
+        if let actualCost = event.actualCostUSD { return actualCost }
+        if event.agent == .cursor { return 0 }
+        let tokens = event.inputTokens + event.outputTokens + event.cacheTokens
+        return Double(tokens) * event.agent.defaultCostPerMillionTokens / 1_000_000
+    }
+
+    static func source(events: [UsageEvent]) -> String {
+        source(reportedCount: events.filter { $0.actualCostUSD != nil }.count, eventCount: events.count)
+    }
+
+    static func source(reportedCount: Int, eventCount: Int) -> String {
+        if reportedCount == 0 { return "defaults" }
+        return reportedCount == eventCount ? "actual" : "mixed"
     }
 }
 
@@ -177,7 +186,7 @@ enum Aggregation {
                     eventCount: bucket.eventCount,
                     promptCount: prompts.count,
                     estimatedCostUSD: CostEstimator.estimate(events: events),
-                    costSource: "defaults"
+                    costSource: CostEstimator.source(events: events)
                 ),
             ]
         }
@@ -208,7 +217,7 @@ enum Aggregation {
                 eventCount: bucket.eventCount,
                 promptCount: promptCount,
                 estimatedCostUSD: CostEstimator.estimate(events: eventList),
-                costSource: "defaults"
+                costSource: CostEstimator.source(events: eventList)
             )
         }
     }

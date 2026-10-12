@@ -5,7 +5,7 @@
 ### See your AI token spend, live.
 ### 把每一笔 AI 编码 token，钉在你的菜单栏上。
 
-A macOS menu-bar app that aggregates **Claude Code · Codex · Gemini CLI · Hermes · OpenClaw · OpenCode · Warp · Pi · Qoder · Kiro · Kimi Code · Grok CLI · Antigravity · Devin · Cursor** usage.
+A macOS menu-bar app that aggregates **Claude Code · Codex · Gemini CLI · Hermes · OpenClaw · OpenCode · Warp · Pi · oh-my-pi · Qoder · Kiro · Kimi Code · Grok CLI · Devin · DeepSeek Harness · Antigravity · Cursor** usage.
 Live tokens, real cost — by project, by agent, by model. **Local-first · No signup · No telemetry.** Optional Cursor account sync is off by default and requires explicit setup.
 
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-007AFF?logo=apple&logoColor=white)](https://www.apple.com/macos/)
@@ -60,7 +60,18 @@ You're paying for Claude, Codex, Gemini and a long tail of coding agents that al
 
 ## 🔌 Supported Sources / 已支持的数据源
 
-TokenBar ships with **fifteen** built-in engines. Fourteen read local files with zero configuration. Cursor also preserves local human prompts for project history; exact account-wide token and cost totals require the optional Dashboard sync in Settings.
+TokenBar ships with **seventeen** built-in engines. Sixteen read local files with zero configuration. Cursor also preserves local human prompts for project history; exact account-wide token and cost totals require the optional Dashboard sync in Settings.
+
+The newest local sources are:
+
+| Source | Default usage files |
+|---|---|
+| Grok CLI | `~/.grok/sessions/**/updates.jsonl` |
+| Devin | `~/.local/share/devin/cli/transcripts/*.json` |
+| oh-my-pi | `~/.omp/agent/sessions/**/*.jsonl` |
+| DeepSeek Harness | `~/.dsh/sessions/**/*.jsonl.zstd` |
+
+App and CLI costs prefer source-reported values, including explicit zeroes, and estimate only events without a reported cost. The CLI's `costSource` identifies `actual`, `defaults`, or `mixed`. Devin and DeepSeek Harness keep a zero default estimate when no token-priced cost is available.
 
 <p align="center">
   <img src="docs/assets/sources-grid.png" alt="Claude Code · Codex · Gemini CLI · Hermes · OpenClaw · OpenCode · Warp · Pi · Qoder · Kiro · Kimi Code · Antigravity" width="100%" />
@@ -102,7 +113,7 @@ The script regenerates the Xcode project (`xcodegen generate --spec project.yml`
 
 1. Grant **Full Disk Access** to TokenBar — only needed for engines whose default path is outside the sandbox (`~/.openclaw`, custom sources). The local built-ins are read-only.
 2. Wait for the **bootstrap catch-up** banner — first index of historical sessions takes seconds-to-minutes depending on how many CLIs you've been using. Run `tbar rebuild` from the terminal if you want to force a full reparse instead.
-3. Open `Settings → Custom Sources` if you want to point TokenBar at an agent that isn't one of the fifteen built-ins.
+3. Open `Settings → Custom Sources` if you want to point TokenBar at an agent that isn't one of the seventeen built-ins.
 
 <br />
 

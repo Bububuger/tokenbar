@@ -44,6 +44,7 @@ struct TokenBarCLIEntry {
                 throw HelpRequested.top
             case "--db":
                 dbOverride = try cursor.nextValue(for: "--db")
+                continue
             case "help":
                 throw HelpRequested.top
             case "events":

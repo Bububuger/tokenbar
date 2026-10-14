@@ -17,10 +17,17 @@
 - **Pass:** main-thread time per frame < 16 ms (P95), zero hitches > 32 ms.
 
 ## CL-P2-016 · 100 k events aggregate < 200 ms
-- **Harness:** `swift test --filter Sprint10PerfTests`
+- **Harness:** `script/test.sh --filter Sprint10PerfTests`
   (`aggregator100kEventsCompletesWithinBudget_CL_P2_016`).
-- **Pass:** test threshold is 800 ms in debug to absorb CI overhead; the
-  release gate is 200 ms wall-clock measured under `swift test -c release`.
+- **Pass:** the automated debug smoke-test threshold is 1.0 s. CI first runs
+  Core + CLI functional tests with `--skip Sprint10PerfTests`, then runs this
+  suite alone with `--skip-build --filter Sprint10PerfTests`. Both invocations must
+  pass; isolation avoids measuring contention from unrelated parallel suites.
+  Elapsed time uses a monotonic clock. Running `script/test.sh` without arguments
+  uses the same split locally; explicit SwiftPM arguments are passed through.
+- **Release acceptance:** 200 ms, measured separately under
+  `swift test -c release --filter Sprint10PerfTests`; the debug smoke-test
+  assertion does not itself enforce or demonstrate the release target.
 
 ## CL-P2-017 · Steady-state RSS ≤ 120 MB
 - **Harness:** Instruments → Allocations + Leaks.

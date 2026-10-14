@@ -3,8 +3,8 @@ import Testing
 @testable import TokenBarCore
 
 /// CL-P2-016: aggregation throughput benchmark. Smoke-tests that 100k
-/// synthetic events produce a snapshot in well under the 200 ms goal so we
-/// catch O(n²) regressions in PRs without waiting for Instruments.
+/// synthetic events stay within the debug smoke-test budget so we catch
+/// O(n²) regressions in PRs. The separate release acceptance goal is 200 ms.
 struct Sprint10PerfTests {
     @Test
     func aggregator100kEventsCompletesWithinBudget_CL_P2_016() {
@@ -32,14 +32,14 @@ struct Sprint10PerfTests {
             )
         }
 
-        let start = Date()
+        let start = ContinuousClock.now
         let snapshot = UsageAggregator.makeSnapshot(from: events, referenceDate: reference, calendar: calendar)
-        let elapsed = Date().timeIntervalSince(start)
+        let elapsed = start.duration(to: .now)
 
-        // 200 ms hard ceiling per CHECKLIST CL-P2-016. We give the test
-        // env 5× slack (1.0 s) to absorb sanitizer + shared CI runner variance
-        // (macOS-26 runners have repeatedly landed just over the old 800 ms cap).
-        #expect(elapsed < 1.0, "aggregator over budget: \(elapsed)s")
+        // Preserve the 1.0 s debug smoke-test budget (5× the release goal).
+        // CI runs this suite separately from functional tests to avoid measuring
+        // their concurrent CPU/I/O load. Use a monotonic clock, not civil time.
+        #expect(elapsed < .seconds(1), "aggregator over budget: \(elapsed)")
         #expect(snapshot.last30Days.count == 30)
         #expect(snapshot.today.totalTokens > 0)
     }

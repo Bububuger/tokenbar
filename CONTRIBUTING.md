@@ -8,9 +8,9 @@ Thanks for considering a contribution. TokenBar is intentionally small — the b
 
 1. **Open an issue first** for anything bigger than a typo or a one-line fix.
    *小到改 typo / 一行修 bug 直接发 PR；大到加功能 / 加数据源，请先开 issue。*
-2. **Read [`AGENTS.md`](AGENTS.md)** — especially the *UI And macOS App Work* section if you're touching SwiftUI.
+2. **Read [`AGENTS.md`](AGENTS.md)** — especially the *项目与架构* and *UI 验收* sections if you're touching SwiftUI.
 3. **Pick the right shape**:
-   - New data source? — try the **Custom Sources** flow in `Settings → Custom Sources` first. If that's not enough, add an engine under [`Sources/TokenBarCore/Services/`](Sources/TokenBarCore/Services/) and a parser under [`Sources/TokenBarCore/Parsers/`](Sources/TokenBarCore/Parsers/).
+   - New data source? — try the **Custom Sources** flow in `Settings → Sources & Data → Custom Sources` first. If that's not enough, add an engine under [`Sources/TokenBarCore/Services/`](Sources/TokenBarCore/Services/) and a parser under [`Sources/TokenBarCore/Parsers/`](Sources/TokenBarCore/Parsers/).
    - New CLI command? — register it in [`Sources/TokenBarCLI/CommandRegistry.swift`](Sources/TokenBarCLI/CommandRegistry.swift) and the `dispatch()` switch in [`Sources/TokenBarCLI/Entry.swift`](Sources/TokenBarCLI/Entry.swift).
    - New `tokenbar-report` persona? — drop a `references/personas/<key>.md` and a matching theme HTML; the dispatch is in [`skills/tokenbar-report/SKILL.md`](skills/tokenbar-report/SKILL.md).
 
@@ -20,17 +20,23 @@ Thanks for considering a contribution. TokenBar is intentionally small — the b
 git clone https://github.com/Bububuger/tokenbar.git
 cd tokenbar
 xcodegen generate --spec project.yml --project .   # regenerate Xcode project from project.yml
-script/test.sh                                     # swift-testing — fast, no signing
-script/build_and_run.sh --verify                   # build + launch + assert the popover renders
+script/test.sh                                   # SwiftPM Core + CLI tests, no app signing
+script/build_and_run.sh --verify                 # build + launch + check the process is running
 ```
 
-Requirements: **macOS 14+**, **Xcode 15+** toolchain, **xcodegen** (`brew install xcodegen`).
+Requirements: **macOS 14+**, an **Xcode toolchain with Swift 6 support**, and **xcodegen** (`brew install xcodegen`). `Package.swift` requires Swift tools 6.0; check the selected toolchain with `swift --version` and `xcodebuild -version`. CI currently runs on `macos-26`.
+
+The app build scripts use Apple Development signing and automatic provisioning. Configure a signed-in Xcode account and set `TOKENBAR_DEVELOPMENT_TEAM` to your own team ID; the scripts otherwise use the repository's default team. `script/test.sh` does not require app signing.
+
+`--verify` checks that TokenBar has a running process. Open the popover and affected windows yourself to verify rendering and interactions. If launch is blocked, the script tries an existing Xcode-managed debug bundle; if none exists, follow its instruction to run the TokenBar scheme once in Xcode and retry.
 
 ## How we work / 怎么写代码
 
 **Shell-first, not Xcode-button-first.**
 
-- Build & test via `script/build.sh` and `script/test.sh` — *not* the Xcode Run button.
+- Use `script/build.sh` for an app build, `script/test.sh` for the SwiftPM Core and CLI tests, and `script/build_and_run.sh` to build and launch the app. The build scripts regenerate the Xcode project automatically.
+- `script/test.sh --xcode` runs the `TokenBarTests` Xcode scheme, which includes the Core tests only. It does not replace the default SwiftPM run's CLI test coverage.
+- CI runs the default tests and checks that XcodeGen regeneration leaves `TokenBar.xcodeproj` unchanged. Documentation-only pushes/PRs are skipped by its path filters; CI does not perform UI acceptance or release packaging.
 - Regenerate `TokenBar.xcodeproj` with `xcodegen generate --spec project.yml --project .` whenever `project.yml` changes.
 - AI-produced macOS code **must build** before it's treated as usable.
 
@@ -44,8 +50,8 @@ Requirements: **macOS 14+**, **Xcode 15+** toolchain, **xcodegen** (`brew instal
 ## What we look for in a PR / PR 验收标准
 
 - [ ] **`script/test.sh` is green.**
-- [ ] **`script/build_and_run.sh --verify` is green for UI-facing changes.**
-- [ ] **No new network code** in the data path. The "0 upload" invariant is load-bearing — if you genuinely need a network call (e.g., to refresh model pricing from an upstream catalog), call it out in the PR description and we'll discuss.
+- [ ] **`script/build_and_run.sh --verify` passes for UI-facing changes, and the affected UI has been checked manually.**
+- [ ] **No undisclosed uploads.** Keep local logs and indexed prompts on-device unless the user explicitly chooses to share them. Describe any new network destination, transmitted data, and consent flow in the PR. Follow the existing Cursor sync, plugin download/execution, and update boundaries documented in [`SECURITY.md`](SECURITY.md).
 - [ ] **No silent number changes.** If your PR changes how a token / cost is computed, link the corresponding test fixture (under `Tests/TokenBarCoreTests/Fixtures/`) and explain the delta in plain words.
 - [ ] **Time-windowed metrics are labeled.** Never mix Today / 30d / Total numbers without explicit labels.
 - [ ] **Screenshot or screen recording** for UI changes.
@@ -59,7 +65,7 @@ Requirements: **macOS 14+**, **Xcode 15+** toolchain, **xcodegen** (`brew instal
 
 ## Filing a bug / 上报 Bug
 
-Use the bug-report template at <https://github.com/Bububuger/tokenbar/issues/new/choose>. The template asks which of the 6 sources is affected and pre-empts the "TokenBar shows a number, my AI tool shows a different number" class of report.
+Use the bug-report template at <https://github.com/Bububuger/tokenbar/issues/new/choose>. The template asks which source is affected; if it is missing from the dropdown, name it in the description. Include enough detail to investigate the "TokenBar shows a number, my AI tool shows a different number" class of report.
 
 ## Security / 安全问题
 

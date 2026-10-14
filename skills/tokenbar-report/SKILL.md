@@ -55,11 +55,13 @@ Execute these steps in order. Steps 0-2 are interactive (confirm with the
 user before continuing). Steps 3-9 are mechanical and don't need check-ins
 unless something fails.
 
-## Step 0 — preflight: ensure TokenBar is installed
+## Step 0 — preflight: check the local index before installing or rebuilding
 
-This skill reads the local TokenBar SQLite index. If the user has never
-installed TokenBar, there is no database to read and nothing to report on.
-Check first, **before** any other step.
+This skill reads the local TokenBar SQLite index. A source-built CLI can
+read an existing index without `/Applications/TokenBar.app`, so a missing
+app alone does not prove there is no data. If a usable `tbar` already exists
+(see Step 1), inspect `tbar schema --json` first and use that index. Do not
+rebuild merely to generate a report.
 
 1. Test whether the app is on disk:
 
@@ -69,26 +71,30 @@ Check first, **before** any other step.
 
 2. If it exists, skip to Step 1.
 
-3. If it does not exist, ask the user (single question, two choices):
+3. If neither the app nor a usable CLI exists, ask the user:
 
    > TokenBar.app 还没装。要我帮你装吗？
    >
    > 我会执行 `brew install --cask Bububuger/tap/tokenbar`，然后跑一次
-   > `tbar rebuild` 把本地 Claude / Codex / Gemini 等 agent 的历史 token
-   > 数据扫进 DB（30 秒到几分钟，看历史多寡），扫完就可以出报告。
+   > `tbar rebuild --background --json` 把本地 Claude / Codex / Gemini 等
+   > agent 的历史 token 数据扫进 DB。耗时取决于历史量和文件可读性，
+   > 扫完先检查结果，再生成报告。
 
 4. If the user agrees, install and rebuild:
 
    ```bash
    brew tap Bububuger/tap 2>/dev/null || true
    brew install --cask Bububuger/tap/tokenbar
-   tbar rebuild         # foreground; blocks until full reindex returns
+   tbar rebuild --background --json > /tmp/tokenbar-report-rebuild.json
    ```
 
-   `brew install` succeeds when `/Applications/TokenBar.app` exists and
-   `/opt/homebrew/bin/tbar` is symlinked. `tbar rebuild` runs the full
-   reparse (the CLI equivalent of the app's "Reparse all"), so the DB has
-   data the moment it returns.
+   Verify `/Applications/TokenBar.app` and `$(brew --prefix)/bin/tbar`;
+   the Homebrew prefix differs between Apple Silicon and Intel Macs.
+   `--background` enables lower-priority, throttled indexing; it still
+   blocks until completion. Inspect `rebuildError`, warnings, and source
+   readability in the saved JSON. A zero exit status alone does not prove
+   the history was indexed successfully. See
+   `../../docs/runbooks/history-rebuild.md` for the full rebuild checks.
 
 5. Confirm the DB picked something up:
 
@@ -96,30 +102,40 @@ Check first, **before** any other step.
    tbar schema --json | jq '.schema.dataWindow.eventCount'
    ```
 
-   Expect a positive integer. If it's `0`, the user genuinely has no local
-   agent history yet — stop the skill and tell them so; nothing to report on.
+   A positive integer confirms indexed events exist. If it is `0`, inspect
+   `tbar sources --json`, `tbar checkpoints --json`, and `tbar warnings --json`
+   for an empty index, unreadable sources, or parsing failures. Do not infer
+   that the user has no local agent history solely from an empty index.
+   Stop report generation until there is data in the requested window.
 
 6. If the user declines installation, stop the skill politely — without
-   the local DB there is no data to summarize. Do not fabricate.
+   usable local index there is no data to summarize. Do not fabricate.
 
-## Step 1 — locate the TokenBar repo
+## Step 1 — locate the CLI
 
-The skill assumes you can resolve a `tbar` binary. Try in this order:
+`scripts/collect.sh` accepts an explicit `--tbar /path/to/tbar`. Otherwise
+it resolves the CLI in this order:
 
-1. `$TOKENBAR_REPO/script/tbar`
-2. `~/Documents/workspace/projects/tokenbar/script/tbar`
-3. `tbar` on `$PATH`
+1. Select `$TOKENBAR_REPO`, or the existing
+   `~/Documents/workspace/projects/tokenbar` checkout.
+2. In that checkout, prefer `.build/release/tbar`, then `.build/debug/tbar`.
+   If neither exists and Swift is available, build once with
+   `swift build --product tbar`; if no binary is produced, it tries
+   `script/tbar` (which also requires Swift). A failed build can stop the
+   script; pass `--tbar` explicitly to use an installed CLI instead.
+3. Fall back to `tbar` on `$PATH`.
 
-If none resolve, ask the user where the TokenBar repo lives and proceed
-once they tell you. `scripts/collect.sh` handles the actual lookup; you
-only need to pass `--tbar /path` if the default resolution fails.
+Set `TBAR` to the resolved executable for the manual checks below, and pass
+`--tbar "$TBAR"` to collection so all checks use the same binary. Homebrew
+users do not need a source checkout. If nothing resolves, ask for the CLI
+or checkout location, or return to the installation choice in Step 0.
 
 ## Step 2 — confirm the time window with the user
 
 Read the data window first:
 
 ```bash
-$TBAR schema --json | jq '.schema.dataWindow'
+"$TBAR" schema --json | jq '.schema.dataWindow'
 ```
 
 Then tell the user what's available and ask for confirmation:
@@ -131,40 +147,62 @@ Then tell the user what's available and ask for confirmation:
 Lock the window before continuing. Translate the user's reply into one of:
 - `--days 0` (all-time, default)
 - `--days N`
-- `--since YYYY-MM-DD --until YYYY-MM-DD`
-- `--since YYYY-01-01 --until YYYY-12-31` (full year)
+- `--since YYYY-MM-DD --until YYYY-MM-DD` (end date is exclusive)
+- `--since 2026-01-01 --until 2027-01-01` (example: the full 2026 calendar year)
+
+Bare dates use local midnight. To include an entire end date, use the
+following day as `--until`. `--days N` starts N days before the query time,
+not at local midnight. `now` is not a valid `--until` value;
+omit the upper bound or supply an ISO 8601 timestamp.
 
 If the user used a vague phrase, map it BEFORE running collect.sh:
 
 | User phrase | Flag |
 |---|---|
-| "年度" / "year" / "annual" / "wrapped" (no further qualifier) | `--days 0` (all-time) |
-| "本年" / "this year" / "今年" / "<current year>" | `--since YYYY-01-01 --until <today>` |
-| "本季度" / "this quarter" / "Q1/Q2/..." (no specific year) | `--days 90` |
-| "本月" / "this month" / "最近一个月" / "last month" | `--days 30` |
-| "本周" / "this week" / "最近一周" / "last week" | `--days 7` |
-| "今天" / "today" | `--days 1` |
+| "wrapped" / "recap" with no period | Offer `--days 0` and confirm; label the report **all-time** if chosen |
+| "年度" / "year" / "annual" with no named year | Ask which calendar year, then use its exact start and exclusive end |
+| "本年" / "this year" / "今年" | `--since <January 1 this year>` (through the latest indexed event) |
+| A named year or quarter | `--since <first day> --until <first day of the following period>` |
+| "本季度" / "this quarter" | `--since <first day of this quarter>` |
+| "本月" / "this month" | `--since <first day of this month>` |
+| "last month" | `--since <first day of previous month> --until <first day of this month>` |
+| "最近一个月" / "last 30 days" | `--days 30` |
+| "本周" / "this week" | `--since <start of this week in the user's locale>` |
+| "last week" | `--since <start of previous week> --until <start of this week>` |
+| "最近一周" / "last 7 days" | `--days 7` |
+| "今天" / "today" | `--since <today> --until <tomorrow>` |
 
-Sanity-check the resulting payload's `dataWindow.eventCount` / `byDay.length`
-against the phrase you mapped — if "最近一个月" returned 109 days of data,
-you mis-mapped and need to re-collect.
+Replace every placeholder with an actual local date and confirm ambiguous
+periods with the user. Never label a multi-year all-time report as one
+calendar year's recap. Sanity-check `queryWindow` and `.timeline.byDay`
+against the agreed period. `dataWindow` comes from the unfiltered schema
+query and always describes the full database, even for a filtered report.
 
 ## Step 3 — gather data
 
 ```bash
-scripts/collect.sh [WINDOW_FLAGS] | scripts/apply_pricing.py > /tmp/payload.json
+scripts/collect.sh --tbar "$TBAR" [WINDOW_FLAGS] > /tmp/collected.json
+scripts/apply_pricing.py < /tmp/collected.json > /tmp/payload.json
 ```
 
 `collect.sh` runs `tbar` queries in parallel, reads the user's
 `tokenbar.pricingOverrides` plist, and emits one aggregated JSON document.
-`apply_pricing.py` recomputes costs using any per-model overrides the user
-has set in TokenBar Settings.
+`apply_pricing.py` attempts to apply per-model overrides. The current helper
+uses legacy combined `cache` rates and `cacheTokens`; current app overrides
+use separate `cacheRead`/`cacheCreation` rates and the CLI emits separate
+cache-read/cache-creation counts. Do not claim its override totals match
+Settings without reconciling these fields. The helper also labels unchanged
+CLI costs `default-flat`, although CLI `costSource` can be `actual` or `mixed`.
+Preserve that provenance and disclose unavailable costs, especially Cursor
+events with no reported cost. Pause cost claims when they cannot be verified.
 
 Verify the payload before continuing:
 
 ```bash
 jq '{
-  events: .dataWindow.eventCount,
+  indexed_events_all_time: .dataWindow.eventCount,
+  selected_events: ([.timeline.byDay[].eventCount] | add // 0),
+  query_window: .queryWindow,
   days: (.timeline.byDay | length),
   agents: (.agents | length),
   models: (.models | length),
@@ -174,8 +212,22 @@ jq '{
 }' /tmp/payload.json
 ```
 
-If any field is 0/null where you expect data, stop and surface the issue to
-the user — don't write a report on empty data.
+If selected events are zero or required fields are unexpectedly null, stop
+and surface the issue. Zero cost or zero captured prompts alone does not
+prove token data is missing; explain unavailable dimensions rather than
+inventing values.
+
+**Completeness checks.** `collect.sh` leaves the default row limits on
+grouped summaries, projects, and models. For a complete report, compare
+the collected arrays with equivalent `tbar ... --json --limit 0` queries
+using the same window and reconcile truncated arrays before analysis.
+In particular, day/hour summaries can exceed the default 100 rows.
+
+**Window checks.** Some current render/derivation helpers still read
+all-time `dataWindow` values for counts and dates. For a filtered report,
+verify every displayed count, span, and activity-age calculation against
+the selected-window timeline/summary. Do not present global metadata as
+selected-window results; resolve any mismatch before delivering the report.
 
 ## Step 4 — cluster the prompt sample
 
@@ -421,8 +473,10 @@ moves the max noticeably — be strict. If the script exits non-zero:
 
 # What the skill does NOT do
 
-- It does NOT modify the TokenBar database, app preferences, or any source
-  file. Read-only on TokenBar's side.
+- Report collection does NOT rebuild usage history, change app preferences,
+  or edit upstream agent logs. Opening the database can initialize or migrate
+  its schema. The optional, user-approved install/rebuild in Step 0 is a
+  separate setup operation and does write the local index.
 - It does NOT call any external LLM API. The narrative authoring happens in
   this Claude session.
 - It does NOT use external CDNs or web fonts that require network access.
@@ -452,10 +506,14 @@ moves the max noticeably — be strict. If the script exits non-zero:
 
 - **`collect.sh: cannot locate tbar`** — pass `--tbar /path/to/tbar` or set
   `TOKENBAR_REPO`. Ask the user.
-- **Empty payload (`eventCount: 0`)** — the user's window is too narrow or
-  the TokenBar DB hasn't been rebuilt. Suggest `tbar rebuild` first.
-- **`apply_pricing.py` errors on pricing overrides** — the user's plist has
-  malformed JSON. Fall back to default-flat pricing and warn in the report.
+- **No events in the selected window** — compare the query window with
+  `schema.dataWindow`, then inspect sources, checkpoints, and warnings.
+  Rebuild only when the index needs it and the user approves; an empty
+  window alone is not a reason to rebuild all history.
+- **Pricing mismatch or helper error** — inspect the actual error and rate
+  fields; do not assume malformed preferences. Current split-cache rates
+  require reconciliation with the legacy helper. Use verified CLI costs
+  with their `costSource`, or mark cost unavailable and explain the gap.
 - **A theme template has a leftover `{{placeholder}}` in output** — the
   template asked for a key that `render.py` doesn't provide. Add the key to
   `derive()` or remove the placeholder.
@@ -476,7 +534,8 @@ moves the max noticeably — be strict. If the script exits non-zero:
 
 # When NOT to invoke this skill
 
-- "How many tokens did I burn today?" → use `tbar summary` directly.
+- "How many tokens did I burn today?" → use `tbar summary --day YYYY-MM-DD`
+  with today's local date; bare `summary` defaults to a rolling 30 days.
 - "Open the TokenBar app" → not this skill's concern.
 - "Reset my pricing overrides" → also not this skill's concern.
 - "Generate the report but only one persona" → still use this skill; it

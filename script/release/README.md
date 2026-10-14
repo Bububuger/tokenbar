@@ -12,27 +12,17 @@ This directory ships templates used when cutting a TokenBar release. It is
 
 ## Release flow
 
-```bash
-# 1. Build DMG (also embeds `tbar` CLI into the .app — see script/release.sh)
-./script/release.sh 1.2.0
+Follow the authoritative [release runbook](../../docs/runbooks/release.md) for
+prerequisites, local acceptance, committing version changes, tagging, publishing
+assets, and updating the independent Homebrew tap.
 
-#    Output looks like:
-#      File          : dist/TokenBar-1.2.0.dmg  (12M)
-#      sha256        : abcd1234…
-#      Embedded CLI  : TokenBar.app/Contents/MacOS/tbar
-
-# 2. Tag and push
-git tag v1.2.0 && git push origin v1.2.0
-
-# 3. Upload dist/TokenBar-1.2.0.dmg to the GitHub Release for v1.2.0.
-
-# 4. Bump the tap's Cask formula:
-#      cd /path/to/homebrew-tap
-#      cp /path/to/tokenbar/script/release/Casks/tokenbar.rb Casks/tokenbar.rb
-#      sed -i '' 's/REPLACE_WITH_DMG_SHA256_FROM_RELEASE_SH/abcd1234…/' Casks/tokenbar.rb
-#      sed -i '' 's/version "[^"]*"/version "1.2.0"/' Casks/tokenbar.rb
-#      git commit -am "tokenbar 1.2.0" && git push
-```
+From the repository root, `script/release.sh <version>` builds
+`dist/TokenBar-<version>.dmg` and prints its SHA-256. It embeds the CLI and uses
+ad-hoc signing; it does not archive, notarize, publish, or update this Cask template.
+Update both `version` and `sha256` in `Casks/tokenbar.rb` with the actual release
+values, commit the reviewed version changes before tagging, then follow the
+runbook's publication order. Replace the existing SHA value; the template already
+contains a release checksum, not a placeholder.
 
 ## What end users get
 

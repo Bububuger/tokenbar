@@ -5,7 +5,14 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ "${1:-}" != "--xcode" ]]; then
   cd "$ROOT_DIR"
-  swift test "$@"
+  if [[ $# == 0 ]]; then
+    # Match CI: preserve all test coverage while keeping the timed benchmark
+    # separate from Swift Testing's concurrently running functional suites.
+    swift test --skip Sprint10PerfTests
+    swift test --skip-build --filter Sprint10PerfTests
+  else
+    swift test "$@"
+  fi
   exit 0
 fi
 

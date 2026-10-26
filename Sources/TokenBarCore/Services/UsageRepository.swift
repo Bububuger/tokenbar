@@ -464,7 +464,8 @@ public struct UsageRepository: Sendable {
             let rows = try Row.fetchAll(db, sql: """
             SELECT id, agent, project_path, project_name, session_id, timestamp,
                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens, model_name,
-                   actual_cost_usd, source_path, parser, confidence
+                   actual_cost_usd, source_path, parser, confidence,
+                   generation_start_ms, generation_end_ms
             FROM usage_events
             ORDER BY timestamp ASC, id ASC
             """)
@@ -492,7 +493,8 @@ public struct UsageRepository: Sendable {
                 rows = try Row.fetchAll(db, sql: """
                 SELECT id, agent, project_path, project_name, session_id, timestamp,
                        input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens, model_name,
-                       actual_cost_usd, source_path, parser, confidence
+                       actual_cost_usd, source_path, parser, confidence,
+                       generation_start_ms, generation_end_ms
                 FROM usage_events
                 WHERE \(filter.sql)
                 ORDER BY timestamp DESC, id DESC
@@ -502,7 +504,8 @@ public struct UsageRepository: Sendable {
                 rows = try Row.fetchAll(db, sql: """
                 SELECT id, agent, project_path, project_name, session_id, timestamp,
                        input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens, model_name,
-                       actual_cost_usd, source_path, parser, confidence
+                       actual_cost_usd, source_path, parser, confidence,
+                       generation_start_ms, generation_end_ms
                 FROM usage_events
                 WHERE \(filter.sql)
                 ORDER BY timestamp DESC, id DESC
@@ -1391,8 +1394,8 @@ public struct UsageRepository: Sendable {
         try db.execute(
             sql: """
             INSERT OR IGNORE INTO usage_events
-            (id, agent, project_path, project_name, session_id, timestamp, input_tokens, output_tokens, cache_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens, model_name, actual_cost_usd, source_path, parser, confidence)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, agent, project_path, project_name, session_id, timestamp, input_tokens, output_tokens, cache_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens, model_name, actual_cost_usd, source_path, parser, confidence, generation_start_ms, generation_end_ms)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             arguments: [
                 event.id,
@@ -1412,6 +1415,8 @@ public struct UsageRepository: Sendable {
                 event.sourcePath,
                 event.parser.rawValue,
                 event.confidence,
+                event.generationStartMs,
+                event.generationEndMs,
             ]
         )
         // INSERT OR IGNORE: changesCount==1 → inserted, 0 → row already existed.
@@ -1432,6 +1437,17 @@ public struct UsageRepository: Sendable {
                 try db.execute(
                     sql: "UPDATE usage_events SET model_name = COALESCE(model_name, ?) WHERE id = ?",
                     arguments: [event.modelName, event.id]
+                )
+            }
+            if event.generationStartMs != nil || event.generationEndMs != nil {
+                try db.execute(
+                    sql: """
+                    UPDATE usage_events
+                    SET generation_start_ms = COALESCE(generation_start_ms, ?),
+                        generation_end_ms   = COALESCE(generation_end_ms, ?)
+                    WHERE id = ?
+                    """,
+                    arguments: [event.generationStartMs, event.generationEndMs, event.id]
                 )
             }
         }
@@ -1847,7 +1863,9 @@ public struct UsageRepository: Sendable {
             actualCostUSD: row["actual_cost_usd"],
             sourcePath: row["source_path"],
             parser: parser,
-            confidence: row["confidence"]
+            confidence: row["confidence"],
+            generationStartMs: row["generation_start_ms"] as Int64?,
+            generationEndMs: row["generation_end_ms"] as Int64?
         )
     }
 

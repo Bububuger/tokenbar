@@ -455,10 +455,6 @@ struct PopoverView: View {
         }
     }
 
-    /// Compact ranking-density row: agent color dot + name, `n=` sample
-    /// count subtitle (generation samples in speed mode, window events for
-    /// burn), and the monospaced rate value on the right. Model children are
-    /// indented 18pt and rendered one size smaller.
     private func rateRow(slice: RateSlice, isChild: Bool) -> some View {
         let name = isChild ? (slice.modelName ?? "") : slice.agent.displayName
         let sampleCount = speedMode ? slice.generation.sampleCount : slice.eventCount

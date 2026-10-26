@@ -132,4 +132,22 @@ struct PiUsageParserTests {
         #expect(result.events[1].generationStartMs == nil)
         #expect(result.events[1].generationEndMs == nil)
     }
+
+    @Test
+    func generationTimingPrefersSameRecordStreamInterval() throws {
+        // Real entries always carry message.timestamp (stamped when the
+        // provider stream opens) plus an outer entry timestamp written at
+        // message_end — together they bound the generation interval without
+        // needing a trigger.
+        let records = lines([
+            #"{"type":"session","version":3,"id":"s","timestamp":"2026-05-30T10:00:00Z","cwd":"/p"}"#,
+            #"{"type":"message","id":"a1","timestamp":1780178430000,"message":{"role":"assistant","model":"m","timestamp":1780178402500,"usage":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0}}}"#,
+        ])
+
+        let result = PiUsageParser.parse(lines: records, fileURL: URL(fileURLWithPath: "/tmp/pi/s.jsonl"))
+        #expect(result.events.count == 1)
+        #expect(result.events[0].generationStartMs == 1_780_178_402_500)
+        #expect(result.events[0].generationEndMs == 1_780_178_430_000)
+        #expect(result.events[0].generationDurationMs == 27_500)
+    }
 }

@@ -189,4 +189,29 @@ struct GrokUsageParserTests {
         #expect(result.events.count == 2)
         #expect(result.events.allSatisfy { $0.generationDurationMs == nil })
     }
+
+    @Test
+    func apiDurationMsPreferredOverElapsedMs() {
+        let record = """
+        {"timestamp":1788449900,"params":{"sessionId":"sess-t","update":{"sessionUpdate":"turn_completed","prompt_id":"t1","elapsed_ms":9000,"usage":{"inputTokens":800,"outputTokens":40,"apiDurationMs":2000,"cachedReadTokens":0,"cacheCreationTokens":0,"primaryModelId":"grok-4.7-high"}}}}
+        """
+        let fileURL = URL(fileURLWithPath: "/tmp/grok-t/updates.jsonl")
+        let result = GrokUsageParser.parse(lines: lines(record), fileURL: fileURL)
+
+        #expect(result.events.count == 1)
+        #expect(result.events[0].generationDurationMs == 2_000)
+    }
+
+    @Test
+    func modelUsageRowApiDurationSetsPerModelTiming() {
+        let record = """
+        {"timestamp":1788449900,"params":{"sessionId":"sess-t","update":{"sessionUpdate":"turn_completed","prompt_id":"t1","elapsed_ms":9000,"usage":{"inputTokens":800,"outputTokens":40,"apiDurationMs":5000,"modelUsage":{"grok-a":{"inputTokens":100,"outputTokens":10,"modelCalls":1,"apiDurationMs":1000},"grok-b":{"inputTokens":200,"outputTokens":20,"modelCalls":1}}}}}}
+        """
+        let fileURL = URL(fileURLWithPath: "/tmp/grok-t/updates.jsonl")
+        let result = GrokUsageParser.parse(lines: lines(record), fileURL: fileURL)
+
+        #expect(result.events.count == 2)
+        #expect(result.events[0].generationDurationMs == 1_000)
+        #expect(result.events[1].generationDurationMs == 5_000)
+    }
 }

@@ -113,6 +113,19 @@ struct GenerationRateTests {
     }
 
     @Test
+    func intervalsBeyondFifteenMinutesAreExcluded() {
+        let events = [
+            // A stale trigger pair reads as a 20-minute generation — excluded.
+            event(output: 1_000, startMs: ms(referenceDate, offset: -1_260_000), endMs: ms(referenceDate, offset: -60_000)),
+            // Exactly at the cap still counts.
+            event(output: 100, startMs: ms(referenceDate, offset: -930_000), endMs: ms(referenceDate, offset: -30_000)),
+        ]
+        let rate = GenerationRate(events: events, asOf: referenceDate)
+        #expect(rate.sampleCount == 1)
+        #expect(rate.tokensPerSecond == 100.0 / 900.0)
+    }
+
+    @Test
     func allSamplesOutsideWindowYieldNil() {
         let events = [
             event(output: 100, startMs: ms(referenceDate, offset: -900_000), endMs: ms(referenceDate, offset: -800_000)),

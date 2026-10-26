@@ -267,6 +267,24 @@ struct TokenNormalizerTests {
         #expect(result[0].inputTokens == 2000)
         #expect(result[0].cacheReadTokens == 3000)
     }
+
+    @Test
+    func normalizeEventsPreservesTimingAndCost() {
+        let events = [
+            UsageEvent(
+                id: "test-1", agent: .custom, projectPath: nil, projectName: "proj",
+                sessionId: "s1", timestamp: Date(),
+                inputTokens: 5000, outputTokens: 1200,
+                cacheReadTokens: 3000, cacheCreationTokens: 0,
+                reasoningTokens: nil, actualCostUSD: 1.5,
+                sourcePath: "/test", parser: .custom, confidence: 1.0,
+                generationStartMs: 1_000, generationEndMs: 2_000
+            ),
+        ]
+        let result = TokenNormalizer.normalizeEvents(events, inputIncludesCached: true)
+        #expect(result[0].actualCostUSD == 1.5)
+        #expect(result[0].generationDurationMs == 1_000)
+    }
 }
 
 // MARK: - PluginSqliteReader Tests

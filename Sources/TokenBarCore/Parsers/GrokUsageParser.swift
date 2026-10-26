@@ -70,15 +70,18 @@ public enum GrokUsageParser {
             let topLevelCost = doubleValue(usage["costUsdTicks"]).map { $0 / 1e10 }
             let modelUsage = usage["modelUsage"] as? [String: [String: Any]] ?? [:]
 
-            // `elapsed_ms` on a turn_completed update is the wall-clock
-            // dispatch → response-end duration (TTFT included); absent or
-            // non-positive values report no timing rather than an estimate.
+            // `apiDurationMs` is the API call duration (generation incl.
+            // TTFT); `elapsed_ms` is whole-turn wall time including tool
+            // execution. Prefer the former; absent or non-positive values
+            // report no timing rather than an estimate.
             let endMs = timestamp.tokenBarMillisecondsSince1970
-            let elapsedMs = (update["elapsed_ms"] as? NSNumber)?.int64Value
-            let generationStartMs: Int64? = {
-                guard let elapsedMs, elapsedMs > 0, endMs > elapsedMs else { return nil }
-                return endMs - elapsedMs
-            }()
+            let turnDurationMs = (usage["apiDurationMs"] as? NSNumber)?.int64Value
+                ?? (update["elapsed_ms"] as? NSNumber)?.int64Value
+            let startFor: (Int64?) -> Int64? = { durationMs in
+                guard let durationMs, durationMs > 0, endMs > durationMs else { return nil }
+                return endMs - durationMs
+            }
+            let generationStartMs = startFor(turnDurationMs)
 
             if modelUsage.isEmpty {
                 appendEvent(
@@ -101,6 +104,9 @@ public enum GrokUsageParser {
                 let trimmedModel = trim(model)
                 let cost = doubleValue(row["costUsdTicks"]).map { $0 / 1e10 }
                     ?? (modelUsage.count == 1 ? topLevelCost : nil)
+                let rowStartMs = startFor(
+                    (row["apiDurationMs"] as? NSNumber)?.int64Value ?? turnDurationMs
+                )
                 appendEvent(
                     into: &events,
                     sourcePath: sourcePath,
@@ -111,8 +117,8 @@ public enum GrokUsageParser {
                     model: trimmedModel,
                     costUSD: cost,
                     project: sessionProject,
-                    generationStartMs: generationStartMs,
-                    generationEndMs: generationStartMs != nil ? endMs : nil
+                    generationStartMs: rowStartMs,
+                    generationEndMs: rowStartMs != nil ? endMs : nil
                 )
             }
         }

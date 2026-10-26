@@ -43,9 +43,12 @@ public enum TokenNormalizer {
                 cacheCreationTokens: result.cacheCreation,
                 reasoningTokens: result.reasoning,
                 modelName: event.modelName,
+                actualCostUSD: event.actualCostUSD,
                 sourcePath: event.sourcePath,
                 parser: event.parser,
-                confidence: event.confidence
+                confidence: event.confidence,
+                generationStartMs: event.generationStartMs,
+                generationEndMs: event.generationEndMs
             )
         }
     }

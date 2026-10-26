@@ -10,6 +10,9 @@ public struct GenerationRate: Sendable, Hashable {
     /// Lower bound on one response's measured seconds — sub-500ms
     /// completions would otherwise inflate tok/s toward infinity.
     public static let minimumDurationSeconds: Double = 0.5
+    /// Upper bound on a plausible generation interval — longer gaps mean
+    /// the stored start is a stale trigger, not a real 15+ minute response.
+    public static let maximumDurationSeconds: Double = 900
 
     /// Trailing window over which completed responses contribute, seconds.
     public let window: TimeInterval
@@ -37,6 +40,7 @@ public struct GenerationRate: Sendable, Hashable {
             guard let durationMs = event.generationDurationMs,
                   let endMs = event.generationEndMs,
                   event.outputTokens > 0,
+                  Double(durationMs) <= GenerationRate.maximumDurationSeconds * 1_000,
                   endMs >= windowStartMs, endMs < asOfMs,
                   event.sourcePath != UsageRepository.cursorRemoteSourcePath else {
                 continue

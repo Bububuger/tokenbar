@@ -120,8 +120,14 @@ public enum PiUsageParser {
                 ))
                 continue
             }
-            let endMs = timestamp.tokenBarMillisecondsSince1970
-            let generationStartMs = (startMs != nil && startMs! < endMs) ? startMs : nil
+            // `message.timestamp` is stamped when the provider stream opens
+            // (request dispatch); the outer entry `timestamp` is written at
+            // message_end and approximates response end. Prefer that pair;
+            // the consumed trigger covers records without a message stamp.
+            let endMs = outerTimestampMs(object)
+            let startCandidate = (messageDict["timestamp"] as? NSNumber)?.int64Value ?? startMs
+            let generationStartMs = (endMs != nil && startCandidate != nil && startCandidate! < endMs!)
+                ? startCandidate : nil
 
             let messageID = (object["id"] as? String) ?? "line-\(line.lineNumber)"
             let resolvedSession = sessionID ?? fileURL.deletingPathExtension().lastPathComponent
@@ -166,6 +172,15 @@ public enum PiUsageParser {
         guard let number = value as? NSNumber else { return nil }
         let cost = number.doubleValue
         return cost.isFinite && cost >= 0 ? cost : nil
+    }
+
+    private static func outerTimestampMs(_ outer: [String: Any]) -> Int64? {
+        if let n = outer["timestamp"] as? NSNumber { return n.int64Value }
+        if let s = outer["timestamp"] as? String,
+           let d = ISO8601Fast.parseUTC(s) ?? iso8601WithFractional.date(from: s) ?? iso8601NoFractional.date(from: s) {
+            return d.tokenBarMillisecondsSince1970
+        }
+        return nil
     }
 
     private static func resolveTimestamp(messageDict: [String: Any], outer: [String: Any]) -> Date? {

@@ -22,3 +22,7 @@
 "tb.refreshing" = "刷新中";
 "tb.stale" = "陈旧";
 "tb.failed" = "失败";
+"tb.rate.tab" = "速度";
+"tb.rate.burn_header" = "烧速 · 10m";
+"tb.rate.output_header" = "吐字速 · 10m";
+"tb.rate.empty" = "最近 10 分钟无活动。";

@@ -1445,6 +1445,21 @@ func tokenbarMirrorValue(
     }
 }
 
+/// Popover Rate-tab row value. Follows the menu bar mirror mode the same way
+/// `tokenbarMirrorValue` does — `speedMode` true shows output speed (tok/s),
+/// otherwise burn rate (tok/min). Non-rate mirror modes fall back to burn so
+/// the tab always labels a real metric.
+func tokenbarSliceRate(speedMode: Bool, slice: RateSlice) -> String {
+    if speedMode {
+        return (slice.generation.tokensPerSecond ?? 0) > 0
+            ? tokenbarTokens(Int((slice.generation.tokensPerSecond ?? 0).rounded())) + " tok/s"
+            : "—"
+    }
+    return Int(slice.burn.tokensPerMinute.rounded()) > 0
+        ? tokenbarTokens(Int(slice.burn.tokensPerMinute.rounded())) + "/min"
+        : "—"
+}
+
 
 /// Popover / Settings popover background.
 ///

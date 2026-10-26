@@ -125,6 +125,7 @@
 		9C7ADB29F7714E03FABCCF5D /* ZstdStreamTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64BD7063889740352A423411 /* ZstdStreamTests.swift */; };
 		9CBA83FF33F60A195AC795A4 /* libCzstd.a in Frameworks */ = {isa = PBXBuildFile; fileRef = DF1467B1B59FBE935C4BD88B /* libCzstd.a */; };
 		9CFEA9A5F003EEB8A7F54BDD /* AntigravityUsageParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0338A7AB84D8DC948F2A68B /* AntigravityUsageParser.swift */; };
+		9F7E6CE36D83B794FB23C914 /* RateDrilldownTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26D32C307010D5798A430926 /* RateDrilldownTests.swift */; };
 		A0D2E126A3E6CD2F0D02D926 /* LICENSE-zstd.md in Resources */ = {isa = PBXBuildFile; fileRef = 93E779F9F59010917F560863 /* LICENSE-zstd.md */; };
 		A12F9C5D1478D5A1A856105D /* ClaudeUsageEventSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A74803C460CCB0DBDA00F761 /* ClaudeUsageEventSource.swift */; };
 		A30B0CBD1FCA7D0036AAEC1B /* KiroUsageEventSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3CE2AA4116D78C932F37FE3 /* KiroUsageEventSource.swift */; };
@@ -225,6 +226,7 @@
 		F8DCB69FE8CC92867876F43E /* SavedPromptCommandSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8684DB129AEB46973A0C6377 /* SavedPromptCommandSync.swift */; };
 		F9232D74C637C361F65652C4 /* ProviderCostIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F129095389B3CBE9D70C02ED /* ProviderCostIntegrationTests.swift */; };
 		F9CBD82BCF1A6914DF05C097 /* CodexUsageParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E75B1288B8D585AEA0B93A43 /* CodexUsageParserTests.swift */; };
+		FB784759E86A365628CA6B36 /* RateDrilldown.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B22C646975EE35C602527E4 /* RateDrilldown.swift */; };
 		FBB190743145B41E03B1D07A /* DevinUsageEventSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3909C38DA3128E18F1CDBBD1 /* DevinUsageEventSource.swift */; };
 		FC35013B2A3F8AFCCFA82D3D /* ClaudeUsageParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 992944677EE64C6EC8F28603 /* ClaudeUsageParserTests.swift */; };
 		FC89CBAF075A4CAA0A47E736 /* ModelDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 927C1B5DB05C85B84E43DBFE /* ModelDetailView.swift */; };
@@ -341,8 +343,10 @@
 		258FA144E32653FD43395BCF /* PluginSystemTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginSystemTests.swift; sourceTree = "<group>"; };
 		25971C8196E6FD36EBCE0E50 /* KiroUsageParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KiroUsageParserTests.swift; sourceTree = "<group>"; };
 		266C6C923D0BF3752261D3A9 /* McpConfigEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = McpConfigEditor.swift; sourceTree = "<group>"; };
+		26D32C307010D5798A430926 /* RateDrilldownTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RateDrilldownTests.swift; sourceTree = "<group>"; };
 		2A5473E6812342DEEFC40E1D /* claude-session-negative.jsonl */ = {isa = PBXFileReference; path = "claude-session-negative.jsonl"; sourceTree = "<group>"; };
 		2AA4A0890E48063F579F5DB7 /* PluginRegistryClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginRegistryClient.swift; sourceTree = "<group>"; };
+		2B22C646975EE35C602527E4 /* RateDrilldown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RateDrilldown.swift; sourceTree = "<group>"; };
 		2E0199F0D8EFAC5FAEFCE323 /* DiscoveryCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryCache.swift; sourceTree = "<group>"; };
 		2E563023618B625EAC0E48C9 /* PiDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiDataSource.swift; sourceTree = "<group>"; };
 		2F16461F18B6D1E080434F42 /* CodexUsageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexUsageParser.swift; sourceTree = "<group>"; };
@@ -811,6 +815,7 @@
 			children = (
 				610836752AE58ADF5CBE1EEF /* BurnRate.swift */,
 				49265CB3322462838A2F2DF8 /* GenerationRate.swift */,
+				2B22C646975EE35C602527E4 /* RateDrilldown.swift */,
 				7D7A40FAE174467B1F3B0D16 /* UsageAggregator.swift */,
 			);
 			path = Aggregation;
@@ -919,6 +924,7 @@
 				84ED46F5F5614A4628F27FFC /* PromptTemplatePreviewTests.swift */,
 				F129095389B3CBE9D70C02ED /* ProviderCostIntegrationTests.swift */,
 				82E25D318AE6D9808BD8CD59 /* QoderUsageParserTests.swift */,
+				26D32C307010D5798A430926 /* RateDrilldownTests.swift */,
 				4C7BE40D2F00FBB970910940 /* RuntimeModelTests.swift */,
 				5E9E1FD331DA3821F93F18A1 /* SavedPromptCommandSyncTests.swift */,
 				09DFD882EBD47868E553E77F /* SavedPromptStoreTests.swift */,
@@ -1476,6 +1482,7 @@
 				1F2E8E81966DEA626FFF3280 /* QoderDataSource.swift in Sources */,
 				E0DF2A778CB76385250F1B0C /* QoderUsageEventSource.swift in Sources */,
 				F8C7B7EC5841593EAB54BD9C /* QoderUsageParser.swift in Sources */,
+				FB784759E86A365628CA6B36 /* RateDrilldown.swift in Sources */,
 				6F8DC10321734E930A3A0212 /* RefreshTrigger.swift in Sources */,
 				1A79012C6BB812370D346EB8 /* RuntimeModels.swift in Sources */,
 				621C36442D567A5141CA6EC3 /* SampleUsageEventSource.swift in Sources */,
@@ -1539,6 +1546,7 @@
 				13473CCEC11872670DEB7346 /* PromptTemplatePreviewTests.swift in Sources */,
 				F9232D74C637C361F65652C4 /* ProviderCostIntegrationTests.swift in Sources */,
 				E641948F2B52EA37D2E36B2A /* QoderUsageParserTests.swift in Sources */,
+				9F7E6CE36D83B794FB23C914 /* RateDrilldownTests.swift in Sources */,
 				6E97E67DC9741A9CB9848210 /* RuntimeModelTests.swift in Sources */,
 				AE1AB85CB6664416F1AA32E0 /* SavedPromptCommandSyncTests.swift in Sources */,
 				A816872EE167D08FB9C69E8B /* SavedPromptStoreTests.swift in Sources */,

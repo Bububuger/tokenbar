@@ -10,6 +10,7 @@ struct PopoverView: View {
     // CL-P0-004: Popover Hero status pill mirrors menubar pause flag.
     @AppStorage("tokenbar.menuBarPaused") private var isPaused = false
     @AppStorage("tokenbar.pricingOverrides") private var pricingOverridesJSON = "{}"
+    @AppStorage("tokenbar.menuBarMirrorMode") private var mirrorModeRaw = MenuBarMirrorMode.burnRate.rawValue
     // CL-P0-013: which PopKPI is expanded inline.
     @State private var expandedPopKPI: String?
 
@@ -17,8 +18,28 @@ struct PopoverView: View {
         case projects = "Projects"
         case agents = "Agents"
         case models = "Models"
+        case rate
 
         var id: String { rawValue }
+
+        var title: LocalizedStringKey {
+            switch self {
+            case .rate:
+                "tb.rate.tab"
+            default:
+                LocalizedStringKey(rawValue)
+            }
+        }
+    }
+
+    /// One agent block inside the Rate tab: the whole-agent row plus its
+    /// per-model child rows, pre-sorted for the active mirror metric.
+    private struct RateSliceGroup: Identifiable {
+        let agent: AgentKind
+        let agentSlice: RateSlice
+        var modelSlices: [RateSlice]
+
+        var id: AgentKind { agent }
     }
 
     private enum PopoverRankingRowKind {
@@ -284,12 +305,17 @@ struct PopoverView: View {
     private var rankings: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack {
-                Text("Rankings · 30d")
-                    .font(.subheadline.weight(.semibold))
+                if selectedTab == .rate {
+                    Text(rateHeaderKey)
+                        .font(.subheadline.weight(.semibold))
+                } else {
+                    Text("Rankings · 30d")
+                        .font(.subheadline.weight(.semibold))
+                }
                 Spacer()
                 Picker("Ranking", selection: $selectedTab) {
                     ForEach(PopoverTab.allCases) { tab in
-                        Text(tab.rawValue).tag(tab)
+                        Text(tab.title).tag(tab)
                     }
                 }
                 .labelsHidden()
@@ -360,9 +386,110 @@ struct PopoverView: View {
                             .foregroundStyle(TokenBarStyle.muted)
                             .padding(.vertical, 10)
                     }
+                case .rate:
+                    rateRows
                 }
             }
         }
+    }
+
+    private var mirrorMode: MenuBarMirrorMode {
+        MenuBarMirrorMode(rawValue: mirrorModeRaw) ?? .off
+    }
+
+    /// The Rate tab only has burn / output-speed metrics — every other
+    /// mirror mode (tokens, cost, sessions, off) shows burn so the header
+    /// never labels a value the row isn't actually reporting.
+    private var speedMode: Bool {
+        mirrorMode == .outputSpeed
+    }
+
+    private var rateHeaderKey: LocalizedStringKey {
+        speedMode ? "tb.rate.output_header" : "tb.rate.burn_header"
+    }
+
+    /// Agent groups sorted by the active metric, capped at 5; each group's
+    /// model children are sorted the same way and capped at 4. Swift's sort
+    /// is stable, so ties keep the deterministic order `RateDrilldown` emits
+    /// (agent rawValue, then model name).
+    private var rateSliceGroups: [RateSliceGroup] {
+        let slices = RateDrilldown.makeSlices(events: runtimeModel.events)
+        var groups: [RateSliceGroup] = []
+        var indexByAgent: [AgentKind: Int] = [:]
+        for slice in slices {
+            if slice.modelName == nil {
+                indexByAgent[slice.agent] = groups.count
+                groups.append(RateSliceGroup(agent: slice.agent, agentSlice: slice, modelSlices: []))
+            } else if let groupIndex = indexByAgent[slice.agent] {
+                groups[groupIndex].modelSlices.append(slice)
+            }
+        }
+        func value(_ slice: RateSlice) -> Double {
+            speedMode ? (slice.generation.tokensPerSecond ?? 0) : slice.burn.tokensPerMinute
+        }
+        return groups
+            .sorted { value($0.agentSlice) > value($1.agentSlice) }
+            .prefix(5)
+            .map { group in
+                var group = group
+                group.modelSlices = Array(group.modelSlices.sorted { value($0) > value($1) }.prefix(4))
+                return group
+            }
+    }
+
+    @ViewBuilder
+    private var rateRows: some View {
+        let groups = rateSliceGroups
+        if groups.isEmpty {
+            Text(LocalizedStringKey("tb.rate.empty"))
+                .font(.caption)
+                .foregroundStyle(TokenBarStyle.muted)
+                .padding(.vertical, 10)
+        } else {
+            ForEach(groups) { group in
+                rateRow(slice: group.agentSlice, isChild: false)
+                ForEach(group.modelSlices, id: \.self) { slice in
+                    rateRow(slice: slice, isChild: true)
+                }
+            }
+        }
+    }
+
+    private func rateRow(slice: RateSlice, isChild: Bool) -> some View {
+        let name = isChild ? (slice.modelName ?? "") : slice.agent.displayName
+        let sampleCount = speedMode ? slice.generation.sampleCount : slice.eventCount
+        let value = tokenbarSliceRate(speedMode: speedMode, slice: slice)
+        return HStack(spacing: 8) {
+            if isChild {
+                Color.clear
+                    .frame(width: 0, height: 0)
+                    .padding(.leading, 18)
+            } else {
+                Circle()
+                    .fill(TokenBarStyle.agentColor(name))
+                    .frame(width: 6, height: 6)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(.system(size: isChild ? 11.5 : 12.5, weight: .regular))
+                    .lineLimit(1)
+                Text("n=\(sampleCount)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(value)
+                .font(.system(size: 12, design: .monospaced))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+                .frame(width: 76, alignment: .trailing)
+        }
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(Divider(), alignment: .bottom)
+        .help("\(slice.agent.displayName)\(isChild ? " · \(name)" : "")\nn=\(sampleCount) · \(value)")
     }
 
     private var footer: some View {

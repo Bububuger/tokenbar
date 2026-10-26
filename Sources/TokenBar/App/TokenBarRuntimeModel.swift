@@ -204,6 +204,13 @@ final class TokenBarRuntimeModel: ObservableObject {
     var showsIndexingCard: Bool {
         indexingState.isVisible || isInitialMeasurement
     }
+
+    /// Trailing-window token burn for the menu bar mirror. Derived on demand —
+    /// the TimelineView tick, not a publication, decides when it re-evaluates.
+    var burnRate: BurnRate {
+        BurnRate(events: events, asOf: Date())
+    }
+
     @Published private(set) var archivedProjectNames: Set<String>
     @Published var mainRoute: TokenBarMainRoute = .today {
         didSet {

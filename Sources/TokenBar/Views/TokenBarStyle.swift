@@ -262,25 +262,34 @@ enum TokenBarUsageStatus: Int {
 }
 
 enum MenuBarMirrorMode: String, CaseIterable, Identifiable {
+    case burnRate
     case tokens
     case cost
     case sessions
+    case outputSpeed
     case off
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .burnRate:
+            "Burn rate"
         case .tokens:
             "Tokens"
         case .cost:
             "Cost"
         case .sessions:
             "Sessions"
+        case .outputSpeed:
+            "Output speed"
         case .off:
             "Off"
         }
     }
+
+    /// outputSpeed stays a greyed placeholder until the U2 metric ships.
+    var isSelectable: Bool { self != .outputSpeed }
 }
 
 struct TokenBarModelBreakdown: Identifiable, Hashable, Sendable {
@@ -1414,17 +1423,22 @@ private func rankingSubtitle(events: [UsageEvent], kind: TokenBarRankingKind, ma
 
 func tokenbarMirrorValue(
     mode: MenuBarMirrorMode,
+    burnRateTokensPerMinute: Double,
     todayTokens: Int,
     todayCost: Double,
     todaySessions: Int
 ) -> String {
     switch mode {
+    case .burnRate:
+        tokenbarTokens(Int(burnRateTokensPerMinute.rounded())) + "/min"
     case .tokens:
         tokenbarTokens(todayTokens)
     case .cost:
         tokenbarCompactCurrency(todayCost)
     case .sessions:
         "\(todaySessions)"
+    case .outputSpeed:
+        "—"
     case .off:
         ""
     }

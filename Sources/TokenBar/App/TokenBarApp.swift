@@ -190,6 +190,7 @@ private struct TokenBarStatusItem: View {
         tokenbarMirrorValue(
             mode: mirrorMode,
             burnRateTokensPerMinute: runtimeModel.burnRate.tokensPerMinute,
+            generationRateTokensPerSecond: runtimeModel.generationRate.tokensPerSecond,
             todayTokens: runtimeModel.snapshot.today.totalTokens,
             todayCost: runtimeModel.popoverSnapshot.todayCost,
             todaySessions: runtimeModel.popoverSnapshot.todaySessionCount
@@ -215,6 +216,9 @@ private struct TokenBarStatusItem: View {
         let pausedSuffix = isPaused ? ", paused" : ""
         if mirrorMode == .burnRate {
             return "TokenBar, burn \(displayedMirror), status \(stateText)\(pausedSuffix)"
+        }
+        if mirrorMode == .outputSpeed {
+            return "TokenBar, output speed \(displayedMirror), status \(stateText)\(pausedSuffix)"
         }
         return "TokenBar, today \(tokens) tokens, status \(stateText)\(pausedSuffix)"
     }

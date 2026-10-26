@@ -188,6 +188,7 @@ struct ProjectDetailView: View {
                         totalTokens: projectRangeSummary.totalTokens,
                         todaySessions: projectTodaySessionCount,
                         burnRateTokensPerMinute: runtimeModel.burnRate.tokensPerMinute,
+                        generationRateTokensPerSecond: runtimeModel.generationRate.tokensPerSecond,
                         refreshState: refreshState,
                         onRefresh: onRefresh,
                         rangeLabel: tokenbarRangeShortLabel(selectedRange)

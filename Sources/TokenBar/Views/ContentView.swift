@@ -1247,6 +1247,7 @@ private struct OverviewPage: View {
                 totalTokens: rangeMetrics.summary.totalTokens,
                 todaySessions: runtimeModel.popoverSnapshot.todaySessionCount,
                 burnRateTokensPerMinute: runtimeModel.burnRate.tokensPerMinute,
+                generationRateTokensPerSecond: runtimeModel.generationRate.tokensPerSecond,
                 refreshState: runtimeModel.refreshState,
                 onRefresh: { Task { await runtimeModel.refresh() } },
                 measuring: runtimeModel.isMeasuringToday,
@@ -1380,6 +1381,7 @@ struct TopRightCluster: View {
     let totalTokens: Int
     let todaySessions: Int
     let burnRateTokensPerMinute: Double
+    let generationRateTokensPerSecond: Double?
     let refreshState: RefreshState
     let onRefresh: (() -> Void)?
     var measuring: Bool = false
@@ -1478,6 +1480,7 @@ struct TopRightCluster: View {
         tokenbarMirrorValue(
             mode: mirrorMode,
             burnRateTokensPerMinute: burnRateTokensPerMinute,
+            generationRateTokensPerSecond: generationRateTokensPerSecond,
             todayTokens: todayTokens,
             todayCost: todayCost,
             todaySessions: todaySessions
@@ -1530,7 +1533,7 @@ struct TopRightCluster: View {
                         VStack(spacing: 2) {
                             Text(mode.title)
                                 .font(.system(size: 10.5, weight: .medium))
-                            Text(tokenbarMirrorValue(mode: mode, burnRateTokensPerMinute: burnRateTokensPerMinute, todayTokens: todayTokens, todayCost: todayCost, todaySessions: todaySessions).isEmpty ? "—" : tokenbarMirrorValue(mode: mode, burnRateTokensPerMinute: burnRateTokensPerMinute, todayTokens: todayTokens, todayCost: todayCost, todaySessions: todaySessions))
+                            Text(tokenbarMirrorValue(mode: mode, burnRateTokensPerMinute: burnRateTokensPerMinute, generationRateTokensPerSecond: generationRateTokensPerSecond, todayTokens: todayTokens, todayCost: todayCost, todaySessions: todaySessions).isEmpty ? "—" : tokenbarMirrorValue(mode: mode, burnRateTokensPerMinute: burnRateTokensPerMinute, generationRateTokensPerSecond: generationRateTokensPerSecond, todayTokens: todayTokens, todayCost: todayCost, todaySessions: todaySessions))
                                 .font(.system(size: 9.5, design: .monospaced))
                                 .foregroundStyle(mirrorMode == mode ? TokenBarStyle.foreground.opacity(0.75) : TokenBarStyle.faint)
                         }
@@ -1540,8 +1543,6 @@ struct TopRightCluster: View {
                         .background(mirrorMode == mode ? TokenBarStyle.input.opacity(0.22) : TokenBarStyle.surfaceRaised, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                     }
                     .buttonStyle(.plain)
-                    .disabled(!mode.isSelectable)
-                    .opacity(mode.isSelectable ? 1 : 0.45)
                 }
             }
 

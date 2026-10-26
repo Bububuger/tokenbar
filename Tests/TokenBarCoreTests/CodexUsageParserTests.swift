@@ -656,6 +656,72 @@ struct CodexUsageParserTests {
         #expect(inputs["claude"] == 100)
     }
 
+    @Test
+    func generationTimingPairsUserDispatchWithTokenCount() {
+        let result = parseJSONLines([
+            sessionMetadata(id: "s1"),
+            userDispatch(timestamp: "2026-07-24T00:00:01.000Z"),
+            timedTokenCount(timestamp: "2026-07-24T00:00:03.500Z", input: 10, output: 5),
+        ])
+
+        #expect(result.events.count == 1)
+        let event = result.events[0]
+        #expect(event.generationStartMs == ms("2026-07-24T00:00:01.000Z"))
+        #expect(event.generationEndMs == ms("2026-07-24T00:00:03.500Z"))
+        #expect(event.generationDurationMs == 2_500)
+    }
+
+    @Test
+    func generationTimingPairsFunctionCallOutputDispatchWithTokenCount() {
+        // After a tool result returns, the model is re-dispatched; the output
+        // record is the boundary for the response that follows it.
+        let result = parseJSONLines([
+            sessionMetadata(id: "s1"),
+            userDispatch(timestamp: "2026-07-24T00:00:01.000Z"),
+            timedTokenCount(timestamp: "2026-07-24T00:00:02.000Z", input: 10, output: 5),
+            functionCallOutputDispatch(timestamp: "2026-07-24T00:00:04.000Z"),
+            timedTokenCount(timestamp: "2026-07-24T00:00:06.000Z", input: 20, output: 7),
+        ])
+
+        #expect(result.events.count == 2)
+        #expect(result.events[0].generationStartMs == ms("2026-07-24T00:00:01.000Z"))
+        #expect(result.events[1].generationStartMs == ms("2026-07-24T00:00:04.000Z"))
+        #expect(result.events[1].generationEndMs == ms("2026-07-24T00:00:06.000Z"))
+    }
+
+    @Test
+    func generationTimingConsumesDispatchSoSecondTokenCountIsUntimed() {
+        let result = parseJSONLines([
+            sessionMetadata(id: "s1"),
+            userDispatch(timestamp: "2026-07-24T00:00:01.000Z"),
+            timedTokenCount(timestamp: "2026-07-24T00:00:02.000Z", input: 10, output: 5),
+            // No new dispatch record between the two counts: the stale trigger
+            // must not become a second, bogus interval.
+            timedTokenCount(timestamp: "2026-07-24T00:00:09.000Z", input: 30, output: 9),
+        ])
+
+        #expect(result.events.count == 2)
+        #expect(result.events[0].generationDurationMs == 1_000)
+        #expect(result.events[1].generationStartMs == nil)
+        #expect(result.events[1].generationEndMs == nil)
+    }
+
+    @Test
+    func generationTimingRequiresDispatchBeforeResponse() {
+        let result = parseJSONLines([
+            sessionMetadata(id: "s1"),
+            // token_count with no preceding dispatch → no timing.
+            timedTokenCount(timestamp: "2026-07-24T00:00:02.000Z", input: 10, output: 5),
+            // Dispatch timestamped AFTER the response end is not a valid
+            // window either.
+            userDispatch(timestamp: "2026-07-24T00:00:09.000Z"),
+            timedTokenCount(timestamp: "2026-07-24T00:00:05.000Z", input: 20, output: 6),
+        ])
+
+        #expect(result.events.count == 2)
+        #expect(result.events.allSatisfy { $0.generationDurationMs == nil })
+    }
+
     private func fixtureURL(named name: String) throws -> URL {
         guard let url = fixtureBundle.url(forResource: name, withExtension: "jsonl") else {
             throw FixtureError.missing(name)
@@ -784,6 +850,28 @@ struct CodexUsageParserTests {
         let writeField = write.map { ",\"cache_write_input_tokens\":\($0)" } ?? ""
         return """
         {"input_tokens":\(input),"cached_input_tokens":\(read)\(writeField),"output_tokens":\(output),"reasoning_output_tokens":\(reasoning),"total_tokens":\(total)}
+        """
+    }
+
+    private func ms(_ iso: String) -> Int64 {
+        CodexUsageParser.parseTimestamp(iso)!.tokenBarMillisecondsSince1970
+    }
+
+    private func userDispatch(timestamp: String) -> String {
+        """
+        {"timestamp":"\(timestamp)","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"go"}]}}
+        """
+    }
+
+    private func functionCallOutputDispatch(timestamp: String) -> String {
+        """
+        {"timestamp":"\(timestamp)","type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"ok"}}
+        """
+    }
+
+    private func timedTokenCount(timestamp: String, input: Int, output: Int) -> String {
+        """
+        {"timestamp":"\(timestamp)","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":\(input),"cached_input_tokens":0,"output_tokens":\(output),"reasoning_output_tokens":0}}}}
         """
     }
 }

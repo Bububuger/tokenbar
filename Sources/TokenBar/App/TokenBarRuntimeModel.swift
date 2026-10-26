@@ -211,6 +211,14 @@ final class TokenBarRuntimeModel: ObservableObject {
         BurnRate(events: events, asOf: Date())
     }
 
+    /// Per-response generation speed for the menu bar mirror's output-speed
+    /// mode. Same trailing window as burn rate; only responses whose source
+    /// recorded explicit generation timing contribute — untimed sources leave
+    /// it nil and the mirror shows "—".
+    var generationRate: GenerationRate {
+        GenerationRate(events: events, asOf: Date())
+    }
+
     @Published private(set) var archivedProjectNames: Set<String>
     @Published var mainRoute: TokenBarMainRoute = .today {
         didSet {

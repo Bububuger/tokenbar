@@ -288,7 +288,6 @@ enum MenuBarMirrorMode: String, CaseIterable, Identifiable {
         }
     }
 
-    var isSelectable: Bool { self != .outputSpeed }
 }
 
 struct TokenBarModelBreakdown: Identifiable, Hashable, Sendable {
@@ -1423,6 +1422,7 @@ private func rankingSubtitle(events: [UsageEvent], kind: TokenBarRankingKind, ma
 func tokenbarMirrorValue(
     mode: MenuBarMirrorMode,
     burnRateTokensPerMinute: Double,
+    generationRateTokensPerSecond: Double?,
     todayTokens: Int,
     todayCost: Double,
     todaySessions: Int
@@ -1437,7 +1437,9 @@ func tokenbarMirrorValue(
     case .sessions:
         "\(todaySessions)"
     case .outputSpeed:
-        "—"
+        (generationRateTokensPerSecond ?? 0) > 0
+            ? tokenbarTokens(Int((generationRateTokensPerSecond ?? 0).rounded())) + " tok/s"
+            : "—"
     case .off:
         ""
     }

@@ -93,4 +93,61 @@ struct PiUsageParserTests {
         #expect(result.events.map(\.inputTokens) == [10, 20])
         #expect(result.events.allSatisfy { $0.projectName == "proj" })
     }
+
+    @Test
+    func generationTimingPairsUserAndToolResultDispatches() throws {
+        let records = lines([
+            #"{"type":"session","version":3,"id":"s","timestamp":"2026-05-30T10:00:00Z","cwd":"/p"}"#,
+            #"{"type":"message","id":"u1","timestamp":1780178400000,"message":{"role":"user","content":"go"}}"#,
+            #"{"type":"message","id":"a1","timestamp":1780178402000,"message":{"role":"assistant","model":"m","usage":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0}}}"#,
+            // A tool result re-dispatches the model: it is the boundary for
+            // the assistant message that follows it.
+            #"{"type":"message","id":"t1","timestamp":1780178405000,"message":{"role":"toolResult","content":[{"type":"text","text":"ok"}]}}"#,
+            #"{"type":"message","id":"a2","timestamp":1780178407000,"message":{"role":"assistant","model":"m","usage":{"input":20,"output":6,"cacheRead":0,"cacheWrite":0}}}"#,
+        ])
+
+        let result = PiUsageParser.parse(lines: records, fileURL: URL(fileURLWithPath: "/tmp/pi/s.jsonl"))
+        #expect(result.events.count == 2)
+        #expect(result.events[0].generationStartMs == 1_780_178_400_000)
+        #expect(result.events[0].generationEndMs == 1_780_178_402_000)
+        #expect(result.events[0].generationDurationMs == 2_000)
+        #expect(result.events[1].generationStartMs == 1_780_178_405_000)
+        #expect(result.events[1].generationDurationMs == 2_000)
+    }
+
+    @Test
+    func generationTimingConsumesTriggerPerAssistant() throws {
+        // One dispatch pairs with exactly one assistant turn; a second
+        // assistant with no fresh user/toolResult trigger reports no timing.
+        let records = lines([
+            #"{"type":"session","version":3,"id":"s","timestamp":"2026-05-30T10:00:00Z","cwd":"/p"}"#,
+            #"{"type":"message","id":"u1","timestamp":1780178400000,"message":{"role":"user","content":"go"}}"#,
+            #"{"type":"message","id":"a1","timestamp":1780178402000,"message":{"role":"assistant","model":"m","usage":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0}}}"#,
+            #"{"type":"message","id":"a2","timestamp":1780178409000,"message":{"role":"assistant","model":"m","usage":{"input":20,"output":6,"cacheRead":0,"cacheWrite":0}}}"#,
+        ])
+
+        let result = PiUsageParser.parse(lines: records, fileURL: URL(fileURLWithPath: "/tmp/pi/s.jsonl"))
+        #expect(result.events.count == 2)
+        #expect(result.events[0].generationDurationMs == 2_000)
+        #expect(result.events[1].generationStartMs == nil)
+        #expect(result.events[1].generationEndMs == nil)
+    }
+
+    @Test
+    func generationTimingPrefersSameRecordStreamInterval() throws {
+        // Real entries always carry message.timestamp (stamped when the
+        // provider stream opens) plus an outer entry timestamp written at
+        // message_end — together they bound the generation interval without
+        // needing a trigger.
+        let records = lines([
+            #"{"type":"session","version":3,"id":"s","timestamp":"2026-05-30T10:00:00Z","cwd":"/p"}"#,
+            #"{"type":"message","id":"a1","timestamp":1780178430000,"message":{"role":"assistant","model":"m","timestamp":1780178402500,"usage":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0}}}"#,
+        ])
+
+        let result = PiUsageParser.parse(lines: records, fileURL: URL(fileURLWithPath: "/tmp/pi/s.jsonl"))
+        #expect(result.events.count == 1)
+        #expect(result.events[0].generationStartMs == 1_780_178_402_500)
+        #expect(result.events[0].generationEndMs == 1_780_178_430_000)
+        #expect(result.events[0].generationDurationMs == 27_500)
+    }
 }

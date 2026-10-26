@@ -61,6 +61,11 @@ public enum PiUsageParser {
         var projectPath = initialProjectPath
         var events: [UsageEvent] = []
         var warnings: [PiParseWarning] = []
+        // Non-assistant message (user / toolResult) = dispatch boundary;
+        // the next assistant message pairs against it (dispatch →
+        // response-end, TTFT included) and consumes it, so a second
+        // assistant without a fresh trigger reports no timing.
+        var lastTriggerMs: Int64?
 
         for line in lines {
             let text = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -83,8 +88,13 @@ public enum PiUsageParser {
             }
             // Only assistant turns carry usage; user / toolResult messages don't.
             if let role = messageDict["role"] as? String, role != "assistant" {
+                if let timestamp = resolveTimestamp(messageDict: messageDict, outer: object) {
+                    lastTriggerMs = timestamp.tokenBarMillisecondsSince1970
+                }
                 continue
             }
+            let startMs = lastTriggerMs
+            lastTriggerMs = nil // consume before the abort/usage guards: a skipped response still eats its boundary
             // Skip aborted / errored turns — their usage is empty / unreliable
             // (mirrors pi's own getLastAssistantUsage gating).
             if let stop = messageDict["stopReason"] as? String, stop == "aborted" || stop == "error" {
@@ -110,6 +120,14 @@ public enum PiUsageParser {
                 ))
                 continue
             }
+            // `message.timestamp` is stamped when the provider stream opens
+            // (request dispatch); the outer entry `timestamp` is written at
+            // message_end and approximates response end. Prefer that pair;
+            // the consumed trigger covers records without a message stamp.
+            let endMs = outerTimestampMs(object)
+            let startCandidate = (messageDict["timestamp"] as? NSNumber)?.int64Value ?? startMs
+            let generationStartMs = (endMs != nil && startCandidate != nil && startCandidate! < endMs!)
+                ? startCandidate : nil
 
             let messageID = (object["id"] as? String) ?? "line-\(line.lineNumber)"
             let resolvedSession = sessionID ?? fileURL.deletingPathExtension().lastPathComponent
@@ -134,7 +152,9 @@ public enum PiUsageParser {
                 actualCostUSD: reportedCost(usage["cost"]),
                 sourcePath: sourcePath,
                 parser: dialect.parser,
-                confidence: 1.0
+                confidence: 1.0,
+                generationStartMs: generationStartMs,
+                generationEndMs: generationStartMs != nil ? endMs : nil
             ))
         }
 
@@ -152,6 +172,15 @@ public enum PiUsageParser {
         guard let number = value as? NSNumber else { return nil }
         let cost = number.doubleValue
         return cost.isFinite && cost >= 0 ? cost : nil
+    }
+
+    private static func outerTimestampMs(_ outer: [String: Any]) -> Int64? {
+        if let n = outer["timestamp"] as? NSNumber { return n.int64Value }
+        if let s = outer["timestamp"] as? String,
+           let d = ISO8601Fast.parseUTC(s) ?? iso8601WithFractional.date(from: s) ?? iso8601NoFractional.date(from: s) {
+            return d.tokenBarMillisecondsSince1970
+        }
+        return nil
     }
 
     private static func resolveTimestamp(messageDict: [String: Any], outer: [String: Any]) -> Date? {

@@ -53,6 +53,7 @@ struct DiagnosticsView: View {
                     totalTokens: runtimeModel.snapshot.last30Summary.totalTokens,
                     todaySessions: runtimeModel.popoverSnapshot.todaySessionCount,
                     burnRateTokensPerMinute: runtimeModel.burnRate.tokensPerMinute,
+                    generationRateTokensPerSecond: runtimeModel.generationRate.tokensPerSecond,
                     refreshState: runtimeModel.refreshState,
                     onRefresh: { Task { await runtimeModel.refresh() } }
                 )

@@ -46,7 +46,8 @@ public struct ClaudeUsageEventSource: InspectableUsageEventSource, ResourceBudge
             sourceName: sourceName,
             watermarks: watermarks,
             referenceDate: referenceDate,
-            resourceThrottle: resourceThrottle
+            resourceThrottle: resourceThrottle,
+            contextBytes: JSONLWatermarkLoader.generationTimingContextBytes
         ) { lines, fileURL in
             let slug = ClaudeDataSource.projectSlug(for: fileURL, rootDirectory: rootDirectory)
             return await ClaudeUsageParser.parse(

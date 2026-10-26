@@ -29,6 +29,10 @@ public enum ClaudeUsageParser {
         var events: [UsageEvent] = []
         var prompts: [PromptRecord] = []
         var warnings: [ClaudeParseWarning] = []
+        // Every transcript record carries uuid + parentUuid; the user record
+        // that dispatched a turn is the assistant record's parent, so its
+        // timestamp is the generation start (dispatch → response end).
+        var uuidToMs: [String: Int64] = [:]
 
         for line in lines {
             let lineNumber = line.lineNumber
@@ -45,6 +49,11 @@ public enum ClaudeUsageParser {
             } catch {
                 warnings.append(ClaudeParseWarning(sourcePath: sourcePath, lineNumber: lineNumber, message: "malformed JSON"))
                 continue
+            }
+
+            if let uuid = object["uuid"] as? String,
+               let timestamp = ClaudeUsageParser.parseTimestamp(object["timestamp"] as? String) {
+                uuidToMs[uuid] = timestamp.tokenBarMillisecondsSince1970
             }
 
             if let prompt = extractUserPrompt(
@@ -92,6 +101,11 @@ public enum ClaudeUsageParser {
                 sourcePath: sourcePath
             )
 
+            let timestamp = parseTimestamp(object["timestamp"] as? String) ?? .distantPast
+            let endMs = timestamp.tokenBarMillisecondsSince1970
+            let parentMs = (object["parentUuid"] as? String).flatMap { uuidToMs[$0] }
+            let generationStartMs = (parentMs != nil && parentMs! < endMs) ? parentMs : nil
+
             events.append(
                 UsageEvent(
                     id: "\(sourcePath)#\(lineNumber)",
@@ -99,7 +113,7 @@ public enum ClaudeUsageParser {
                     projectPath: project.path,
                     projectName: project.name,
                     sessionId: object["sessionId"] as? String ?? fileURL.deletingPathExtension().lastPathComponent,
-                    timestamp: parseTimestamp(object["timestamp"] as? String) ?? .distantPast,
+                    timestamp: timestamp,
                     inputTokens: inputTokens,
                     outputTokens: outputTokens,
                     cacheReadTokens: cacheReadTokens,
@@ -108,7 +122,9 @@ public enum ClaudeUsageParser {
                     modelName: modelName,
                     sourcePath: sourcePath,
                     parser: .claudeCode,
-                    confidence: 1.0
+                    confidence: 1.0,
+                    generationStartMs: generationStartMs,
+                    generationEndMs: generationStartMs != nil ? endMs : nil
                 )
             )
         }
@@ -129,6 +145,8 @@ public enum ClaudeUsageParser {
         var warnings: [ClaudeParseWarning] = []
         var sliceStartedAt = Date()
         var linesSinceThrottle = 0
+        // See sync parse: user record uuid → timestamp seeds the pairing map.
+        var uuidToMs: [String: Int64] = [:]
 
         for line in lines {
             let lineNumber = line.lineNumber
@@ -145,6 +163,11 @@ public enum ClaudeUsageParser {
             } catch {
                 warnings.append(ClaudeParseWarning(sourcePath: sourcePath, lineNumber: lineNumber, message: "malformed JSON"))
                 continue
+            }
+
+            if let uuid = object["uuid"] as? String,
+               let timestamp = ClaudeUsageParser.parseTimestamp(object["timestamp"] as? String) {
+                uuidToMs[uuid] = timestamp.tokenBarMillisecondsSince1970
             }
 
             if let prompt = extractUserPrompt(
@@ -178,6 +201,11 @@ public enum ClaudeUsageParser {
                     sourcePath: sourcePath
                 )
 
+                let timestamp = parseTimestamp(object["timestamp"] as? String) ?? .distantPast
+                let endMs = timestamp.tokenBarMillisecondsSince1970
+                let parentMs = (object["parentUuid"] as? String).flatMap { uuidToMs[$0] }
+                let generationStartMs = (parentMs != nil && parentMs! < endMs) ? parentMs : nil
+
                 events.append(
                     UsageEvent(
                         id: "\(sourcePath)#\(lineNumber)",
@@ -185,7 +213,7 @@ public enum ClaudeUsageParser {
                         projectPath: project.path,
                         projectName: project.name,
                         sessionId: object["sessionId"] as? String ?? fileURL.deletingPathExtension().lastPathComponent,
-                        timestamp: parseTimestamp(object["timestamp"] as? String) ?? .distantPast,
+                        timestamp: timestamp,
                         inputTokens: inputClamp.value,
                         outputTokens: outputClamp.value,
                         cacheReadTokens: cacheReadClamp.value,
@@ -194,7 +222,9 @@ public enum ClaudeUsageParser {
                         modelName: modelName,
                         sourcePath: sourcePath,
                         parser: .claudeCode,
-                        confidence: 1.0
+                        confidence: 1.0,
+                        generationStartMs: generationStartMs,
+                        generationEndMs: generationStartMs != nil ? endMs : nil
                     )
                 )
             }

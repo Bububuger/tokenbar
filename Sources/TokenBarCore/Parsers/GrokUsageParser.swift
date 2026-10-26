@@ -70,6 +70,19 @@ public enum GrokUsageParser {
             let topLevelCost = doubleValue(usage["costUsdTicks"]).map { $0 / 1e10 }
             let modelUsage = usage["modelUsage"] as? [String: [String: Any]] ?? [:]
 
+            // `apiDurationMs` is the API call duration (generation incl.
+            // TTFT); `elapsed_ms` is whole-turn wall time including tool
+            // execution. Prefer the former; absent or non-positive values
+            // report no timing rather than an estimate.
+            let endMs = timestamp.tokenBarMillisecondsSince1970
+            let turnDurationMs = (usage["apiDurationMs"] as? NSNumber)?.int64Value
+                ?? (update["elapsed_ms"] as? NSNumber)?.int64Value
+            let startFor: (Int64?) -> Int64? = { durationMs in
+                guard let durationMs, durationMs > 0, endMs > durationMs else { return nil }
+                return endMs - durationMs
+            }
+            let generationStartMs = startFor(turnDurationMs)
+
             if modelUsage.isEmpty {
                 appendEvent(
                     into: &events,
@@ -80,7 +93,9 @@ public enum GrokUsageParser {
                     usage: usage,
                     model: (usage["primaryModelId"] as? String).flatMap { trim($0) },
                     costUSD: topLevelCost,
-                    project: sessionProject
+                    project: sessionProject,
+                    generationStartMs: generationStartMs,
+                    generationEndMs: generationStartMs != nil ? endMs : nil
                 )
                 continue
             }
@@ -89,6 +104,9 @@ public enum GrokUsageParser {
                 let trimmedModel = trim(model)
                 let cost = doubleValue(row["costUsdTicks"]).map { $0 / 1e10 }
                     ?? (modelUsage.count == 1 ? topLevelCost : nil)
+                let rowStartMs = startFor(
+                    (row["apiDurationMs"] as? NSNumber)?.int64Value ?? turnDurationMs
+                )
                 appendEvent(
                     into: &events,
                     sourcePath: sourcePath,
@@ -98,7 +116,9 @@ public enum GrokUsageParser {
                     usage: row,
                     model: trimmedModel,
                     costUSD: cost,
-                    project: sessionProject
+                    project: sessionProject,
+                    generationStartMs: rowStartMs,
+                    generationEndMs: rowStartMs != nil ? endMs : nil
                 )
             }
         }
@@ -115,7 +135,9 @@ public enum GrokUsageParser {
         usage: [String: Any],
         model: String?,
         costUSD: Double?,
-        project: (projectName: String, projectPath: String?)?
+        project: (projectName: String, projectPath: String?)?,
+        generationStartMs: Int64?,
+        generationEndMs: Int64?
     ) {
         let input = intValue(usage["inputTokens"])
         let output = intValue(usage["outputTokens"])
@@ -144,7 +166,9 @@ public enum GrokUsageParser {
                 actualCostUSD: costUSD,
                 sourcePath: sourcePath,
                 parser: .grok,
-                confidence: 1.0
+                confidence: 1.0,
+                generationStartMs: generationStartMs,
+                generationEndMs: generationEndMs
             )
         )
     }

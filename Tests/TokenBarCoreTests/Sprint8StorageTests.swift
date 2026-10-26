@@ -258,6 +258,111 @@ struct Sprint8StorageTests {
     }
 
     @Test
+    func generationTimingFieldsRoundtripThroughStorage() throws {
+        let dbURL = temporaryDatabaseURL()
+        let repository = try UsageRepository(databaseURL: dbURL)
+        let now = fixedDate()
+        let startMs = Int64(now.timeIntervalSince1970 * 1_000) - 4_200
+        let endMs = Int64(now.timeIntervalSince1970 * 1_000)
+
+        let timed = UsageEvent(
+            id: "timed-1",
+            agent: .codex,
+            projectPath: "/tmp/tokenbar",
+            projectName: "tokenbar",
+            sessionId: "session",
+            timestamp: now,
+            inputTokens: 10,
+            outputTokens: 20,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            reasoningTokens: nil,
+            sourcePath: "/tmp/source.jsonl",
+            parser: .codex,
+            confidence: 1.0,
+            generationStartMs: startMs,
+            generationEndMs: endMs
+        )
+        _ = try repository.insertCheckpoint(
+            trigger: "timing",
+            startedAt: now,
+            endedAt: now,
+            events: [timed],
+            prompts: [],
+            nextWatermarks: [],
+            warnings: [],
+            error: nil
+        )
+
+        let loaded = try repository.allEvents()
+        #expect(loaded.count == 1)
+        #expect(loaded[0].generationStartMs == startMs)
+        #expect(loaded[0].generationEndMs == endMs)
+        #expect(loaded[0].generationDurationMs == 4_200)
+
+        // Rows first indexed without timing get it backfilled when a
+        // context-line re-parse re-emits the same event id with timing.
+        let untimed = UsageEvent(
+            id: "backfill-1",
+            agent: .codex,
+            projectPath: "/tmp/tokenbar",
+            projectName: "tokenbar",
+            sessionId: "session",
+            timestamp: now,
+            inputTokens: 5,
+            outputTokens: 5,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            reasoningTokens: nil,
+            sourcePath: "/tmp/source.jsonl",
+            parser: .codex,
+            confidence: 1.0
+        )
+        let timedReplay = UsageEvent(
+            id: "backfill-1",
+            agent: .codex,
+            projectPath: "/tmp/tokenbar",
+            projectName: "tokenbar",
+            sessionId: "session",
+            timestamp: now,
+            inputTokens: 5,
+            outputTokens: 5,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            reasoningTokens: nil,
+            sourcePath: "/tmp/source.jsonl",
+            parser: .codex,
+            confidence: 1.0,
+            generationStartMs: startMs,
+            generationEndMs: endMs
+        )
+        _ = try repository.insertCheckpoint(
+            trigger: "timing",
+            startedAt: now,
+            endedAt: now,
+            events: [untimed],
+            prompts: [],
+            nextWatermarks: [],
+            warnings: [],
+            error: nil
+        )
+        _ = try repository.insertCheckpoint(
+            trigger: "timing",
+            startedAt: now,
+            endedAt: now,
+            events: [timedReplay],
+            prompts: [],
+            nextWatermarks: [],
+            warnings: [],
+            error: nil
+        )
+
+        let backfilled = try #require(try repository.allEvents().first { $0.id == "backfill-1" })
+        #expect(backfilled.generationStartMs == startMs)
+        #expect(backfilled.generationEndMs == endMs)
+    }
+
+    @Test
     func makeSnapshotAggregatesFromSQLiteWithDerivedFields() throws {
         let dbURL = temporaryDatabaseURL()
         let repository = try UsageRepository(databaseURL: dbURL)

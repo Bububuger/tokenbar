@@ -545,8 +545,20 @@ public struct UsageEvent: Identifiable, Sendable, Hashable {
     public let sourcePath: String
     public let parser: ParserKind
     public let confidence: Double
+    /// Parsers set both endpoints or neither — a half-timed row must never
+    /// persist, because `generationDurationMs` treats either nil as untimed.
+    public let generationStartMs: Int64?
+    public let generationEndMs: Int64?
 
     public var cacheTokens: Int { cacheReadTokens + cacheCreationTokens }
+
+    /// Wall-clock generation interval in ms (dispatch → response end, includes
+    /// TTFT). nil unless both endpoints were recorded in the source and the
+    /// interval is strictly positive.
+    public var generationDurationMs: Int64? {
+        guard let s = generationStartMs, let e = generationEndMs, e > s else { return nil }
+        return e - s
+    }
 
     public init(
         id: String,
@@ -564,7 +576,9 @@ public struct UsageEvent: Identifiable, Sendable, Hashable {
         actualCostUSD: Double? = nil,
         sourcePath: String,
         parser: ParserKind,
-        confidence: Double
+        confidence: Double,
+        generationStartMs: Int64? = nil,
+        generationEndMs: Int64? = nil
     ) {
         self.id = id
         self.agent = agent
@@ -582,6 +596,8 @@ public struct UsageEvent: Identifiable, Sendable, Hashable {
         self.sourcePath = sourcePath
         self.parser = parser
         self.confidence = confidence
+        self.generationStartMs = generationStartMs
+        self.generationEndMs = generationEndMs
     }
 }
 

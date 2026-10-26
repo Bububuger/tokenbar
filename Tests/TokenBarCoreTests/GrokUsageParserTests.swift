@@ -159,4 +159,59 @@ struct GrokUsageParserTests {
         #expect(e.actualCostUSD ?? 0 == 250000000 / 1e10)
         #expect(e.id == fileURL.path + "#grok#plain-1")
     }
+
+    @Test
+    func turnCompletedElapsedMsSetsGenerationTiming() {
+        let record = """
+        {"timestamp":1788449900,"params":{"sessionId":"sess-t","update":{"sessionUpdate":"turn_completed","prompt_id":"t1","elapsed_ms":1500,"usage":{"inputTokens":800,"outputTokens":40,"cachedReadTokens":0,"cacheCreationTokens":0,"primaryModelId":"grok-4.7-high"}}}}
+        """
+        let fileURL = URL(fileURLWithPath: "/tmp/grok-t/updates.jsonl")
+        let result = GrokUsageParser.parse(lines: lines(record), fileURL: fileURL)
+
+        #expect(result.events.count == 1)
+        let event = result.events[0]
+        #expect(event.generationEndMs == 1_788_449_900_000)
+        #expect(event.generationStartMs == 1_788_449_898_500)
+        #expect(event.generationDurationMs == 1_500)
+    }
+
+    @Test
+    func turnCompletedWithoutElapsedMsReportsNoTiming() {
+        let record = """
+        {"timestamp":1788449900,"params":{"sessionId":"sess-t","update":{"sessionUpdate":"turn_completed","prompt_id":"t1","usage":{"inputTokens":800,"outputTokens":40,"cachedReadTokens":0,"cacheCreationTokens":0,"primaryModelId":"grok-4.7-high"}}}}
+        """
+        let zeroElapsed = """
+        {"timestamp":1788449901,"params":{"sessionId":"sess-t","update":{"sessionUpdate":"turn_completed","prompt_id":"t2","elapsed_ms":0,"usage":{"inputTokens":100,"outputTokens":10,"cachedReadTokens":0,"cacheCreationTokens":0,"primaryModelId":"grok-4.7-high"}}}}
+        """
+        let fileURL = URL(fileURLWithPath: "/tmp/grok-t/updates.jsonl")
+        let result = GrokUsageParser.parse(lines: lines(record + "\n" + zeroElapsed), fileURL: fileURL)
+
+        #expect(result.events.count == 2)
+        #expect(result.events.allSatisfy { $0.generationDurationMs == nil })
+    }
+
+    @Test
+    func apiDurationMsPreferredOverElapsedMs() {
+        let record = """
+        {"timestamp":1788449900,"params":{"sessionId":"sess-t","update":{"sessionUpdate":"turn_completed","prompt_id":"t1","elapsed_ms":9000,"usage":{"inputTokens":800,"outputTokens":40,"apiDurationMs":2000,"cachedReadTokens":0,"cacheCreationTokens":0,"primaryModelId":"grok-4.7-high"}}}}
+        """
+        let fileURL = URL(fileURLWithPath: "/tmp/grok-t/updates.jsonl")
+        let result = GrokUsageParser.parse(lines: lines(record), fileURL: fileURL)
+
+        #expect(result.events.count == 1)
+        #expect(result.events[0].generationDurationMs == 2_000)
+    }
+
+    @Test
+    func modelUsageRowApiDurationSetsPerModelTiming() {
+        let record = """
+        {"timestamp":1788449900,"params":{"sessionId":"sess-t","update":{"sessionUpdate":"turn_completed","prompt_id":"t1","elapsed_ms":9000,"usage":{"inputTokens":800,"outputTokens":40,"apiDurationMs":5000,"modelUsage":{"grok-a":{"inputTokens":100,"outputTokens":10,"modelCalls":1,"apiDurationMs":1000},"grok-b":{"inputTokens":200,"outputTokens":20,"modelCalls":1}}}}}}
+        """
+        let fileURL = URL(fileURLWithPath: "/tmp/grok-t/updates.jsonl")
+        let result = GrokUsageParser.parse(lines: lines(record), fileURL: fileURL)
+
+        #expect(result.events.count == 2)
+        #expect(result.events[0].generationDurationMs == 1_000)
+        #expect(result.events[1].generationDurationMs == 5_000)
+    }
 }

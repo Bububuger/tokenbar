@@ -122,6 +122,18 @@ public enum OpenCodeUsageParser {
                     return "opencode"
                 }()
 
+                // Same-record generation window: payload time.created →
+                // time.completed (dispatch → response end, TTFT included).
+                // Missing, zero, or non-positive completed timing yields nil.
+                let generationStartMs: Int64? = {
+                    guard let created = payload.time?.created,
+                          let completed = payload.time?.completed,
+                          created > 0, completed > created else {
+                        return nil
+                    }
+                    return created
+                }()
+
                 events.append(
                     UsageEvent(
                         id: "\(databaseURL.path)#opencode#\(messageID)",
@@ -138,7 +150,9 @@ public enum OpenCodeUsageParser {
                         modelName: payload.modelID,
                         sourcePath: databaseURL.path,
                         parser: .openCode,
-                        confidence: 1.0
+                        confidence: 1.0,
+                        generationStartMs: generationStartMs,
+                        generationEndMs: generationStartMs != nil ? payload.time?.completed : nil
                     )
                 )
             }
@@ -179,6 +193,12 @@ private struct OpenCodeMessagePayload: Decodable {
     let modelID: String?
     let providerID: String?
     let tokens: OpenCodeTokens?
+    let time: OpenCodeMessageTime?
+}
+
+private struct OpenCodeMessageTime: Decodable {
+    let created: Int64?
+    let completed: Int64?
 }
 
 private struct OpenCodeTokens: Decodable {

@@ -63,6 +63,117 @@ struct Sprint9IncrementalTests {
     }
 
     @Test
+    func jsonlReaderContextBytesReemitsLookbehindFromLineBoundary() throws {
+        let fileURL = temporaryDirectory().appendingPathComponent("ctx.jsonl")
+        try writeLines(["{\"a\":1}", "{\"bb\":22}", "{\"ccc\":333}"], to: fileURL, trailingNewline: true)
+        let first = try JSONLIncrementalReader.read(fileURL: fileURL, sourceName: "Codex", agent: .codex, watermark: nil)
+        #expect(first.lines.map(\.lineNumber) == [1, 2, 3])
+
+        try append("{\"d\":4}\n", to: fileURL)
+
+        // Window lands mid-line inside line 2; the partial head is dropped
+        // and the lookbehind re-emits from line 3's boundary. Line numbers
+        // must match a full re-parse.
+        let contextBytes = Int64("{\"ccc\":333}\n".utf8.count + 5)
+        let second = try JSONLIncrementalReader.read(
+            fileURL: fileURL,
+            sourceName: "Codex",
+            agent: .codex,
+            watermark: first.nextWatermark,
+            contextBytes: contextBytes
+        )
+
+        #expect(second.lines.map(\.text) == ["{\"ccc\":333}", "{\"d\":4}"])
+        #expect(second.lines.map(\.lineNumber) == [3, 4])
+        // Watermark still advances to EOF, never regresses into the context.
+        #expect(second.nextWatermark.lastByteOffset == Int64((try Data(contentsOf: fileURL)).count))
+    }
+
+    @Test
+    func jsonlReaderContextBytesAsyncMatchesSyncLineNumbers() async throws {
+        let fileURL = temporaryDirectory().appendingPathComponent("ctx-async.jsonl")
+        try writeLines(["{\"a\":1}", "{\"bb\":22}", "{\"ccc\":333}"], to: fileURL, trailingNewline: true)
+        let first = try JSONLIncrementalReader.read(fileURL: fileURL, sourceName: "Codex", agent: .codex, watermark: nil)
+        try append("{\"d\":4}\n", to: fileURL)
+
+        let contextBytes = Int64("{\"ccc\":333}\n".utf8.count + 5)
+        let second = try await JSONLIncrementalReader.read(
+            fileURL: fileURL,
+            sourceName: "Codex",
+            agent: .codex,
+            watermark: first.nextWatermark,
+            contextBytes: contextBytes,
+            resourceThrottle: nil
+        )
+
+        #expect(second.lines.map(\.text) == ["{\"ccc\":333}", "{\"d\":4}"])
+        #expect(second.lines.map(\.lineNumber) == [3, 4])
+        #expect(second.nextWatermark.lastByteOffset == Int64((try Data(contentsOf: fileURL)).count))
+    }
+
+    @Test
+    func jsonlReaderContextBytesZeroIsIncrementalOnlyAndOversizedReadsWholeFile() throws {
+        let fileURL = temporaryDirectory().appendingPathComponent("ctx-bounds.jsonl")
+        try writeLines(["{\"a\":1}", "{\"b\":2}"], to: fileURL, trailingNewline: true)
+        let first = try JSONLIncrementalReader.read(fileURL: fileURL, sourceName: "Codex", agent: .codex, watermark: nil)
+        try append("{\"c\":3}\n", to: fileURL)
+
+        let incrementalOnly = try JSONLIncrementalReader.read(
+            fileURL: fileURL,
+            sourceName: "Codex",
+            agent: .codex,
+            watermark: first.nextWatermark,
+            contextBytes: 0
+        )
+        #expect(incrementalOnly.lines.map(\.text) == ["{\"c\":3}"])
+
+        let oversized = try JSONLIncrementalReader.read(
+            fileURL: fileURL,
+            sourceName: "Codex",
+            agent: .codex,
+            watermark: first.nextWatermark,
+            contextBytes: .max
+        )
+        #expect(oversized.lines.map(\.lineNumber) == [1, 2, 3])
+    }
+
+    @Test
+    func codexSourceContextLookbehindPairsAppendedResponseWithEarlierDispatch() async throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let referenceDate = calendar.date(from: DateComponents(year: 2026, month: 5, day: 14, hour: 8))!
+        let root = codexFixtureRoot(referenceDate: referenceDate)
+        let fileURL = root
+            .appendingPathComponent("2026")
+            .appendingPathComponent("05")
+            .appendingPathComponent("14")
+            .appendingPathComponent("rollout-test.jsonl")
+        try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try writeLines([
+            #"{"timestamp":"2026-05-14T00:00:00.000Z","type":"session_meta","payload":{"id":"s1","cwd":"/tmp/tokenbar"}}"#,
+            #"{"timestamp":"2026-05-14T00:00:10.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"go"}]}}"#,
+        ], to: fileURL, trailingNewline: true)
+
+        let store = try UsageStore(databaseURL: temporaryDatabaseURL())
+        let source = CodexUsageEventSource(rootPath: root.path, daysBack: 2)
+        let engine = CheckpointEngine(sources: [source], store: store)
+
+        let first = await engine.run(trigger: "test", startedAt: referenceDate, referenceDate: referenceDate, calendar: calendar)
+        #expect(first.checkpoint?.eventsAdded == 0)
+
+        try append(tokenCountLine(timestamp: "2026-05-14T00:00:15.000Z", input: 20, cache: 2, output: 3) + "\n", to: fileURL)
+        let second = await engine.run(trigger: "test", startedAt: referenceDate, referenceDate: referenceDate, calendar: calendar)
+
+        // The dispatch record sits behind the watermark; the 1 MiB
+        // lookbehind re-reads it so the appended response carries real
+        // generation timing rather than nil.
+        #expect(second.checkpoint?.eventsAdded == 1)
+        let event = try #require(second.state.events.last)
+        #expect(event.generationStartMs == 1_778_716_810_000)
+        #expect(event.generationEndMs == 1_778_716_815_000)
+        #expect(event.generationDurationMs == 5_000)
+    }
+
+    @Test
     func codexSourceSecondCheckpointIsNoOpThenAppendAddsOneEvent() async throws {
         let calendar = Calendar(identifier: .gregorian)
         let referenceDate = calendar.date(from: DateComponents(year: 2026, month: 5, day: 14, hour: 8))!

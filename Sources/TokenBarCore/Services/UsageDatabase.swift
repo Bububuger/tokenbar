@@ -419,6 +419,15 @@ public final class UsageDatabase: @unchecked Sendable {
             ON usage_events(source_path, timestamp)
             """)
         }
+        migrator.registerMigration("v21_add_generation_timing") { db in
+            let eventColumns = try db.columns(in: "usage_events")
+            if !eventColumns.contains(where: { $0.name == "generation_start_ms" }) {
+                try db.execute(sql: "ALTER TABLE usage_events ADD COLUMN generation_start_ms INTEGER;")
+            }
+            if !eventColumns.contains(where: { $0.name == "generation_end_ms" }) {
+                try db.execute(sql: "ALTER TABLE usage_events ADD COLUMN generation_end_ms INTEGER;")
+            }
+        }
         return migrator
     }
 }

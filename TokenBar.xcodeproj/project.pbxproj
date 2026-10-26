@@ -33,8 +33,10 @@
 		28EB6FD7322043D54179CA3F /* GrokDataSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADED29F847E5278775AFF777 /* GrokDataSource.swift */; };
 		29895282DA84CF98BA945E18 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = F564CFA83CC2F25DF5F61881 /* Localizable.strings */; };
 		29B9B765267E0C66E7F96CE6 /* IndexingResourceThrottle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A21A75E49D97E2D9072E96CF /* IndexingResourceThrottle.swift */; };
+		2B18BDCEA4E9842D51903CA9 /* GenerationRate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49265CB3322462838A2F2DF8 /* GenerationRate.swift */; };
 		2B7F4275BB72666AD129AB27 /* claude-session-unicode-cwd.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = 6777696CA6F3021A247FD109 /* claude-session-unicode-cwd.jsonl */; };
 		2C0A567C4F523E5E6C22B9F5 /* TokenBarCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = CE68C5C4D63519C0D1AA1A2F /* TokenBarCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		2D6C4A618747CC1F4F3A824F /* GenerationRateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABBCF06BC4C71B1367D13D68 /* GenerationRateTests.swift */; };
 		2DB3031F751A8CD8A7860D01 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 88E72B0E28BA176B815BA2C9 /* Assets.xcassets */; };
 		2F1BF4057039E60E24D49CEF /* TokenBarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E0D668C114B1D19E73AFBD1 /* TokenBarApp.swift */; };
 		2F6E717D6867AB002AEA417C /* MascotStageImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE1C94B1FB9D02515FE1C787 /* MascotStageImage.swift */; };
@@ -365,6 +367,7 @@
 		41542FC51C470B3D79FE5E27 /* OpenCodeUsageEventSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeUsageEventSource.swift; sourceTree = "<group>"; };
 		47BCDC84C7B31F09D67141B4 /* LibraryConflictDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryConflictDetector.swift; sourceTree = "<group>"; };
 		48B6611AAEFD9FFCDF157EA9 /* QoderUsageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QoderUsageParser.swift; sourceTree = "<group>"; };
+		49265CB3322462838A2F2DF8 /* GenerationRate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationRate.swift; sourceTree = "<group>"; };
 		4928DC72DB17512B06F60B6F /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		49AEE3709C8A3A525D70342C /* dsh-legacy.jsonl.zstd */ = {isa = PBXFileReference; path = "dsh-legacy.jsonl.zstd"; sourceTree = "<group>"; };
 		49B9CE9D8F90B3B7848EA71D /* AntigravityDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityDataSource.swift; sourceTree = "<group>"; };
@@ -456,6 +459,7 @@
 		A7ADFB8A8AC26404801D4CB4 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		A87D8537D4E3486C607656EF /* session-zero-counts.jsonl */ = {isa = PBXFileReference; path = "session-zero-counts.jsonl"; sourceTree = "<group>"; };
 		A8D7D0940208FB972B748ADE /* CodexDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexDataSource.swift; sourceTree = "<group>"; };
+		ABBCF06BC4C71B1367D13D68 /* GenerationRateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationRateTests.swift; sourceTree = "<group>"; };
 		AC238696F84C85AA63788187 /* PromptBodyEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptBodyEditor.swift; sourceTree = "<group>"; };
 		AD741663A590583349753736 /* Support.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support.swift; sourceTree = "<group>"; };
 		ADED29F847E5278775AFF777 /* GrokDataSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokDataSource.swift; sourceTree = "<group>"; };
@@ -806,6 +810,7 @@
 			isa = PBXGroup;
 			children = (
 				610836752AE58ADF5CBE1EEF /* BurnRate.swift */,
+				49265CB3322462838A2F2DF8 /* GenerationRate.swift */,
 				7D7A40FAE174467B1F3B0D16 /* UsageAggregator.swift */,
 			);
 			path = Aggregation;
@@ -900,6 +905,7 @@
 				D436992428CD4DF475BD7B50 /* DshUsageParserTests.swift */,
 				185A44011F9E5B62EDA4C90C /* FixtureBundle.swift */,
 				D16CF1F6DA2D0F4877571FDF /* GeminiUsageParserTests.swift */,
+				ABBCF06BC4C71B1367D13D68 /* GenerationRateTests.swift */,
 				C0D98AD2FDC268DF45B9ED83 /* GrokUsageParserTests.swift */,
 				F825B75115C033F1C045795F /* IndexRebuilderTests.swift */,
 				07CED31408E5040D3129BBEA /* KimiUsageParserTests.swift */,
@@ -1427,6 +1433,7 @@
 				615B7716C62964D21B71DA56 /* GeminiDataSource.swift in Sources */,
 				00A6D8ACEE790C20BB79E0B0 /* GeminiUsageEventSource.swift in Sources */,
 				E78940BB111D14C7D025DDDA /* GeminiUsageParser.swift in Sources */,
+				2B18BDCEA4E9842D51903CA9 /* GenerationRate.swift in Sources */,
 				28EB6FD7322043D54179CA3F /* GrokDataSource.swift in Sources */,
 				12D4C8F15AC82AAA42690BC2 /* GrokUsageEventSource.swift in Sources */,
 				9A4B6FD967E78F3BDD4B40CF /* GrokUsageParser.swift in Sources */,
@@ -1518,6 +1525,7 @@
 				40BBDC26F459EB94A7CAA939 /* DshUsageParserTests.swift in Sources */,
 				CB8F494F7DED938C2480D7BC /* FixtureBundle.swift in Sources */,
 				0D19304353393CC31B880CF1 /* GeminiUsageParserTests.swift in Sources */,
+				2D6C4A618747CC1F4F3A824F /* GenerationRateTests.swift in Sources */,
 				ADA844DDA18F4CACB6B1CDE4 /* GrokUsageParserTests.swift in Sources */,
 				723FFC2D14E02466896C58E0 /* IndexRebuilderTests.swift in Sources */,
 				B3C799038CC50BADE7A40F54 /* KimiUsageParserTests.swift in Sources */,

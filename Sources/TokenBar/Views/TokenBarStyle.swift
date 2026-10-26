@@ -1429,7 +1429,7 @@ func tokenbarMirrorValue(
 ) -> String {
     switch mode {
     case .burnRate:
-        tokenbarTokens(Int(burnRateTokensPerMinute.rounded())) + "/min"
+        Int(burnRateTokensPerMinute.rounded()) > 0 ? tokenbarTokens(Int(burnRateTokensPerMinute.rounded())) + "/min" : "—"
     case .tokens:
         tokenbarTokens(todayTokens)
     case .cost:

@@ -47,7 +47,7 @@ public struct OmpUsageEventSource: InspectableUsageEventSource, ResourceBudgeted
             watermarks: watermarks,
             referenceDate: referenceDate,
             resourceThrottle: resourceThrottle,
-            contextBytes: 1_048_576
+            contextBytes: JSONLWatermarkLoader.generationTimingContextBytes
         ) { lines, fileURL in
             let context = PiUsageParser.sessionContext(fileURL: fileURL)
             return PiUsageParser.parse(

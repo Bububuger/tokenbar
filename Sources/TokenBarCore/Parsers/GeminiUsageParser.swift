@@ -79,7 +79,7 @@ public enum GeminiUsageParser {
                 continue
             }
             let startMs = lastTriggerMs
-            lastTriggerMs = nil
+            lastTriggerMs = nil // consume before the guards: a malformed gemini message still eats its boundary
 
             guard let messageID = message["id"] as? String else {
                 continue

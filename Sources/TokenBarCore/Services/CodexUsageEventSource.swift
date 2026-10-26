@@ -76,7 +76,7 @@ public struct CodexUsageEventSource: InspectableUsageEventSource, ResourceBudget
             watermarks: watermarks,
             referenceDate: referenceDate,
             resourceThrottle: resourceThrottle,
-            contextBytes: 1_048_576
+            contextBytes: JSONLWatermarkLoader.generationTimingContextBytes
         ) { lines, fileURL in
             let context = CodexUsageParser.sessionContext(fileURL: fileURL)
             let isArchived = archiveURL == fileURL

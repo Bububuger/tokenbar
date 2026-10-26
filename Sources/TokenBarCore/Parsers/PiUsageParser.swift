@@ -94,7 +94,7 @@ public enum PiUsageParser {
                 continue
             }
             let startMs = lastTriggerMs
-            lastTriggerMs = nil
+            lastTriggerMs = nil // consume before the abort/usage guards: a skipped response still eats its boundary
             // Skip aborted / errored turns — their usage is empty / unreliable
             // (mirrors pi's own getLastAssistantUsage gating).
             if let stop = messageDict["stopReason"] as? String, stop == "aborted" || stop == "error" {

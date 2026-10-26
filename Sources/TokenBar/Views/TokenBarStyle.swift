@@ -1437,7 +1437,6 @@ func tokenbarMirrorValue(
     case .sessions:
         "\(todaySessions)"
     case .outputSpeed:
-        // Per-response generation speed — nil until a timed response lands.
         (generationRateTokensPerSecond ?? 0) > 0
             ? tokenbarTokens(Int((generationRateTokensPerSecond ?? 0).rounded())) + " tok/s"
             : "—"

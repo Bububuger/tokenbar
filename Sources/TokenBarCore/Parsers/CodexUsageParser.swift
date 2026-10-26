@@ -252,7 +252,7 @@ public enum CodexUsageParser {
                 modelName = payload?["model"] as? String ?? modelName
                 lastEmittedUsage = nil
                 previousTotalUsage = nil
-                lastTriggerMs = nil
+                lastTriggerMs = nil // a pre-session trigger must not leak across session boundaries
                 if disposition == .applyWithMissingUnlockWarning {
                     warnings.append(CodexParseWarning(
                         sourcePath: sourcePath,

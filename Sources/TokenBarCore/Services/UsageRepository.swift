@@ -1439,6 +1439,8 @@ public struct UsageRepository: Sendable {
                     arguments: [event.modelName, event.id]
                 )
             }
+            // A context-line replay can re-emit an event with timing the
+            // first parse could not pair; backfill once, never overwrite.
             if event.generationStartMs != nil || event.generationEndMs != nil {
                 try db.execute(
                     sql: """

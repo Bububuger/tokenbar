@@ -545,6 +545,8 @@ public struct UsageEvent: Identifiable, Sendable, Hashable {
     public let sourcePath: String
     public let parser: ParserKind
     public let confidence: Double
+    /// Parsers set both endpoints or neither — a half-timed row must never
+    /// persist, because `generationDurationMs` treats either nil as untimed.
     public let generationStartMs: Int64?
     public let generationEndMs: Int64?
 

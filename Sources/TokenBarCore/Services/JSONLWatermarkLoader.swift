@@ -7,6 +7,12 @@ import Foundation
 /// `UsageSourceWarning` → tail-rest the throttle. This helper replaces all
 /// three copies so a fourth JSONL agent only needs a parse closure.
 public enum JSONLWatermarkLoader {
+    /// Lookbehind that covers a typical dispatch→response span: pairing
+    /// parsers need the trigger record even when the incremental slice begins
+    /// mid-turn. 1 MiB absorbs fat tool-result lines; beyond it the event
+    /// degrades to untimed rather than wrong.
+    public static let generationTimingContextBytes: Int64 = 1_048_576
+
     public static func load(
         files: [URL],
         agent: AgentKind,

@@ -40,6 +40,11 @@ public enum DshUsageParser {
         var events: [UsageEvent] = []
         var prompts: [PromptRecord] = []
         var warnings: [ParseWarning] = []
+        // A user/message record (any source.kind — injected context also
+        // dispatches a turn) is the generation boundary; the next
+        // assistant/message pairs against it and consumes it. assistant/attempt
+        // stream mirrors are not boundaries.
+        var lastTriggerMs: Int64?
 
         for line in lines {
             let text = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -54,6 +59,11 @@ public enum DshUsageParser {
             let seq = intValue(object["seq"])
             let timestamp = resolveTimestamp(object) ?? sessionCreatedAt ?? .distantPast
 
+            if eventType == "user/message",
+               let triggerTimestamp = resolveTimestamp(object) {
+                lastTriggerMs = triggerTimestamp.tokenBarMillisecondsSince1970
+            }
+
             switch eventType {
             case "session":
                 // Leading identity row. NOTE: id/createdAt/cwd are TOP-LEVEL
@@ -64,6 +74,10 @@ public enum DshUsageParser {
                 }
 
             case "assistant/message":
+                let startMs = lastTriggerMs
+                lastTriggerMs = nil
+                let endMs = timestamp.tokenBarMillisecondsSince1970
+                let generationStartMs = (startMs != nil && startMs! < endMs) ? startMs : nil
                 appendUsageEvent(
                     payload: payload,
                     object: object,
@@ -75,7 +89,9 @@ public enum DshUsageParser {
                     fileURL: fileURL,
                     lineNumber: line.lineNumber,
                     events: &events,
-                    warnings: &warnings
+                    warnings: &warnings,
+                    generationStartMs: generationStartMs,
+                    generationEndMs: generationStartMs != nil ? endMs : nil
                 )
 
             case "user/message":
@@ -120,7 +136,9 @@ public enum DshUsageParser {
         fileURL: URL,
         lineNumber: Int,
         events: inout [UsageEvent],
-        warnings: inout [ParseWarning]
+        warnings: inout [ParseWarning],
+        generationStartMs: Int64?,
+        generationEndMs: Int64?
     ) {
         guard let usage = payload["usage"] as? [String: Any] else {
             warnings.append(
@@ -168,7 +186,9 @@ public enum DshUsageParser {
                 modelName: modelName,
                 sourcePath: sourcePath,
                 parser: .dsh,
-                confidence: 1.0
+                confidence: 1.0,
+                generationStartMs: generationStartMs,
+                generationEndMs: generationEndMs
             )
         )
     }

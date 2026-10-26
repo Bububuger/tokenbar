@@ -14,6 +14,7 @@ public enum JSONLWatermarkLoader {
         watermarks: [String: SourceWatermark],
         referenceDate: Date,
         resourceThrottle: IndexingResourceThrottle?,
+        contextBytes: Int64 = 0,
         parse: (_ lines: [JSONLLineRecord], _ fileURL: URL) async -> ParseResult
     ) async throws -> UsageSourceLoadResult {
         var events: [UsageEvent] = []
@@ -28,6 +29,7 @@ public enum JSONLWatermarkLoader {
                 agent: agent,
                 watermark: watermarks[file.path],
                 now: referenceDate,
+                contextBytes: contextBytes,
                 resourceThrottle: resourceThrottle
             )
             warnings.append(contentsOf: incremental.warnings)

@@ -83,6 +83,48 @@ struct ClaudeUsageParserTests {
         #expect(result.events.map(\.projectPath) == ["/Users/dev/Documents/workspace/projects/my-cli-tool"])
     }
 
+    @Test
+    func generationTimingPairsAssistantWithItsUserParentUuid() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("session.jsonl")
+        try [
+            #"{"type":"user","uuid":"u1","timestamp":"2026-05-18T10:00:00.000Z","cwd":"/tmp/p","sessionId":"s1","message":{"role":"user","content":"hi"}}"#,
+            #"{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-05-18T10:00:02.500Z","cwd":"/tmp/p","sessionId":"s1","message":{"role":"assistant","model":"m","usage":{"input_tokens":10,"output_tokens":20,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#,
+        ].joined(separator: "\n").appending("\n").write(to: file, atomically: true, encoding: .utf8)
+
+        let result = try ClaudeUsageParser.parse(fileURL: file, fallbackProjectSlug: "p")
+        #expect(result.events.count == 1)
+        let event = result.events[0]
+        #expect(event.generationStartMs == ms("2026-05-18T10:00:00.000Z"))
+        #expect(event.generationEndMs == ms("2026-05-18T10:00:02.500Z"))
+        #expect(event.generationDurationMs == 2_500)
+    }
+
+    @Test
+    func generationTimingIsNilForMissingOrReversedParent() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("session.jsonl")
+        try [
+            // Parent record timestamped AFTER the child: not a valid window.
+            #"{"type":"user","uuid":"u1","timestamp":"2026-05-18T10:00:10.000Z","cwd":"/tmp/p","sessionId":"s1","message":{"role":"user","content":"hi"}}"#,
+            #"{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-05-18T10:00:02.500Z","cwd":"/tmp/p","sessionId":"s1","message":{"role":"assistant","model":"m","usage":{"input_tokens":10,"output_tokens":20,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#,
+            // parentUuid points at a record that never appears in this file.
+            #"{"type":"assistant","uuid":"a2","parentUuid":"absent","timestamp":"2026-05-18T10:00:03.000Z","cwd":"/tmp/p","sessionId":"s1","message":{"role":"assistant","model":"m","usage":{"input_tokens":10,"output_tokens":20,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#,
+            // No parentUuid at all.
+            #"{"type":"assistant","uuid":"a3","timestamp":"2026-05-18T10:00:04.000Z","cwd":"/tmp/p","sessionId":"s1","message":{"role":"assistant","model":"m","usage":{"input_tokens":10,"output_tokens":20,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#,
+        ].joined(separator: "\n").appending("\n").write(to: file, atomically: true, encoding: .utf8)
+
+        let result = try ClaudeUsageParser.parse(fileURL: file, fallbackProjectSlug: "p")
+        #expect(result.events.count == 3)
+        #expect(result.events.allSatisfy { $0.generationDurationMs == nil })
+    }
+
+    private func ms(_ iso: String) -> Int64 {
+        ClaudeUsageParser.parseTimestamp(iso)!.tokenBarMillisecondsSince1970
+    }
+
     private func fixtureURL(named name: String) throws -> URL {
         guard let url = fixtureBundle.url(forResource: name, withExtension: "jsonl") else {
             throw FixtureError.missing(name)

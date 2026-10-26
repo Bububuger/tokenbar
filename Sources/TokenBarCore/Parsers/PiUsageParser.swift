@@ -61,6 +61,11 @@ public enum PiUsageParser {
         var projectPath = initialProjectPath
         var events: [UsageEvent] = []
         var warnings: [PiParseWarning] = []
+        // Non-assistant message (user / toolResult) = dispatch boundary;
+        // the next assistant message pairs against it (dispatch →
+        // response-end, TTFT included) and consumes it, so a second
+        // assistant without a fresh trigger reports no timing.
+        var lastTriggerMs: Int64?
 
         for line in lines {
             let text = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -83,8 +88,13 @@ public enum PiUsageParser {
             }
             // Only assistant turns carry usage; user / toolResult messages don't.
             if let role = messageDict["role"] as? String, role != "assistant" {
+                if let timestamp = resolveTimestamp(messageDict: messageDict, outer: object) {
+                    lastTriggerMs = timestamp.tokenBarMillisecondsSince1970
+                }
                 continue
             }
+            let startMs = lastTriggerMs
+            lastTriggerMs = nil
             // Skip aborted / errored turns — their usage is empty / unreliable
             // (mirrors pi's own getLastAssistantUsage gating).
             if let stop = messageDict["stopReason"] as? String, stop == "aborted" || stop == "error" {
@@ -110,6 +120,8 @@ public enum PiUsageParser {
                 ))
                 continue
             }
+            let endMs = timestamp.tokenBarMillisecondsSince1970
+            let generationStartMs = (startMs != nil && startMs! < endMs) ? startMs : nil
 
             let messageID = (object["id"] as? String) ?? "line-\(line.lineNumber)"
             let resolvedSession = sessionID ?? fileURL.deletingPathExtension().lastPathComponent
@@ -134,7 +146,9 @@ public enum PiUsageParser {
                 actualCostUSD: reportedCost(usage["cost"]),
                 sourcePath: sourcePath,
                 parser: dialect.parser,
-                confidence: 1.0
+                confidence: 1.0,
+                generationStartMs: generationStartMs,
+                generationEndMs: generationStartMs != nil ? endMs : nil
             ))
         }
 

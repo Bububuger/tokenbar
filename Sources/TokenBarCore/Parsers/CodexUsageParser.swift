@@ -210,6 +210,12 @@ public enum CodexUsageParser {
         var previousTotalUsage: RawUsage?
         var parentReplayState = ParentReplayState()
         var latestTurnContextModel: String?
+        // Dispatch boundary (user/tool dispatch record) → next token_count:
+        // generation duration is wall-clock dispatch → response end, TTFT
+        // included. The trigger is consumed by the first emitted token_count;
+        // a second count without a fresh dispatch gets nil rather than a
+        // stale interval.
+        var lastTriggerMs: Int64?
         let hasReplayUnlockMarker = replayPreflight(in: lines).hasUnlockMarker
 
         for line in lines {
@@ -246,6 +252,7 @@ public enum CodexUsageParser {
                 modelName = payload?["model"] as? String ?? modelName
                 lastEmittedUsage = nil
                 previousTotalUsage = nil
+                lastTriggerMs = nil
                 if disposition == .applyWithMissingUnlockWarning {
                     warnings.append(CodexParseWarning(
                         sourcePath: sourcePath,
@@ -272,7 +279,13 @@ public enum CodexUsageParser {
                 modelName = latestTurnContextModel ?? owner.modelName
                 lastEmittedUsage = nil
                 previousTotalUsage = nil
+                lastTriggerMs = nil
                 continue
+            }
+
+            if !parentReplayState.isReplayingParent,
+               let triggerMs = CodexUsageParser.dispatchTriggerMs(object) {
+                lastTriggerMs = triggerMs
             }
 
             if !parentReplayState.isReplayingParent,
@@ -348,6 +361,10 @@ public enum CodexUsageParser {
             )
 
             let timestamp = parseTimestamp(object["timestamp"] as? String) ?? .distantPast
+            let endMs = timestamp.tokenBarMillisecondsSince1970
+            let startMs = lastTriggerMs
+            lastTriggerMs = nil
+            let generationStartMs = (startMs != nil && startMs! < endMs) ? startMs : nil
             let normalizedProjectPath = projectPath
             let normalizedProjectName = normalizedProjectPath
                 .map { URL(fileURLWithPath: $0).lastPathComponent }
@@ -370,7 +387,9 @@ public enum CodexUsageParser {
                     modelName: modelName,
                     sourcePath: sourcePath,
                     parser: .codex,
-                    confidence: 1.0
+                    confidence: 1.0,
+                    generationStartMs: generationStartMs,
+                    generationEndMs: generationStartMs != nil ? endMs : nil
                 )
             )
         }
@@ -402,6 +421,8 @@ public enum CodexUsageParser {
         var previousTotalUsage: RawUsage?
         var parentReplayState = ParentReplayState()
         var latestTurnContextModel: String?
+        // See sync parse: dispatch boundary → next token_count pairing.
+        var lastTriggerMs: Int64?
         let hasReplayUnlockMarker = replayPreflight(in: lines).hasUnlockMarker
         var sliceStartedAt = Date()
         var linesSinceThrottle = 0
@@ -423,6 +444,11 @@ public enum CodexUsageParser {
                 continue
             }
 
+            if !parentReplayState.isReplayingParent,
+               let triggerMs = CodexUsageParser.dispatchTriggerMs(object) {
+                lastTriggerMs = triggerMs
+            }
+
             if let type = object["type"] as? String, type == "session_meta" {
                 let payload = object["payload"] as? [String: Any]
                 let disposition = parentReplayState.observeSessionMetadata(
@@ -438,6 +464,7 @@ public enum CodexUsageParser {
                     modelName = payload?["model"] as? String ?? modelName
                     lastEmittedUsage = nil
                     previousTotalUsage = nil
+                    lastTriggerMs = nil
                     if disposition == .applyWithMissingUnlockWarning {
                         warnings.append(CodexParseWarning(
                             sourcePath: sourcePath,
@@ -459,6 +486,7 @@ public enum CodexUsageParser {
                 modelName = latestTurnContextModel ?? owner.modelName
                 lastEmittedUsage = nil
                 previousTotalUsage = nil
+                lastTriggerMs = nil
             } else if !parentReplayState.isReplayingParent,
                       let prompt = extractUserPrompt(
                 object: object,
@@ -520,6 +548,10 @@ public enum CodexUsageParser {
                         lineNumber: lineNumber
                     )
                     let timestamp = parseTimestamp(object["timestamp"] as? String) ?? .distantPast
+                    let endMs = timestamp.tokenBarMillisecondsSince1970
+                    let startMs = lastTriggerMs
+                    lastTriggerMs = nil
+                    let generationStartMs = (startMs != nil && startMs! < endMs) ? startMs : nil
                     let normalizedProjectPath = projectPath
                     let normalizedProjectName = normalizedProjectPath
                         .map { URL(fileURLWithPath: $0).lastPathComponent }
@@ -542,7 +574,9 @@ public enum CodexUsageParser {
                             modelName: modelName,
                             sourcePath: sourcePath,
                             parser: .codex,
-                            confidence: 1.0
+                            confidence: 1.0,
+                            generationStartMs: generationStartMs,
+                            generationEndMs: generationStartMs != nil ? endMs : nil
                         )
                     )
                 }
@@ -883,6 +917,39 @@ public enum CodexUsageParser {
             .appendingPathComponent(String(parts[2]), isDirectory: true)
             .appendingPathComponent(filename)
             .path
+    }
+
+    /// A record marks a model dispatch boundary — the start of a generation —
+    /// when it is dispatch input rather than an emitted response: a user
+    /// `message`, a tool/shell output (`*_output`, `local_shell_call`), or an
+    /// `event_msg` lifecycle marker (`task_started`, `turn_started`,
+    /// `user_message`). Assistant output (`message` with role assistant,
+    /// `reasoning`, `agent_message`) and `token_count` itself are not
+    /// boundaries.
+    private static func dispatchTriggerMs(_ object: [String: Any]) -> Int64? {
+        guard let type = object["type"] as? String,
+              let payload = object["payload"] as? [String: Any],
+              let payloadType = payload["type"] as? String else {
+            return nil
+        }
+        let isTrigger: Bool
+        switch type {
+        case "response_item":
+            isTrigger = (payloadType == "message" && (payload["role"] as? String) == "user")
+                || payloadType == "local_shell_call"
+                || payloadType.hasSuffix("_output")
+        case "event_msg":
+            isTrigger = payloadType == "task_started"
+                || payloadType == "turn_started"
+                || payloadType == "user_message"
+        default:
+            isTrigger = false
+        }
+        guard isTrigger,
+              let timestamp = parseTimestamp(object["timestamp"] as? String) else {
+            return nil
+        }
+        return timestamp.tokenBarMillisecondsSince1970
     }
 
     static func parseTimestamp(_ value: String?) -> Date? {

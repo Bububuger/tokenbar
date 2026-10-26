@@ -71,7 +71,8 @@ public enum JSONLIncrementalReader {
         sourceName: String,
         agent: AgentKind,
         watermark: SourceWatermark?,
-        now: Date = Date()
+        now: Date = Date(),
+        contextBytes: Int64 = 0
     ) throws -> JSONLIncrementalReadResult {
         let path = fileURL.path
         let current = try fingerprint(at: path)
@@ -100,7 +101,31 @@ public enum JSONLIncrementalReader {
         }
 
         let data = try Data(contentsOf: fileURL)
-        let safeStart = max(0, min(Int(startOffset), data.count))
+        var safeStart = max(0, min(Int(startOffset), data.count))
+        if contextBytes > 0, case .incremental(let offset) = strategy {
+            // Bounded lookbehind: context lines are re-parsed so parsers can
+            // pair dispatch boundaries with responses that cross the
+            // watermark. Re-emitted ids dedup via INSERT OR IGNORE.
+            safeStart = max(0, Int(offset - contextBytes))
+        }
+        if safeStart > 0, safeStart <= data.count, data[safeStart - 1] != 10 {
+            // A lookbehind window may land mid-line: drop the partial head
+            // so the first emitted line begins at a boundary and line
+            // numbers stay identical to a full re-parse.
+            if let newline = data[safeStart...].firstIndex(of: 10) {
+                safeStart = newline + 1
+            } else {
+                return emptyResult(
+                    path: path,
+                    agent: agent,
+                    current: current,
+                    now: now,
+                    cleanOffset: startOffset,
+                    reason: reason,
+                    sourceName: sourceName
+                )
+            }
+        }
         let prefixLineCount = safeStart == 0 ? 0 : data[..<safeStart].reduce(0) { count, byte in
             byte == 10 ? count + 1 : count
         }
@@ -198,6 +223,7 @@ public enum JSONLIncrementalReader {
         agent: AgentKind,
         watermark: SourceWatermark?,
         now: Date = Date(),
+        contextBytes: Int64 = 0,
         resourceThrottle: IndexingResourceThrottle?
     ) async throws -> JSONLIncrementalReadResult {
         let path = fileURL.path
@@ -226,7 +252,36 @@ public enum JSONLIncrementalReader {
             )
         }
 
-        let safeStart = max(0, min(Int(startOffset), Int(current.size)))
+        var safeStart = max(0, min(Int(startOffset), Int(current.size)))
+        if contextBytes > 0, case .incremental(let offset) = strategy {
+            // Bounded lookbehind: context lines are re-parsed so parsers can
+            // pair dispatch boundaries with responses that cross the
+            // watermark. Re-emitted ids dedup via INSERT OR IGNORE.
+            safeStart = max(0, Int(offset - contextBytes))
+        }
+        // Read one byte early so a mid-line lookbehind is detectable; the
+        // partial head is dropped so the first emitted line begins at a
+        // boundary and line numbers stay identical to a full re-parse.
+        let probeStart = safeStart > 0 ? safeStart - 1 : 0
+        var data = try readData(fileURL: fileURL, fromOffset: probeStart)
+        if safeStart > 0, !data.isEmpty {
+            if data[0] == 10 {
+                data = data.subdata(in: 1..<data.count)
+            } else if let newline = data.firstIndex(of: 10) {
+                safeStart += newline
+                data = data.subdata(in: (newline + 1)..<data.count)
+            } else {
+                return emptyResult(
+                    path: path,
+                    agent: agent,
+                    current: current,
+                    now: now,
+                    cleanOffset: startOffset,
+                    reason: reason,
+                    sourceName: sourceName
+                )
+            }
+        }
         let prefixLineCount = safeStart == 0
             ? 0
             : try await countNewlines(
@@ -234,7 +289,6 @@ public enum JSONLIncrementalReader {
                 upToOffset: safeStart,
                 resourceThrottle: resourceThrottle
             )
-        let data = try readData(fileURL: fileURL, fromOffset: safeStart)
 
         var lines: [JSONLLineRecord] = []
         var warnings: [UsageSourceWarning] = []

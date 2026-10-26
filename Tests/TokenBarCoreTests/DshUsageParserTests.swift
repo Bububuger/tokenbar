@@ -108,6 +108,46 @@ struct DshUsageParserTests {
     }
 
     @Test
+    func generationTimingPairsUserMessageWithAssistantMessage() {
+        let records = lines("""
+        {"type":"user/message","seq":1,"time":1790000000000,"data":{"source":{"kind":"user"},"content":"go"}}
+        {"type":"assistant/message","seq":2,"time":1790000002500,"data":{"usage":{"inputTokens":10,"outputTokens":5},"message":{"source":{"model":"m"}}}}
+        """)
+        let result = DshUsageParser.parse(
+            lines: records,
+            fileURL: URL(fileURLWithPath: "/tmp/dsh/" + Self.sessionID + "/session.v4.jsonl.zstd")
+        )
+
+        #expect(result.events.count == 1)
+        #expect(result.events[0].generationStartMs == 1_790_000_000_000)
+        #expect(result.events[0].generationEndMs == 1_790_000_002_500)
+        #expect(result.events[0].generationDurationMs == 2_500)
+    }
+
+    @Test
+    func generationTimingConsumesTriggerAndIgnoresAssistantAttempt() {
+        // The attempt mirror between dispatch and response neither sets nor
+        // consumes the boundary; the second assistant/message without a new
+        // user/message reports no timing.
+        let records = lines("""
+        {"type":"user/message","seq":1,"time":1790000000000,"data":{"source":{"kind":"user"},"content":"go"}}
+        {"type":"assistant/attempt","seq":2,"time":1790000001000,"data":{"attempt":1}}
+        {"type":"assistant/message","seq":3,"time":1790000002000,"data":{"usage":{"inputTokens":10,"outputTokens":5},"message":{"source":{"model":"m"}}}}
+        {"type":"assistant/message","seq":4,"time":1790000009000,"data":{"usage":{"inputTokens":20,"outputTokens":6},"message":{"source":{"model":"m"}}}}
+        """)
+        let result = DshUsageParser.parse(
+            lines: records,
+            fileURL: URL(fileURLWithPath: "/tmp/dsh/" + Self.sessionID + "/session.v4.jsonl.zstd")
+        )
+
+        #expect(result.events.count == 2)
+        #expect(result.events[0].generationStartMs == 1_790_000_000_000)
+        #expect(result.events[0].generationDurationMs == 2_000)
+        #expect(result.events[1].generationStartMs == nil)
+        #expect(result.events[1].generationEndMs == nil)
+    }
+
+    @Test
     func reparseIsIdempotent() throws {
         let file = try stagedFixture("dsh-v4", ext: "jsonl", session: Self.sessionID)
         let text = try String(contentsOf: file, encoding: .utf8)

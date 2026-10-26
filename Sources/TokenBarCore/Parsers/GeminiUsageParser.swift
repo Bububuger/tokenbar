@@ -59,11 +59,27 @@ public enum GeminiUsageParser {
         var events: [UsageEvent] = []
         var warnings: [UsageSourceWarning] = []
         var lastEventId: String?
+        // A user message is the dispatch boundary; the next gemini response
+        // pairs against it (dispatch → response-end, TTFT included) and
+        // consumes it — a second response without a fresh user message
+        // reports no timing rather than an adjacent-event interval.
+        var lastTriggerMs: Int64?
 
         for message in messages {
-            guard let type = message["type"] as? String, type == "gemini" else {
+            guard let type = message["type"] as? String else {
                 continue
             }
+            if type == "user" {
+                if let timestamp = parseTimestamp(message["timestamp"] as? String) {
+                    lastTriggerMs = timestamp.tokenBarMillisecondsSince1970
+                }
+                continue
+            }
+            guard type == "gemini" else {
+                continue
+            }
+            let startMs = lastTriggerMs
+            lastTriggerMs = nil
 
             guard let messageID = message["id"] as? String else {
                 continue
@@ -115,6 +131,8 @@ public enum GeminiUsageParser {
 
             let modelName = message["model"] as? String
             let timestamp = parseTimestamp(message["timestamp"] as? String) ?? .distantPast
+            let endMs = timestamp.tokenBarMillisecondsSince1970
+            let generationStartMs = (startMs != nil && startMs! < endMs) ? startMs : nil
             let event = UsageEvent(
                 id: "\(sourcePath)#\(messageID)",
                 agent: .geminiCLI,
@@ -134,7 +152,9 @@ public enum GeminiUsageParser {
                 modelName: modelName,
                 sourcePath: sourcePath,
                 parser: .gemini,
-                confidence: 1.0
+                confidence: 1.0,
+                generationStartMs: generationStartMs,
+                generationEndMs: generationStartMs != nil ? endMs : nil
             )
             events.append(event)
             lastEventId = messageID
@@ -170,6 +190,8 @@ public enum GeminiUsageParser {
         var events: [UsageEvent] = []
         var warnings: [UsageSourceWarning] = []
         var lastEventId: String?
+        // See JSON parse: user message → next gemini response pairing.
+        var lastTriggerMs: Int64?
 
         for line in content.components(separatedBy: .newlines) {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -186,9 +208,20 @@ public enum GeminiUsageParser {
 
             if obj["$set"] != nil { continue }
 
-            guard let type = obj["type"] as? String, type == "gemini" else {
+            guard let type = obj["type"] as? String else {
                 continue
             }
+            if type == "user" {
+                if let timestamp = parseTimestamp(obj["timestamp"] as? String) {
+                    lastTriggerMs = timestamp.tokenBarMillisecondsSince1970
+                }
+                continue
+            }
+            guard type == "gemini" else {
+                continue
+            }
+            let startMs = lastTriggerMs
+            lastTriggerMs = nil
             guard let messageID = obj["id"] as? String else {
                 continue
             }
@@ -231,6 +264,8 @@ public enum GeminiUsageParser {
 
             let modelName = obj["model"] as? String
             let timestamp = parseTimestamp(obj["timestamp"] as? String) ?? .distantPast
+            let endMs = timestamp.tokenBarMillisecondsSince1970
+            let generationStartMs = (startMs != nil && startMs! < endMs) ? startMs : nil
             let event = UsageEvent(
                 id: "\(sourcePath)#\(messageID)",
                 agent: .geminiCLI,
@@ -246,7 +281,9 @@ public enum GeminiUsageParser {
                 modelName: modelName,
                 sourcePath: sourcePath,
                 parser: .gemini,
-                confidence: 1.0
+                confidence: 1.0,
+                generationStartMs: generationStartMs,
+                generationEndMs: generationStartMs != nil ? endMs : nil
             )
             events.append(event)
             lastEventId = messageID

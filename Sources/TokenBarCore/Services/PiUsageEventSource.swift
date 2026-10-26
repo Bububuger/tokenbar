@@ -41,7 +41,8 @@ public struct PiUsageEventSource: InspectableUsageEventSource, ResourceBudgetedU
             sourceName: sourceName,
             watermarks: watermarks,
             referenceDate: referenceDate,
-            resourceThrottle: resourceThrottle
+            resourceThrottle: resourceThrottle,
+            contextBytes: 1_048_576
         ) { lines, fileURL in
             let context = PiUsageParser.sessionContext(fileURL: fileURL)
             return PiUsageParser.parse(

@@ -115,6 +115,49 @@ struct OpenCodeUsageParserTests {
     }
 
     @Test
+    func generationTimingComesFromPayloadTimeWindow() throws {
+        let fixture = try OpenCodeFixture.make { db in
+            try OpenCodeFixture.insertProject(db, id: "p1", worktree: "/Users/dev/x", name: "x")
+            try OpenCodeFixture.insertSession(db, id: "s1", projectID: "p1", timeCreated: 1_000)
+            try OpenCodeFixture.insertMessage(db,
+                id: "m1", sessionID: "s1", timeCreated: 1_772_546_000_000,
+                payload: .raw(#"{"role":"assistant","time":{"created":1772546000000,"completed":1772546002300},"modelID":"m","providerID":"p","tokens":{"input":10,"output":5}}"#))
+        }
+
+        let result = try OpenCodeUsageParser.parse(databaseURL: fixture.url)
+
+        let event = try #require(result.events.first)
+        #expect(event.generationStartMs == 1_772_546_000_000)
+        #expect(event.generationEndMs == 1_772_546_002_300)
+        #expect(event.generationDurationMs == 2_300)
+    }
+
+    @Test
+    func generationTimingRejectsMissingOrNonPositiveWindows() throws {
+        let fixture = try OpenCodeFixture.make { db in
+            try OpenCodeFixture.insertProject(db, id: "p1", worktree: "/Users/dev/x", name: "x")
+            try OpenCodeFixture.insertSession(db, id: "s1", projectID: "p1", timeCreated: 1_000)
+            try OpenCodeFixture.insertMessage(db,
+                id: "no-time", sessionID: "s1", timeCreated: 2_000,
+                payload: .raw(#"{"role":"assistant","modelID":"m","providerID":"p","tokens":{"input":1,"output":1}}"#))
+            try OpenCodeFixture.insertMessage(db,
+                id: "zero-created", sessionID: "s1", timeCreated: 3_000,
+                payload: .raw(#"{"role":"assistant","time":{"created":0,"completed":2000},"modelID":"m","providerID":"p","tokens":{"input":1,"output":1}}"#))
+            try OpenCodeFixture.insertMessage(db,
+                id: "zero-completed", sessionID: "s1", timeCreated: 4_000,
+                payload: .raw(#"{"role":"assistant","time":{"created":1000,"completed":0},"modelID":"m","providerID":"p","tokens":{"input":1,"output":1}}"#))
+            try OpenCodeFixture.insertMessage(db,
+                id: "completed-before", sessionID: "s1", timeCreated: 5_000,
+                payload: .raw(#"{"role":"assistant","time":{"created":2000,"completed":2000},"modelID":"m","providerID":"p","tokens":{"input":1,"output":1}}"#))
+        }
+
+        let result = try OpenCodeUsageParser.parse(databaseURL: fixture.url)
+
+        #expect(result.events.count == 4)
+        #expect(result.events.allSatisfy { $0.generationDurationMs == nil })
+    }
+
+    @Test
     func malformedDataProducesUserActionableWarning() throws {
         let fixture = try OpenCodeFixture.make { db in
             try OpenCodeFixture.insertProject(db, id: "p1", worktree: "/Users/dev/x", name: "x")
@@ -146,6 +189,7 @@ private enum OpenCodeFixture {
                        input: Int, output: Int, reasoning: Int?,
                        cacheRead: Int, cacheWrite: Int)
         case assistantNoTokens(providerID: String)
+        case raw(String)
     }
 
     static func make(_ populate: (Database) throws -> Void) throws -> Handle {
@@ -239,6 +283,8 @@ private enum OpenCodeFixture {
             return #"""
             {"role":"assistant","time":{"created":0,"completed":0},"modelID":"unknown","providerID":"\#(providerID)"}
             """#
+        case let .raw(json):
+            return json
         }
     }
 }

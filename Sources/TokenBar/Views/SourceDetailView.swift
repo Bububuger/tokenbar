@@ -94,6 +94,7 @@ struct SourceDetailView: View {
                         todayTokens: metrics.todaySummary.totalTokens,
                         totalTokens: metrics.rangeSummary.totalTokens,
                         todaySessions: metrics.todaySessionCount,
+                        burnRateTokensPerMinute: BurnRate(events: events, asOf: Date()).tokensPerMinute,
                         refreshState: refreshState,
                         onRefresh: onRefresh,
                         rangeLabel: tokenbarRangeShortLabel(selectedRange)

@@ -288,7 +288,6 @@ enum MenuBarMirrorMode: String, CaseIterable, Identifiable {
         }
     }
 
-    /// outputSpeed stays a greyed placeholder until the U2 metric ships.
     var isSelectable: Bool { self != .outputSpeed }
 }
 

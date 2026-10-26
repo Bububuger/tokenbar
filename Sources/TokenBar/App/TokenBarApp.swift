@@ -136,8 +136,8 @@ private struct TokenBarStatusItem: View {
             // budget (~14 mono chars), collapse to glyph-only rather than let
             // macOS truncate mid-number. Glyph remains so users still see
             // status colour.
-            // 30s tick re-evaluates the burn window between data refreshes so
-            // the rate decays as events age out (paused keeps the frozen text).
+            // 30s tick so the burn rate decays as events age out. Refreshes
+            // can be 30 min apart or manual-only.
             TimelineView(.periodic(from: .now, by: 30)) { _ in
                 if mirrorMode != .off, displayedMirror.count <= 14 {
                     // CL-P1-033: design canvas spec is 12.5pt mono (not 11pt).
@@ -154,8 +154,6 @@ private struct TokenBarStatusItem: View {
         }
         .onAppear { syncFrozenMirror() }
         .onChange(of: isPaused) { _, paused in
-            // Capture the value at the moment of pause; clear on resume so we
-            // immediately flow back to live snapshots.
             frozenMirror = paused ? liveMirror : nil
         }
         .onChange(of: mirrorModeRaw) { _, _ in

@@ -47,15 +47,10 @@ struct BurnRateTests {
     func windowIsHalfOpenAroundAsOf() {
         let windowStart = referenceDate.addingTimeInterval(-BurnRate.defaultWindow)
         let events = [
-            // Exactly at the window start: included.
             event(timestamp: windowStart, input: 10),
-            // Just inside the window: included.
             event(timestamp: windowStart.addingTimeInterval(1), input: 10),
-            // Older than the window: excluded.
             event(timestamp: windowStart.addingTimeInterval(-1), input: 1000),
-            // Exactly at asOf: excluded (half-open [start, asOf)).
             event(timestamp: referenceDate, input: 1000),
-            // Future-dated: excluded.
             event(timestamp: referenceDate.addingTimeInterval(60), input: 1000),
         ]
         let rate = BurnRate(events: events, asOf: referenceDate)
@@ -85,8 +80,6 @@ struct BurnRateTests {
         #expect(rate.totalTokens == 0)
         #expect(rate.tokensPerMinute == 0)
     }
-
-    // MARK: - helpers
 
     private func event(
         timestamp: Date,

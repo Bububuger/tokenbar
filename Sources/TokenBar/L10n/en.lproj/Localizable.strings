@@ -22,3 +22,7 @@
 "tb.refreshing" = "refreshing";
 "tb.stale" = "stale";
 "tb.failed" = "failed";
+"tb.rate.tab" = "Rate";
+"tb.rate.burn_header" = "Burn rate · 10m";
+"tb.rate.output_header" = "Output speed · 10m";
+"tb.rate.empty" = "No activity in the last 10 minutes.";

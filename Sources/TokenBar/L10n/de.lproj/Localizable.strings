@@ -22,3 +22,7 @@
 "tb.refreshing" = "aktualisiert";
 "tb.stale" = "veraltet";
 "tb.failed" = "fehlgeschlagen";
+"tb.rate.tab" = "Rate";
+"tb.rate.burn_header" = "Burnrate · 10m";
+"tb.rate.output_header" = "Ausgabetempo · 10m";
+"tb.rate.empty" = "Keine Aktivität in den letzten 10 Minuten.";

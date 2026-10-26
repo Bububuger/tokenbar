@@ -81,6 +81,17 @@ struct BurnRateTests {
         #expect(rate.tokensPerMinute == 0)
     }
 
+    @Test
+    func eventsOutsideWindowYieldZero() {
+        let events = [
+            event(timestamp: referenceDate.addingTimeInterval(-601), input: 5_000),
+            event(timestamp: referenceDate.addingTimeInterval(-60_000), input: 5_000),
+            event(timestamp: referenceDate, input: 5_000),
+        ]
+        let rate = BurnRate(events: events, asOf: referenceDate)
+        #expect(rate.totalTokens == 0)
+    }
+
     private func event(
         timestamp: Date,
         input: Int = 0,

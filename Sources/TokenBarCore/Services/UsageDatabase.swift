@@ -437,6 +437,15 @@ extension Date {
         Int64((timeIntervalSince1970 * 1_000).rounded())
     }
 
+    /// A watermark stored by rounding up lands ahead of the real file mtime,
+    /// which makes `JSONLIncrementalReader.decide` report "mtime regress" on
+    /// every checkpoint. Floor instead so the stored value never leads the
+    /// filesystem value. Event timestamps keep `.rounded()` above; truncating
+    /// them can underflow integer-ms inputs reconstructed through Double.
+    var tokenBarMillisecondsSince1970Floor: Int64 {
+        Int64((timeIntervalSince1970 * 1_000).rounded(.down))
+    }
+
     static func tokenBarDate(millisecondsSince1970 value: Int64) -> Date {
         Date(timeIntervalSince1970: TimeInterval(value) / 1_000)
     }

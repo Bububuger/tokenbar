@@ -24,6 +24,43 @@ struct Sprint9IncrementalTests {
         #expect(JSONLIncrementalReader.decide(current: FileFingerprint(inode: 11, size: 20, mtime: now), watermark: watermark) == .incremental(fromByteOffset: 10))
     }
 
+    /// Regression: a persisted `lastMtime` rounded above the real file mtime
+    /// made `decide` report "mtime regress" on every checkpoint for files
+    /// whose mtime carries a sub-millisecond fraction ≥0.5ms.
+    @Test
+    func persistedWatermarkMtimeNeverLeadsRealMtime() throws {
+        let repository = try UsageRepository(databaseURL: temporaryDatabaseURL())
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+        for (index, fractionMs) in [(0, 0.6), (1, 0.4)] {
+            let realMtime = Date(timeIntervalSince1970: 1_700_000_000.123 + fractionMs / 1_000)
+            let path = "/tmp/mtime-\(index).jsonl"
+            _ = try repository.insertCheckpoint(
+                trigger: "test",
+                startedAt: now,
+                endedAt: now,
+                events: [],
+                prompts: [],
+                nextWatermarks: [SourceWatermark(
+                    sourcePath: path,
+                    agent: .codex,
+                    lastMtime: realMtime,
+                    lastByteOffset: 10,
+                    lastEventId: nil,
+                    lastInode: 11,
+                    updatedAt: now
+                )],
+                warnings: [],
+                error: nil
+            )
+
+            let stored = try #require(try repository.watermark(for: path))
+            #expect(stored.lastMtime <= realMtime)
+            let current = FileFingerprint(inode: 11, size: 20, mtime: realMtime)
+            #expect(JSONLIncrementalReader.decide(current: current, watermark: stored) == .incremental(fromByteOffset: 10))
+        }
+    }
+
     @Test
     func jsonlReaderReadsOnlyAppendedCleanLinesAndRewindsPartialTrailingLine() throws {
         let fileURL = temporaryDirectory().appendingPathComponent("rollout-test.jsonl")

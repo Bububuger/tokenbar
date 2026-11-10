@@ -94,10 +94,10 @@ public enum AntigravityUsageParser {
     }
 
     private static func resolveTimestamp(_ object: [String: Any]) -> Date? {
-        if let n = object["timestamp"] as? NSNumber {
+        if let n = object["timestamp"] as? NSNumber ?? object["created_at"] as? NSNumber {
             return Date(timeIntervalSince1970: n.doubleValue / 1000.0)
         }
-        if let iso = object["timestamp"] as? String {
+        if let iso = object["timestamp"] as? String ?? object["created_at"] as? String {
             return ISO8601Fast.parseUTC(iso) ?? iso8601WithFractional.date(from: iso) ?? iso8601NoFractional.date(from: iso)
         }
         return nil

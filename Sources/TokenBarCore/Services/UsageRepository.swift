@@ -1501,7 +1501,7 @@ public struct UsageRepository: Sendable {
             arguments: [
                 watermark.sourcePath,
                 watermark.agent.rawValue,
-                watermark.lastMtime.tokenBarMillisecondsSince1970,
+                watermark.lastMtime.tokenBarMillisecondsSince1970Floor,
                 watermark.lastByteOffset,
                 watermark.lastEventId,
                 watermark.updatedAt.tokenBarMillisecondsSince1970,

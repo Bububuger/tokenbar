@@ -62,6 +62,34 @@ struct AntigravityUsageParserTests {
         #expect(result.warnings.isEmpty)
     }
 
+    /// Real agy/antigravity-cli lines carry `created_at` instead of
+    /// `timestamp`; both spellings must produce a real event date.
+    @Test
+    func parsesCreatedAtAsTimestampFallback() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("antigravity-ts-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("session.jsonl")
+        let text = """
+        {"id":"iso-frac","created_at":"2027-01-15T08:56:07.890Z","input_tokens":10,"output_tokens":5}
+        {"id":"iso-plain","created_at":"2027-01-15T08:56:07Z","input_tokens":10,"output_tokens":5}
+        {"id":"epoch-ms","created_at":1800000000000,"input_tokens":10,"output_tokens":5}
+        {"id":"both","timestamp":1800000000000,"created_at":"2027-01-15T08:56:07.890Z","input_tokens":10,"output_tokens":5}
+        {"id":"none","input_tokens":10,"output_tokens":5}
+        """
+        try text.write(to: file, atomically: true, encoding: .utf8)
+
+        let result = AntigravityUsageParser.parse(lines: lines(text), fileURL: file)
+        #expect(result.events.count == 5)
+        let byId = Dictionary(uniqueKeysWithValues: result.events.map { ($0.id, $0) })
+
+        #expect(byId["\(file.path)#antigravity#iso-frac"]?.timestamp != .distantPast)
+        #expect(byId["\(file.path)#antigravity#iso-plain"]?.timestamp != .distantPast)
+        #expect(byId["\(file.path)#antigravity#epoch-ms"]?.timestamp == Date(timeIntervalSince1970: 1_800_000_000))
+        #expect(byId["\(file.path)#antigravity#both"]?.timestamp == Date(timeIntervalSince1970: 1_800_000_000))
+        #expect(byId["\(file.path)#antigravity#none"]?.timestamp == .distantPast)
+    }
+
     private func total(_ e: UsageEvent) -> Int {
         e.inputTokens + e.outputTokens + e.cacheReadTokens + e.cacheCreationTokens + (e.reasoningTokens ?? 0)
     }

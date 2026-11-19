@@ -23,16 +23,15 @@ public enum AntigravityDataSource {
             for root in roots {
                 let expanded = CodexDataSource.expandHome(in: root)
                 let originalRoot = URL(fileURLWithPath: expanded, isDirectory: true)
-                    .standardizedFileURL
+                // Only the root directory entry itself — not parents like
+                // macOS `/var` → `/private/var` — decides symlink handling.
+                // Resolving parents would rewrite sourcePath spellings and
+                // break historical event ids / watermarks.
+                let rootIsSymlink = isSymlinkDirectory(originalRoot, fileManager: fileManager)
                 let resolvedRoot = originalRoot.resolvingSymlinksInPath().standardizedFileURL
                 guard resolvedRoots.insert(resolvedRoot.path).inserted else { continue }
 
-                // Symlink roots must enumerate the real directory (otherwise
-                // children are missed). Non-symlink roots keep their original
-                // spelling so historical event ids / watermarks stay stable.
-                let enumerateRoot = originalRoot.path == resolvedRoot.path
-                    ? originalRoot.path
-                    : resolvedRoot.path
+                let enumerateRoot = rootIsSymlink ? resolvedRoot.path : originalRoot.path
                 for file in uncachedDiscover(rootDirectory: enumerateRoot, fileManager: fileManager) {
                     let resolvedFile = file.resolvingSymlinksInPath().standardizedFileURL.path
                     guard seenResolvedFiles.insert(resolvedFile).inserted else { continue }
@@ -43,6 +42,11 @@ public enum AntigravityDataSource {
         }
     }
 
+    private static func isSymlinkDirectory(_ url: URL, fileManager: FileManager) -> Bool {
+        let attrs = try? fileManager.attributesOfItem(atPath: url.path)
+        return (attrs?[.type] as? FileAttributeType) == .typeSymbolicLink
+    }
+
     private static func uncachedDiscover(
         rootDirectory: String,
         fileManager: FileManager
@@ -51,6 +55,8 @@ public enum AntigravityDataSource {
         let root = URL(fileURLWithPath: expandedRoot, isDirectory: true)
 
         var isDirectory = ObjCBool(false)
+        // Follow the final symlink for existence so a symlink root that we
+        // already resolved still validates as a directory.
         guard fileManager.fileExists(atPath: root.path, isDirectory: &isDirectory),
               isDirectory.boolValue else {
             return []

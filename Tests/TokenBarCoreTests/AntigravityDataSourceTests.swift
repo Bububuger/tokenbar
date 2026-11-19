@@ -128,7 +128,8 @@ struct AntigravityDataSourceTests {
         #expect(discovered.resolvingSymlinksInPath().standardizedFileURL == file.standardizedFileURL)
     }
 
-    /// Non-symlink roots keep their original path spelling (no forced canonicalize).
+    /// Non-symlink roots keep their original path spelling (do not rewrite
+    /// through parent symlinks such as macOS `/var` → `/private/var`).
     @Test
     func nonSymlinkRootKeepsOriginalPathSpelling() throws {
         DiscoveryCache.reset()
@@ -139,6 +140,36 @@ struct AntigravityDataSourceTests {
         let files = try AntigravityDataSource.discoverSessionFiles(roots: [root.path])
         #expect(files.count == 1)
         let discovered = try #require(files.first)
+        #expect(discovered.path == file.path)
+        #expect(discovered.path.hasPrefix(root.path))
+    }
+
+    /// An ancestor symlink must not rewrite returned paths when the root
+    /// directory entry itself is a real directory (linkParent/root).
+    @Test
+    func ancestorSymlinkKeepsRootSpelling() throws {
+        DiscoveryCache.reset()
+        let base = try temporaryDirectory()
+        let realParent = base.appendingPathComponent("realParent", isDirectory: true)
+        try FileManager.default.createDirectory(at: realParent, withIntermediateDirectories: true)
+        let linkParent = base.appendingPathComponent("linkParent", isDirectory: true)
+        try FileManager.default.createSymbolicLink(
+            atPath: linkParent.path,
+            withDestinationPath: realParent.path
+        )
+
+        let root = linkParent.appendingPathComponent("root", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let file = root.appendingPathComponent("session.jsonl")
+        try Data("{}".utf8).write(to: file)
+
+        let rootAttrs = try FileManager.default.attributesOfItem(atPath: root.path)
+        #expect((rootAttrs[.type] as? FileAttributeType) != .typeSymbolicLink)
+
+        let files = try AntigravityDataSource.discoverSessionFiles(roots: [root.path])
+        #expect(files.count == 1)
+        let discovered = try #require(files.first)
+        #expect(discovered.path.hasPrefix(root.path))
         #expect(discovered.path == file.path)
     }
 

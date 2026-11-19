@@ -64,12 +64,15 @@ struct AntigravityDataSourceTests {
         }
 
         let ids = Set(events.map(\.id))
-        #expect(ids == [
+        let expectedIDs: Set<String> = [
             "\(transcript.path)#antigravity#hidden-ok",
             "\(session.path)#antigravity#plain-ok",
-        ])
-        #expect(events.map { $0.inputTokens + $0.outputTokens }.reduce(0, +) == 11 + 2 + 7 + 3)
-        #expect(!ids.contains(where: { $0.contains("noise") }))
+        ]
+        #expect(ids == expectedIDs)
+        let tokenTotal = events.reduce(0) { $0 + $1.inputTokens + $1.outputTokens }
+        #expect(tokenTotal == 23)
+        let hasNoise = ids.contains(where: { $0.contains("noise") })
+        #expect(!hasNoise)
     }
 
     @Test

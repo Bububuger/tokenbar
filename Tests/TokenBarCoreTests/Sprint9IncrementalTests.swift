@@ -142,7 +142,8 @@ struct Sprint9IncrementalTests {
             }
             let cleanOffset = try #require(cleanOffsets[fileURL.path])
             let lastEventId = seededEvents.first(where: { $0.sourcePath == fileURL.path })?.id
-            try queue.write { db in
+            // Prefer the async DatabaseQueue.write overload inside async tests.
+            try await queue.write { db in
                 try db.execute(
                     sql: """
                     INSERT INTO source_watermarks
@@ -161,8 +162,9 @@ struct Sprint9IncrementalTests {
             }
         }
 
-        let baselineIDs = Set(try repository.allEvents().map(\.id))
-        let baselineTokens = try repository.allEvents().map(totalTokens).reduce(0, +)
+        let baselineEvents = try repository.allEvents()
+        let baselineIDs = Set(baselineEvents.map(\.id))
+        let baselineTokens = baselineEvents.reduce(0) { $0 + totalTokens($1) }
         #expect(baselineIDs.count == allSeeded.count)
 
         let source = AntigravityUsageEventSource(roots: [root.path])
@@ -176,15 +178,16 @@ struct Sprint9IncrementalTests {
                 referenceDate: now,
                 calendar: Calendar(identifier: .gregorian)
             )
-            let mtimeWarnings = loaded.warnings.filter {
+            let mtimeWarningCount = loaded.warnings.filter {
                 $0.message.localizedCaseInsensitiveContains("mtime regress")
-            }
-            mtimeRegressByCheckpoint.append(mtimeWarnings.count)
+            }.count
+            mtimeRegressByCheckpoint.append(mtimeWarningCount)
             // Partial-line warnings may legitimately repeat; do not treat them
             // as the mtime-regress failure mode under test.
-            #expect(loaded.warnings.contains(where: {
+            let hasPartialWarning = loaded.warnings.contains(where: {
                 $0.message.localizedCaseInsensitiveContains("partial trailing JSONL line")
-            }))
+            })
+            #expect(hasPartialWarning)
 
             let summary = try repository.insertCheckpoint(
                 trigger: "upgrade-\(checkpointIndex)",
@@ -205,11 +208,16 @@ struct Sprint9IncrementalTests {
         #expect(totalEventsAdded == 0)
 
         let finalEvents = try repository.allEvents()
-        #expect(Set(finalEvents.map(\.id)) == baselineIDs)
-        #expect(finalEvents.map(totalTokens).reduce(0, +) == baselineTokens)
-        #expect(finalEvents.contains(where: { $0.id == "preserve-codex" && $0.agent == .codex }))
-        #expect(finalEvents.contains(where: { $0.id == "preserve-devin" && $0.agent == .devin }))
-        #expect(finalEvents.contains(where: { $0.id == "preserve-grok" && $0.agent == .grok }))
+        let finalIDs = Set(finalEvents.map(\.id))
+        let finalTokens = finalEvents.reduce(0) { $0 + totalTokens($1) }
+        #expect(finalIDs == baselineIDs)
+        #expect(finalTokens == baselineTokens)
+        let preservedCodex = finalEvents.contains { $0.id == "preserve-codex" && $0.agent == .codex }
+        let preservedDevin = finalEvents.contains { $0.id == "preserve-devin" && $0.agent == .devin }
+        let preservedGrok = finalEvents.contains { $0.id == "preserve-grok" && $0.agent == .grok }
+        #expect(preservedCodex)
+        #expect(preservedDevin)
+        #expect(preservedGrok)
 
         // After upgrade, stored watermarks must not lead real mtimes.
         for spec in specs {
@@ -218,7 +226,8 @@ struct Sprint9IncrementalTests {
             let realMtime = try #require(realMtimes[fileURL.path])
             #expect(stored.lastMtime <= realMtime)
             let current = try JSONLIncrementalReader.fingerprint(at: fileURL.path)
-            #expect(JSONLIncrementalReader.decide(current: current, watermark: stored) == .incremental(fromByteOffset: stored.lastByteOffset))
+            let strategy = JSONLIncrementalReader.decide(current: current, watermark: stored)
+            #expect(strategy == .incremental(fromByteOffset: stored.lastByteOffset))
         }
     }
 

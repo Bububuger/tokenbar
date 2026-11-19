@@ -87,10 +87,12 @@ struct AntigravityDataSourceTests {
         try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: real.path)
 
         let files = try AntigravityDataSource.discoverSessionFiles(roots: [real.path, link.path])
-        #expect(files.map(\.standardizedFileURL) == [file.standardizedFileURL])
+        #expect(files.count == 1)
+        let discovered = try #require(files.first)
+        #expect(discovered.standardizedFileURL == file.standardizedFileURL)
     }
 
-    /// Reversed alias order still yields one file; spelling follows the first root.
+    /// Reversed alias order still yields one file.
     @Test
     func deduplicatesReversedSymlinkRootOrder() throws {
         DiscoveryCache.reset()
@@ -103,8 +105,41 @@ struct AntigravityDataSourceTests {
         try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: real.path)
 
         let files = try AntigravityDataSource.discoverSessionFiles(roots: [link.path, real.path])
-        let resolvedDiscovered = files.map { $0.resolvingSymlinksInPath().standardizedFileURL }
-        #expect(resolvedDiscovered == [file.standardizedFileURL])
+        #expect(files.count == 1)
+        let discovered = try #require(files.first)
+        #expect(discovered.resolvingSymlinksInPath().standardizedFileURL == file.standardizedFileURL)
+    }
+
+    /// A symlink root alone must still discover sessions via the real directory.
+    @Test
+    func discoversSessionsThroughSymlinkRootAlone() throws {
+        DiscoveryCache.reset()
+        let base = try temporaryDirectory()
+        let real = base.appendingPathComponent("real", isDirectory: true)
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        let file = real.appendingPathComponent("session.jsonl")
+        try Data("{}".utf8).write(to: file)
+        let link = base.appendingPathComponent("link", isDirectory: true)
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: real.path)
+
+        let files = try AntigravityDataSource.discoverSessionFiles(roots: [link.path])
+        #expect(files.count == 1)
+        let discovered = try #require(files.first)
+        #expect(discovered.resolvingSymlinksInPath().standardizedFileURL == file.standardizedFileURL)
+    }
+
+    /// Non-symlink roots keep their original path spelling (no forced canonicalize).
+    @Test
+    func nonSymlinkRootKeepsOriginalPathSpelling() throws {
+        DiscoveryCache.reset()
+        let root = try temporaryDirectory()
+        let file = root.appendingPathComponent("session.jsonl")
+        try Data("{}".utf8).write(to: file)
+
+        let files = try AntigravityDataSource.discoverSessionFiles(roots: [root.path])
+        #expect(files.count == 1)
+        let discovered = try #require(files.first)
+        #expect(discovered.path == file.path)
     }
 
     /// Overlapping but unequal roots must not return the same file twice.
@@ -118,8 +153,9 @@ struct AntigravityDataSourceTests {
         try Data("{}".utf8).write(to: file)
 
         let files = try AntigravityDataSource.discoverSessionFiles(roots: [root.path, nested.path])
-        let resolvedDiscovered = files.map { $0.resolvingSymlinksInPath().standardizedFileURL }
-        #expect(resolvedDiscovered == [file.standardizedFileURL])
+        #expect(files.count == 1)
+        let discovered = try #require(files.first)
+        #expect(discovered.resolvingSymlinksInPath().standardizedFileURL == file.standardizedFileURL)
     }
 
     @Test

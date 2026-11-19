@@ -17,18 +17,23 @@ public enum AntigravityDataSource {
         return try DiscoveryCache.cached(key: "antigravity|\(roots.joined(separator: ","))") {
             var files: [URL] = []
             var resolvedRoots = Set<String>()
+            // Shared across every root in this call so overlapping roots
+            // (e.g. root + root/brain/session-a) cannot double-emit a file.
             var seenResolvedFiles = Set<String>()
             for root in roots {
-                // A root that resolves to an already-scanned path (symlink or
-                // spelling difference) must not double-count its files.
-                let resolvedRoot = URL(
-                    fileURLWithPath: CodexDataSource.expandHome(in: root),
-                    isDirectory: true
-                ).resolvingSymlinksInPath().standardizedFileURL.path
-                guard resolvedRoots.insert(resolvedRoot).inserted else { continue }
-                // Enumerate the resolved directory so symlink roots still yield
-                // children; keep first-seen path spelling for event-id stability.
-                for file in uncachedDiscover(rootDirectory: resolvedRoot, fileManager: fileManager) {
+                let expanded = CodexDataSource.expandHome(in: root)
+                let originalRoot = URL(fileURLWithPath: expanded, isDirectory: true)
+                    .standardizedFileURL
+                let resolvedRoot = originalRoot.resolvingSymlinksInPath().standardizedFileURL
+                guard resolvedRoots.insert(resolvedRoot.path).inserted else { continue }
+
+                // Symlink roots must enumerate the real directory (otherwise
+                // children are missed). Non-symlink roots keep their original
+                // spelling so historical event ids / watermarks stay stable.
+                let enumerateRoot = originalRoot.path == resolvedRoot.path
+                    ? originalRoot.path
+                    : resolvedRoot.path
+                for file in uncachedDiscover(rootDirectory: enumerateRoot, fileManager: fileManager) {
                     let resolvedFile = file.resolvingSymlinksInPath().standardizedFileURL.path
                     guard seenResolvedFiles.insert(resolvedFile).inserted else { continue }
                     files.append(file)
@@ -44,7 +49,6 @@ public enum AntigravityDataSource {
     ) -> [URL] {
         let expandedRoot = CodexDataSource.expandHome(in: rootDirectory)
         let root = URL(fileURLWithPath: expandedRoot, isDirectory: true)
-            .resolvingSymlinksInPath()
 
         var isDirectory = ObjCBool(false)
         guard fileManager.fileExists(atPath: root.path, isDirectory: &isDirectory),

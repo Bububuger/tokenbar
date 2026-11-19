@@ -17,15 +17,22 @@ public enum AntigravityDataSource {
         return try DiscoveryCache.cached(key: "antigravity|\(roots.joined(separator: ","))") {
             var files: [URL] = []
             var resolvedRoots = Set<String>()
+            var seenResolvedFiles = Set<String>()
             for root in roots {
                 // A root that resolves to an already-scanned path (symlink or
                 // spelling difference) must not double-count its files.
-                let resolved = URL(
+                let resolvedRoot = URL(
                     fileURLWithPath: CodexDataSource.expandHome(in: root),
                     isDirectory: true
                 ).resolvingSymlinksInPath().standardizedFileURL.path
-                guard resolvedRoots.insert(resolved).inserted else { continue }
-                files.append(contentsOf: uncachedDiscover(rootDirectory: root, fileManager: fileManager))
+                guard resolvedRoots.insert(resolvedRoot).inserted else { continue }
+                // Enumerate the resolved directory so symlink roots still yield
+                // children; keep first-seen path spelling for event-id stability.
+                for file in uncachedDiscover(rootDirectory: resolvedRoot, fileManager: fileManager) {
+                    let resolvedFile = file.resolvingSymlinksInPath().standardizedFileURL.path
+                    guard seenResolvedFiles.insert(resolvedFile).inserted else { continue }
+                    files.append(file)
+                }
             }
             return files.sorted { $0.path < $1.path }
         }
@@ -37,6 +44,7 @@ public enum AntigravityDataSource {
     ) -> [URL] {
         let expandedRoot = CodexDataSource.expandHome(in: rootDirectory)
         let root = URL(fileURLWithPath: expandedRoot, isDirectory: true)
+            .resolvingSymlinksInPath()
 
         var isDirectory = ObjCBool(false)
         guard fileManager.fileExists(atPath: root.path, isDirectory: &isDirectory),
@@ -56,7 +64,6 @@ public enum AntigravityDataSource {
         }
 
         var files: [URL] = []
-        var seenResolvedFiles = Set<String>()
         for case let url as URL in enumerator {
             let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
             if values?.isDirectory == true {
@@ -68,16 +75,15 @@ public enum AntigravityDataSource {
                 }
                 continue
             }
-            guard values?.isRegularFile == true,
-                  url.pathExtension.lowercased() == "jsonl",
+            guard url.pathExtension.lowercased() == "jsonl",
                   !url.lastPathComponent.hasPrefix(".") else {
                 continue
             }
-            // Overlapping roots (e.g. root + root/brain) can yield the same
-            // inode via different spellings in one call; keep the first path
-            // so event ids stay stable and we do not double-insert.
-            let resolved = url.resolvingSymlinksInPath().standardizedFileURL.path
-            guard seenResolvedFiles.insert(resolved).inserted else { continue }
+            // resourceValues can omit isRegularFile for some symlink spellings;
+            // only reject when the filesystem explicitly says it is not a file.
+            if values?.isRegularFile == false {
+                continue
+            }
             files.append(url)
         }
         return files

@@ -103,8 +103,8 @@ struct AntigravityDataSourceTests {
         try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: real.path)
 
         let files = try AntigravityDataSource.discoverSessionFiles(roots: [link.path, real.path])
-        #expect(files.count == 1)
-        #expect(files[0].resolvingSymlinksInPath().standardizedFileURL == file.standardizedFileURL)
+        let resolvedDiscovered = files.map { $0.resolvingSymlinksInPath().standardizedFileURL }
+        #expect(resolvedDiscovered == [file.standardizedFileURL])
     }
 
     /// Overlapping but unequal roots must not return the same file twice.
@@ -118,7 +118,8 @@ struct AntigravityDataSourceTests {
         try Data("{}".utf8).write(to: file)
 
         let files = try AntigravityDataSource.discoverSessionFiles(roots: [root.path, nested.path])
-        #expect(files.map(\.standardizedFileURL) == [file.standardizedFileURL])
+        let resolvedDiscovered = files.map { $0.resolvingSymlinksInPath().standardizedFileURL }
+        #expect(resolvedDiscovered == [file.standardizedFileURL])
     }
 
     @Test

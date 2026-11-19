@@ -8,6 +8,9 @@ import Foundation
 /// `cache_read_tokens|cacheReadTokens`, `cache_write_tokens|cacheWriteTokens|cacheCreationTokens`.
 /// `inputIncludesCached == false`.
 ///
+/// Timestamps: a valid `timestamp` (epoch ms or ISO-8601) always wins; `created_at`
+/// is used only when `timestamp` is absent or unparseable.
+///
 /// Implemented as a NATIVE parser (not declarative) so usage is attributed to
 /// `AgentKind.antigravity` rather than the generic `.custom` agent —
 /// see CONTRACT.md§AgentKind.
@@ -93,12 +96,28 @@ public enum AntigravityUsageParser {
         return nil
     }
 
+    /// Field precedence: a valid `timestamp` (epoch ms number or ISO-8601 string)
+    /// always wins. Fall back to `created_at` only when `timestamp` is absent or
+    /// unparseable. An invalid `timestamp` therefore yields to a valid
+    /// `created_at`; when both are missing/unparseable the caller uses
+    /// `.distantPast`. Valid timestamp forms keep their existing meaning
+    /// (epoch milliseconds for numbers; ISO-8601 for strings).
     private static func resolveTimestamp(_ object: [String: Any]) -> Date? {
-        if let n = object["timestamp"] as? NSNumber {
+        if let date = parseTimestampValue(object["timestamp"]) {
+            return date
+        }
+        return parseTimestampValue(object["created_at"])
+    }
+
+    private static func parseTimestampValue(_ raw: Any?) -> Date? {
+        guard let raw else { return nil }
+        if let n = raw as? NSNumber {
             return Date(timeIntervalSince1970: n.doubleValue / 1000.0)
         }
-        if let iso = object["timestamp"] as? String {
-            return ISO8601Fast.parseUTC(iso) ?? iso8601WithFractional.date(from: iso) ?? iso8601NoFractional.date(from: iso)
+        if let iso = raw as? String {
+            return ISO8601Fast.parseUTC(iso)
+                ?? iso8601WithFractional.date(from: iso)
+                ?? iso8601NoFractional.date(from: iso)
         }
         return nil
     }

@@ -62,6 +62,49 @@ struct AntigravityUsageParserTests {
         #expect(result.warnings.isEmpty)
     }
 
+    /// Real agy/antigravity-cli lines carry `created_at` instead of
+    /// `timestamp`; both spellings must produce a real event date.
+    /// A valid `timestamp` always wins over `created_at` regardless of type.
+    @Test
+    func parsesCreatedAtAsTimestampFallback() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("antigravity-ts-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("session.jsonl")
+        let text = """
+        {"id":"iso-frac","created_at":"2027-01-15T08:56:07.890Z","input_tokens":10,"output_tokens":5}
+        {"id":"iso-plain","created_at":"2027-01-15T08:56:07Z","input_tokens":10,"output_tokens":5}
+        {"id":"epoch-ms","created_at":1800000000000,"input_tokens":10,"output_tokens":5}
+        {"id":"both-num-ts-iso-ca","timestamp":1700000000000,"created_at":"2027-01-15T08:56:07.890Z","input_tokens":10,"output_tokens":5}
+        {"id":"both-iso-ts-num-ca","timestamp":"2023-11-14T22:13:20Z","created_at":1800000000000,"input_tokens":10,"output_tokens":5}
+        {"id":"invalid-ts-valid-ca","timestamp":"not-a-date","created_at":1800000000000,"input_tokens":10,"output_tokens":5}
+        {"id":"none","input_tokens":10,"output_tokens":5}
+        """
+        try text.write(to: file, atomically: true, encoding: .utf8)
+
+        let result = AntigravityUsageParser.parse(lines: lines(text), fileURL: file)
+        #expect(result.events.count == 7)
+        let byId = Dictionary(uniqueKeysWithValues: result.events.map { ($0.id, $0) })
+
+        let isoFrac = try #require(ISO8601Fast.parseUTC("2027-01-15T08:56:07.890Z"))
+        let isoPlain = try #require(ISO8601Fast.parseUTC("2027-01-15T08:56:07Z"))
+        let epochMs = Date(timeIntervalSince1970: 1_800_000_000)
+        let tsEpoch = Date(timeIntervalSince1970: 1_700_000_000)
+        let tsIso = try #require(ISO8601Fast.parseUTC("2023-11-14T22:13:20Z"))
+
+        #expect(byId["\(file.path)#antigravity#iso-frac"]?.timestamp == isoFrac)
+        #expect(byId["\(file.path)#antigravity#iso-plain"]?.timestamp == isoPlain)
+        #expect(byId["\(file.path)#antigravity#epoch-ms"]?.timestamp == epochMs)
+        // Numeric timestamp beats ISO created_at.
+        #expect(byId["\(file.path)#antigravity#both-num-ts-iso-ca"]?.timestamp == tsEpoch)
+        // ISO timestamp beats numeric created_at (must not prefer any-number-first).
+        #expect(byId["\(file.path)#antigravity#both-iso-ts-num-ca"]?.timestamp == tsIso)
+        // Unparseable timestamp falls back to created_at.
+        #expect(byId["\(file.path)#antigravity#invalid-ts-valid-ca"]?.timestamp == epochMs)
+        #expect(byId["\(file.path)#antigravity#none"]?.timestamp == .distantPast)
+        #expect(tsIso == tsEpoch)
+    }
+
     private func total(_ e: UsageEvent) -> Int {
         e.inputTokens + e.outputTokens + e.cacheReadTokens + e.cacheCreationTokens + (e.reasoningTokens ?? 0)
     }

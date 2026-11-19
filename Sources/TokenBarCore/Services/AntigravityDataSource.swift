@@ -23,19 +23,27 @@ public enum AntigravityDataSource {
             for root in roots {
                 let expanded = CodexDataSource.expandHome(in: root)
                 let originalRoot = URL(fileURLWithPath: expanded, isDirectory: true)
-                // Only the root directory entry itself — not parents like
-                // macOS `/var` → `/private/var` — decides symlink handling.
-                // Resolving parents would rewrite sourcePath spellings and
-                // break historical event ids / watermarks.
+                // Only the root directory entry itself — not ancestors like
+                // macOS `/var` → `/private/var` — counts as a "symlink root".
                 let rootIsSymlink = isSymlinkDirectory(originalRoot, fileManager: fileManager)
                 let resolvedRoot = originalRoot.resolvingSymlinksInPath().standardizedFileURL
                 guard resolvedRoots.insert(resolvedRoot.path).inserted else { continue }
 
-                let enumerateRoot = rootIsSymlink ? resolvedRoot.path : originalRoot.path
-                for file in uncachedDiscover(rootDirectory: enumerateRoot, fileManager: fileManager) {
+                // Always walk the resolved directory (enumerator itself may
+                // canonicalize). Return paths under the caller's spelling when
+                // the root entry is not a symlink so historical event ids stay
+                // stable; symlink roots return the resolved spelling.
+                let returnRootPath = rootIsSymlink ? resolvedRoot.path : originalRoot.path
+                for file in uncachedDiscover(rootDirectory: resolvedRoot.path, fileManager: fileManager) {
                     let resolvedFile = file.resolvingSymlinksInPath().standardizedFileURL.path
                     guard seenResolvedFiles.insert(resolvedFile).inserted else { continue }
-                    files.append(file)
+                    files.append(
+                        rebasedURL(
+                            file: file,
+                            ontoRoot: returnRootPath,
+                            resolvedRootPath: resolvedRoot.path
+                        )
+                    )
                 }
             }
             return files.sorted { $0.path < $1.path }
@@ -47,6 +55,31 @@ public enum AntigravityDataSource {
         return (attrs?[.type] as? FileAttributeType) == .typeSymbolicLink
     }
 
+    /// Map an enumerator URL (often fully resolved) back onto `ontoRoot`.
+    /// Resolved paths are dedup keys only; returned sourcePath keeps spelling.
+    private static func rebasedURL(
+        file: URL,
+        ontoRoot: String,
+        resolvedRootPath: String
+    ) -> URL {
+        let resolvedFile = file.resolvingSymlinksInPath().standardizedFileURL.path
+        let resolvedRoot = resolvedRootPath.hasSuffix("/")
+            ? String(resolvedRootPath.dropLast())
+            : resolvedRootPath
+        guard resolvedFile == resolvedRoot || resolvedFile.hasPrefix(resolvedRoot + "/") else {
+            return file
+        }
+        var suffix = String(resolvedFile.dropFirst(resolvedRoot.count))
+        while suffix.hasPrefix("/") {
+            suffix.removeFirst()
+        }
+        let base = URL(fileURLWithPath: ontoRoot, isDirectory: true)
+        if suffix.isEmpty {
+            return base
+        }
+        return base.appendingPathComponent(suffix)
+    }
+
     private static func uncachedDiscover(
         rootDirectory: String,
         fileManager: FileManager
@@ -55,8 +88,6 @@ public enum AntigravityDataSource {
         let root = URL(fileURLWithPath: expandedRoot, isDirectory: true)
 
         var isDirectory = ObjCBool(false)
-        // Follow the final symlink for existence so a symlink root that we
-        // already resolved still validates as a directory.
         guard fileManager.fileExists(atPath: root.path, isDirectory: &isDirectory),
               isDirectory.boolValue else {
             return []

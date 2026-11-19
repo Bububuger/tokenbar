@@ -46,16 +46,38 @@ public enum AntigravityDataSource {
 
         guard let enumerator = fileManager.enumerator(
             at: root,
-            includingPropertiesForKeys: [.isRegularFileKey],
+            includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
             // Transcripts live under `brain/<id>/.system_generated/logs/`;
-            // hidden segments must be traversed to reach them.
+            // that one hidden segment must be traversable. Other hidden
+            // directories (caches, backups) stay out of the session set.
             options: []
         ) else {
             return []
         }
 
         var files: [URL] = []
-        for case let url as URL in enumerator where url.pathExtension.lowercased() == "jsonl" {
+        var seenResolvedFiles = Set<String>()
+        for case let url as URL in enumerator {
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
+            if values?.isDirectory == true {
+                let name = url.lastPathComponent
+                // Allow only the known Antigravity transcript container;
+                // skip every other hidden directory tree.
+                if name.hasPrefix("."), name != ".system_generated" {
+                    enumerator.skipDescendants()
+                }
+                continue
+            }
+            guard values?.isRegularFile == true,
+                  url.pathExtension.lowercased() == "jsonl",
+                  !url.lastPathComponent.hasPrefix(".") else {
+                continue
+            }
+            // Overlapping roots (e.g. root + root/brain) can yield the same
+            // inode via different spellings in one call; keep the first path
+            // so event ids stay stable and we do not double-insert.
+            let resolved = url.resolvingSymlinksInPath().standardizedFileURL.path
+            guard seenResolvedFiles.insert(resolved).inserted else { continue }
             files.append(url)
         }
         return files

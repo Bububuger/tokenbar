@@ -22,6 +22,7 @@
 		12D4C8F15AC82AAA42690BC2 /* GrokUsageEventSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 943CC5F75A48CE64D4EA3348 /* GrokUsageEventSource.swift */; };
 		13473CCEC11872670DEB7346 /* PromptTemplatePreviewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84ED46F5F5614A4628F27FFC /* PromptTemplatePreviewTests.swift */; };
 		13C6A572B337CECA1363DD7B /* WarpUsageParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98C0AAB42EE381A923F00048 /* WarpUsageParserTests.swift */; };
+		16AEBA4083FC671B7F624893 /* PiDataSourceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE2EA89ADD46A6D77CD10133 /* PiDataSourceTests.swift */; };
 		19F556FC44FDA1BA8BC35444 /* Aggregation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E15456AA376C9D15A280DE88 /* Aggregation.swift */; };
 		1A79012C6BB812370D346EB8 /* RuntimeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6127B31ADF0D7B1BBA11F078 /* RuntimeModels.swift */; };
 		1B719ABACB12F3C73AA79A70 /* session-jsonl.jsonl in Resources */ = {isa = PBXBuildFile; fileRef = B31D8E7606EBD82DEC311AFB /* session-jsonl.jsonl */; };
@@ -511,6 +512,7 @@
 		D9AB63001486A5F7AD87CC5E /* LibraryWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryWatcher.swift; sourceTree = "<group>"; };
 		D9B148F57A8B58DB1832330D /* SavedPromptCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedPromptCommand.swift; sourceTree = "<group>"; };
 		DCAAEAAF9072211A9088F669 /* dsh-v4.jsonl */ = {isa = PBXFileReference; path = "dsh-v4.jsonl"; sourceTree = "<group>"; };
+		DE2EA89ADD46A6D77CD10133 /* PiDataSourceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiDataSourceTests.swift; sourceTree = "<group>"; };
 		DF1467B1B59FBE935C4BD88B /* libCzstd.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libCzstd.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		E0338A7AB84D8DC948F2A68B /* AntigravityUsageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityUsageParser.swift; sourceTree = "<group>"; };
 		E15456AA376C9D15A280DE88 /* Aggregation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Aggregation.swift; sourceTree = "<group>"; };
@@ -920,6 +922,7 @@
 				FB2BEDAA52758903C1A5DE44 /* McpScannerTests.swift */,
 				C1E0AFCDD89A0C62A6E26EA3 /* OmpUsageParserTests.swift */,
 				760EDFDB66351F65724427BB /* OpenCodeUsageParserTests.swift */,
+				DE2EA89ADD46A6D77CD10133 /* PiDataSourceTests.swift */,
 				3C1DD0E6A16F9D342FE5E9F2 /* PiUsageParserTests.swift */,
 				258FA144E32653FD43395BCF /* PluginSystemTests.swift */,
 				EE0152A458ED7AB993AD3E52 /* PromptTemplateLinterTests.swift */,
@@ -1543,6 +1546,7 @@
 				90E219F02122AA530A8CD709 /* McpScannerTests.swift in Sources */,
 				305A136C45EBA904E9AA29E0 /* OmpUsageParserTests.swift in Sources */,
 				70A31C892E296F8E4AA57A31 /* OpenCodeUsageParserTests.swift in Sources */,
+				16AEBA4083FC671B7F624893 /* PiDataSourceTests.swift in Sources */,
 				31986815D9AC246547C88777 /* PiUsageParserTests.swift in Sources */,
 				F86CBC87B5907E3889D79CDC /* PluginSystemTests.swift in Sources */,
 				C2EB4EF734E32CC8DE3543DD /* PromptTemplateLinterTests.swift in Sources */,

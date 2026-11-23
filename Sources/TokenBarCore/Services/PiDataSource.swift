@@ -27,8 +27,6 @@ public enum PiDataSource {
             return []
         }
 
-        // pi stores one subdirectory per encoded cwd (--<cwd>--), each holding
-        // <timestamp>_<sessionId>.jsonl files.
         let cwdDirs = (try? fileManager.contentsOfDirectory(
             at: sessionsRoot,
             includingPropertiesForKeys: [.isDirectoryKey],
@@ -37,13 +35,31 @@ public enum PiDataSource {
 
         var files: [URL] = []
         for cwdDir in cwdDirs {
-            let sessionFiles = (try? fileManager.contentsOfDirectory(
+            let sessionEntries = (try? fileManager.contentsOfDirectory(
                 at: cwdDir,
-                includingPropertiesForKeys: [.isRegularFileKey],
+                includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
                 options: [.skipsHiddenFiles]
             )) ?? []
-            for file in sessionFiles where file.pathExtension.lowercased() == "jsonl" {
-                files.append(file)
+            for entry in sessionEntries {
+                let values = try? entry.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey])
+                if values?.isRegularFile == true, entry.pathExtension.lowercased() == "jsonl" {
+                    files.append(entry)
+                    continue
+                }
+                guard values?.isDirectory == true else { continue }
+                let nestedFiles = (try? fileManager.contentsOfDirectory(
+                    at: entry,
+                    includingPropertiesForKeys: [.isRegularFileKey],
+                    options: [.skipsHiddenFiles]
+                )) ?? []
+                for nestedFile in nestedFiles {
+                    let nestedValues = try? nestedFile.resourceValues(forKeys: [.isRegularFileKey])
+                    guard nestedValues?.isRegularFile == true,
+                          nestedFile.pathExtension.lowercased() == "jsonl" else {
+                        continue
+                    }
+                    files.append(nestedFile)
+                }
             }
         }
         return files.sorted { $0.path < $1.path }

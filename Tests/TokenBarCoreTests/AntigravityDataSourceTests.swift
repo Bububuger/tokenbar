@@ -189,6 +189,57 @@ struct AntigravityDataSourceTests {
         #expect(discovered.resolvingSymlinksInPath().standardizedFileURL == file.standardizedFileURL)
     }
 
+    /// Copies beside the session file repeat the same steps. Only
+    /// `logs/transcript.jsonl` is that session.
+    @Test
+    func discoversOnlyTheSessionTranscriptBesideCopies() throws {
+        DiscoveryCache.reset()
+        let root = try temporaryDirectory()
+        let logs = root.appendingPathComponent(
+            "brain/9f8e7d6c-5b4a-3c2d-1e0f-a1b2c3d4e5f6/.system_generated/logs",
+            isDirectory: true
+        )
+        let chunkTranscript = logs.appendingPathComponent("chunks/transcript", isDirectory: true)
+        let chunkFull = logs.appendingPathComponent("chunks/transcript_full", isDirectory: true)
+        let cacheDir = root.appendingPathComponent(".cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: chunkTranscript, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: chunkFull, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+
+        let transcript = logs.appendingPathComponent("transcript.jsonl")
+        let full = logs.appendingPathComponent("transcript_full.jsonl")
+        let chunk = chunkTranscript.appendingPathComponent("00000001.jsonl")
+        let chunkFullFile = chunkFull.appendingPathComponent("00000001.jsonl")
+        let cacheNoise = cacheDir.appendingPathComponent("noise.jsonl")
+        let secret = logs.appendingPathComponent(".secret.jsonl")
+        let line = #"{"created_at":"2026-11-01T00:00:00.000Z","input_tokens":10,"cache_read_tokens":4,"output_tokens":3}"#
+        for url in [transcript, full, chunk, chunkFullFile, cacheNoise, secret] {
+            try line.write(to: url, atomically: true, encoding: .utf8)
+        }
+
+        let files = try AntigravityDataSource.discoverSessionFiles(roots: [root.path])
+        #expect(files.map(\.standardizedFileURL.path) == [transcript.standardizedFileURL.path])
+
+        var events: [UsageEvent] = []
+        for file in files {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            let records = text.split(whereSeparator: \.isNewline).enumerated().map { idx, line in
+                JSONLLineRecord(text: String(line), lineNumber: idx + 1, startOffset: 0, endOffset: 0)
+            }
+            events.append(contentsOf: AntigravityUsageParser.parse(lines: records, fileURL: file).events)
+        }
+
+        #expect(events.count == 1)
+        #expect(Set(events.map(\.id)).count == 1)
+        let event = try #require(events.first)
+        #expect(event.inputTokens == 10)
+        #expect(event.cacheReadTokens == 4)
+        #expect(event.outputTokens == 3)
+        #expect(event.sourcePath == transcript.path)
+        #expect(event.timestamp == ISO8601Fast.parseUTC("2026-11-01T00:00:00.000Z"))
+        #expect(!files.contains(where: { $0.path == cacheNoise.path || $0.path == secret.path }))
+    }
+
     @Test
     func defaultRootsIncludeAntigravityCLITree() {
         #expect(AntigravityDataSource.defaultRoots.contains("~/.gemini/antigravity-cli"))

@@ -125,8 +125,22 @@ public enum AntigravityDataSource {
             if values?.isRegularFile == false {
                 continue
             }
+            guard keepsSessionFile(url) else { continue }
             files.append(url)
         }
         return files
+    }
+
+    /// `.system_generated/logs/transcript.jsonl` is the session. The full
+    /// transcript and the chunk files next to it repeat those steps.
+    private static func keepsSessionFile(_ url: URL) -> Bool {
+        let parts = url.pathComponents
+        guard let logsIndex = parts.lastIndex(of: "logs"),
+              logsIndex > 0,
+              parts[logsIndex - 1] == ".system_generated" else {
+            return true
+        }
+        return logsIndex == parts.count - 2
+            && parts[parts.count - 1].lowercased() == "transcript.jsonl"
     }
 }

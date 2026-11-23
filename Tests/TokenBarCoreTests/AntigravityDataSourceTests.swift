@@ -3,7 +3,7 @@ import Testing
 @testable import TokenBarCore
 
 struct AntigravityDataSourceTests {
-    /// Session boundary: find `brain/<id>/.system_generated/logs/transcript*.jsonl`
+    /// Session boundary: find `brain/<id>/.system_generated/logs/transcript.jsonl`
     /// and normal non-hidden sessions; ignore other hidden noise even when it
     /// carries token fields. Discovery → parse must emit events only for the
     /// allowed paths.
@@ -27,7 +27,7 @@ struct AntigravityDataSourceTests {
         try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: backupDir, withIntermediateDirectories: true)
 
-        let transcript = hiddenLogs.appendingPathComponent("transcript-1.jsonl")
+        let transcript = hiddenLogs.appendingPathComponent("transcript.jsonl")
         let session = plainDir.appendingPathComponent("session.jsonl")
         let cacheNoise = cacheDir.appendingPathComponent("x.jsonl")
         let backupNoise = backupDir.appendingPathComponent("transcript.jsonl")

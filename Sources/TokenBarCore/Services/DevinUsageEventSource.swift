@@ -2,8 +2,8 @@ import Foundation
 
 /// Devin transcript source: static JSON files re-read on change (Gemini
 /// pattern), with fingerprint-based skip so unchanged transcripts cost
-/// nothing on refresh. Re-emitted events are deduplicated downstream by
-/// their stable `<sourcePath>#devin#<step_id>` ids.
+/// nothing on refresh. A changed file is parsed whole. The checkpoint
+/// replaces stored rows for that path with the events from the current file.
 public struct DevinUsageEventSource: InspectableUsageEventSource, ResourceBudgetedUsageEventSource, @unchecked Sendable {
     public let sourceName = "Devin"
     public let rootPath: String

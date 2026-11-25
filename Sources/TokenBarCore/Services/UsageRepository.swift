@@ -142,6 +142,16 @@ public struct UsageRepository: Sendable {
             var eventsAdded = 0
             var promptsAdded = 0
 
+            // Devin rewrites a transcript in place and this checkpoint carries
+            // the current file. Drop that path's previous rows before insert.
+            let replacedDevinPaths = Set(events.lazy.filter { $0.agent == .devin }.map(\.sourcePath))
+            for path in replacedDevinPaths {
+                try db.execute(
+                    sql: "DELETE FROM usage_events WHERE source_path = ? AND agent = ?",
+                    arguments: [path, AgentKind.devin.rawValue]
+                )
+            }
+
             for event in events {
                 eventsAdded += try insertEvent(event, db: db)
             }

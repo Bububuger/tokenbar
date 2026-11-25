@@ -130,4 +130,83 @@ struct DevinUsageParserTests {
         #expect(result.warnings.count == 1)
         #expect(result.warnings[0].message.contains("malformed"))
     }
+
+    /// A numeric `step_id` is the step's identity. A later parse of the same
+    /// path replaces the stored rows with that file and leaves other paths.
+    @Test
+    func numericStepIDReplacesStoredRowsForTheSamePath() throws {
+        let path = "/tmp/devin-rewrite.json"
+        let fileURL = URL(fileURLWithPath: path)
+        let first = DevinUsageParser.parse(data: Data("""
+        {"schema_version":"ATIF-v1.7","session_id":"sess-a","steps":[
+          {"step_id":1,"timestamp":"2026-10-01T00:00:00Z","metrics":{"prompt_tokens":10,"completion_tokens":1}},
+          {"step_id":2,"timestamp":"2026-10-01T00:01:00Z","metrics":{"prompt_tokens":20,"completion_tokens":2}}
+        ]}
+        """.utf8), fileURL: fileURL)
+        let second = DevinUsageParser.parse(data: Data("""
+        {"schema_version":"ATIF-v1.7","session_id":"sess-b","steps":[
+          {"step_id":2,"timestamp":"2026-10-01T00:01:00Z","metrics":{"prompt_tokens":20,"completion_tokens":2}},
+          {"step_id":3,"timestamp":"2026-10-01T00:02:00Z","metrics":{"prompt_tokens":30,"completion_tokens":3}}
+        ]}
+        """.utf8), fileURL: fileURL)
+
+        #expect(first.events.map(\.id) == ["\(path)#devin#1", "\(path)#devin#2"])
+        #expect(first.events.map(\.inputTokens) == [10, 20])
+        #expect(first.events.map(\.sessionId) == ["sess-a", "sess-a"])
+        #expect(second.events.map(\.id) == ["\(path)#devin#2", "\(path)#devin#3"])
+        #expect(second.events.map(\.inputTokens) == [20, 30])
+        #expect(second.events.map(\.sessionId) == ["sess-b", "sess-b"])
+
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("devin-replace-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let repository = try UsageRepository(databaseURL: directory.appendingPathComponent("tokenbar.sqlite"))
+        let now = Date(timeIntervalSince1970: 1_770_000_000)
+        let other = UsageEvent(
+            id: "/tmp/other.json#devin#9",
+            agent: .devin,
+            projectPath: nil,
+            projectName: "unknown",
+            sessionId: "other",
+            timestamp: now,
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            reasoningTokens: nil,
+            modelName: nil,
+            sourcePath: "/tmp/other.json",
+            parser: .devin,
+            confidence: 1
+        )
+        _ = try repository.insertCheckpoint(
+            trigger: "first",
+            startedAt: now,
+            endedAt: now,
+            events: first.events + [other],
+            prompts: [],
+            nextWatermarks: [],
+            warnings: [],
+            error: nil
+        )
+        _ = try repository.insertCheckpoint(
+            trigger: "rewrite",
+            startedAt: now,
+            endedAt: now,
+            events: second.events,
+            prompts: [],
+            nextWatermarks: [],
+            warnings: [],
+            error: nil
+        )
+
+        let stored = try repository.allEvents()
+            .filter { $0.sourcePath == path }
+            .sorted { $0.id < $1.id }
+        #expect(stored.map(\.id) == ["\(path)#devin#2", "\(path)#devin#3"])
+        #expect(stored.map(\.inputTokens) == [20, 30])
+        #expect(stored.map(\.outputTokens) == [2, 3])
+        #expect(stored.map(\.sessionId) == ["sess-b", "sess-b"])
+        #expect(try repository.allEvents().filter { $0.sourcePath == "/tmp/other.json" }.map(\.id) == ["/tmp/other.json#devin#9"])
+    }
 }

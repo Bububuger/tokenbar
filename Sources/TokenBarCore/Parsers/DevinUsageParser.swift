@@ -84,8 +84,7 @@ public enum DevinUsageParser {
             let freshInput = max(prompt - cached - cacheCreation, 0)
             guard freshInput + completion + cached + cacheCreation > 0 else { continue }
 
-            let stepID = (step["step_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-                ?? "step-\(index)"
+            let stepID = stepIdentifier(step["step_id"]) ?? "step-\(index)"
             let timestamp = resolveTimestamp(step) ?? .distantPast
             let model = (step["model_name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? agentModel
 
@@ -145,6 +144,15 @@ public enum DevinUsageParser {
         }
 
         return ParseResult(events: events, prompts: [], warnings: warnings)
+    }
+
+    private static func stepIdentifier(_ raw: Any?) -> String? {
+        if let text = raw as? String {
+            return text.isEmpty ? nil : text
+        }
+        guard let number = raw as? NSNumber else { return nil }
+        if CFGetTypeID(number as CFTypeRef) == CFBooleanGetTypeID() { return nil }
+        return number.stringValue
     }
 
     private static func resolveTimestamp(_ step: [String: Any]) -> Date? {
